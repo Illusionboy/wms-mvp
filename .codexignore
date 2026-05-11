@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+postgres_data/
+商品数据_精简版.xlsx
+商品箱规数据2.2.xlsx
+商品箱规数据4.30.xlsx
+import_products.py
+process_excel.py

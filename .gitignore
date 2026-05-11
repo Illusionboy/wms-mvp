@@ -1,0 +1,16 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+postgres_data/
+4-30-normal.xlsx
+4-30-rakuten.xlsx
+rakuten_20260511.csv
+20260511.csv
+import_products.py
+process_excel.py
+rakuten_delivery_dtl.py
+merge_tool.py
