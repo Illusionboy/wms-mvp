@@ -73,11 +73,7 @@ def _product_search_statement(keyword: str, limit: int):
     normalized_keyword = keyword.strip()
     name_pattern = f"%{normalized_keyword}%"
 
-    conditions = [
-        Product.name_jp.ilike(name_pattern),
-        Product.name_zh.ilike(name_pattern),
-    ]
-
+    conditions = []
     rank_conditions = []
     if normalized_keyword.isdigit():
         conditions.append(Product.jan_code == normalized_keyword)
@@ -101,6 +97,13 @@ def _product_search_statement(keyword: str, limit: int):
             )
             conditions.append(suffix_condition)
             rank_conditions.append((suffix_condition, 1))
+    else:
+        conditions.extend(
+            [
+                Product.name_jp.ilike(name_pattern),
+                Product.name_zh.ilike(name_pattern),
+            ]
+        )
 
     statement = (
         select(Product)

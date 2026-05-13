@@ -49,6 +49,7 @@ from app.services.rakuten_shipments import (
     create_rakuten_shipment_draft,
     get_rakuten_shipment_draft,
     preview_rakuten_shipment_draft,
+    sync_product_names_from_rakuten_drafts,
 )
 
 
@@ -328,6 +329,17 @@ async def apply_rakuten_csv(message: Message) -> None:
         return
 
     await _answer_long(message, _format_rakuten_csv_apply_success(draft_id=draft_id, result=result))
+
+
+@telegram_router.message(Command("sync_rakuten_names"))
+async def sync_rakuten_names(message: Message) -> None:
+    if not await _require_admin_permission(message):
+        return
+
+    async with AsyncSessionLocal() as session:
+        updated_count = await sync_product_names_from_rakuten_drafts(session=session)
+
+    await message.answer(f"Rakuten product names synced: {updated_count}")
 
 
 @telegram_router.message(Command("show_report"))

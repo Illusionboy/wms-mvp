@@ -48,6 +48,26 @@ PostgreSQL 数据保存在 Docker named volume `newproject_postgres_data` 中。
 
 ## 4 月 30 日初始盘点表导入
 
+### 商品字典/箱规导入
+
+如果有 `商品箱规数据5.12.xlsx` 这类商品主数据表，表头包含 `JAN`、`商品名`、`中文`、`箱入れ数`，先导入它：
+
+```bash
+python -m app.tools.import_product_catalog \
+  --file "/path/to/商品箱规数据5.12.xlsx"
+```
+
+Docker 容器里执行：
+
+```bash
+docker compose exec api python -m app.tools.import_product_catalog \
+  --file "/app/imports/商品箱规数据5.12.xlsx"
+```
+
+这个脚本会更新 `products.name_jp`、`products.name_zh`、`products.units_per_case`。`/search_sku` 查的就是 `products` 表。
+
+### 盘点库存导入
+
 你现在有两张无表头 Excel：
 
 - 乐天仓库盘点表
@@ -194,6 +214,12 @@ DATABASE_URL=postgresql+asyncpg://wms_user:your_password@localhost:5432/wms \
 
 ```text
 /apply_rakuten_csv DRAFT_ID ignore
+```
+
+历史乐天 CSV 草稿里的商品名可以回填到商品字典：
+
+```text
+/sync_rakuten_names
 ```
 
 默认从 `乐天仓库` 的 `乐天` 客户库存扣减。如果需要临时指定：

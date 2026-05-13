@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.customer import Customer
 from app.models.inventory_record import InventoryRecord
+from app.models.product import Product
 from app.models.rakuten_shipment_draft import RakutenShipmentDraft
 from app.models.warehouse import Warehouse
 from app.schemas.inventory import (
@@ -90,6 +91,7 @@ async def import_rakuten_shipment_csv(
 ) -> RakutenShipmentImportResult:
     lines = parse_rakuten_shipment_csv(content)
     merged_lines = _merge_shipment_lines(lines)
+    await _sync_product_names_from_rakuten_lines(session=session, lines=merged_lines)
     return await apply_rakuten_shipment_lines(
         session=session,
         lines=merged_lines,
@@ -107,6 +109,7 @@ async def create_rakuten_shipment_draft(
     telegram_user_id: int | None = None,
 ) -> RakutenShipmentDraft:
     lines = _merge_shipment_lines(parse_rakuten_shipment_csv(content))
+    await _sync_product_names_from_rakuten_lines(session=session, lines=lines)
     document = RakutenShipmentDraftDocument(
         warehouse_name=warehouse_name,
         customer_name=customer_name,
@@ -171,6 +174,7 @@ async def apply_rakuten_shipment_lines(
     customer_name: str = DEFAULT_RAKUTEN_CUSTOMER,
     ignore_missing: bool = False,
 ) -> RakutenShipmentImportResult:
+    await _sync_product_names_from_rakuten_lines(session=session, lines=lines)
     issues, resolved = await _validate_rakuten_shipment_lines(
         session=session,
         lines=lines,
@@ -333,6 +337,51 @@ def _merge_shipment_lines(lines: list[RakutenShipmentLine]) -> list[RakutenShipm
         first_line[jan_code].model_copy(update={"quantity": quantity})
         for jan_code, quantity in quantities.items()
     ]
+
+
+async def _sync_product_names_from_rakuten_lines(
+    session: AsyncSession,
+    lines: list[RakutenShipmentLine],
+) -> int:
+    names_by_jan: dict[str, str] = {}
+    for line in lines:
+        product_name = _clean_text(line.product_name)
+        if product_name:
+            names_by_jan.setdefault(line.jan_code, product_name)
+    if not names_by_jan:
+        return 0
+
+    result = await session.scalars(
+        select(Product).where(Product.jan_code.in_(names_by_jan.keys()))
+    )
+    updated_count = 0
+    for product in result.all():
+        product_name = names_by_jan.get(product.jan_code)
+        if product_name and _is_placeholder_product_name(product):
+            product.name_jp = product_name[:255]
+            updated_count += 1
+    if updated_count:
+        await session.flush()
+    return updated_count
+
+
+async def sync_product_names_from_rakuten_drafts(session: AsyncSession) -> int:
+    result = await session.scalars(select(RakutenShipmentDraft).order_by(RakutenShipmentDraft.id.asc()))
+    updated_count = 0
+    for draft in result.all():
+        document = RakutenShipmentDraftDocument.model_validate(draft.document)
+        updated_count += await _sync_product_names_from_rakuten_lines(
+            session=session,
+            lines=document.lines,
+        )
+    if updated_count:
+        await session.commit()
+    return updated_count
+
+
+def _is_placeholder_product_name(product: Product) -> bool:
+    name_jp = _clean_text(product.name_jp)
+    return not name_jp or name_jp == product.jan_code
 
 
 async def _resolve_warehouse(session: AsyncSession, warehouse_name: str) -> Warehouse | None:
