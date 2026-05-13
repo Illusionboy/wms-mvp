@@ -125,6 +125,14 @@ DATABASE_URL=postgresql+asyncpg://wms_user:your_password@localhost:5432/wms \
 /search JAN_OR_NAME
 ```
 
+只查商品字典，不看库存：
+
+```text
+/search_sku JAN_OR_NAME
+```
+
+`/search` 和 `/search_sku` 都支持完整 JAN、后六位、倒数第六到倒数第二位/后五位、日文名、中文名。
+
 添加商品：
 
 ```text
@@ -147,6 +155,8 @@ DATABASE_URL=postgresql+asyncpg://wms_user:your_password@localhost:5432/wms \
 /stock_out JAN 仓库名 数量
 ```
 
+如果仓库名匹配 `乐天仓库`，省略客户时默认客户为 `乐天`；其它仓库默认客户为 `店铺`。
+
 盘点修正：
 
 ```text
@@ -168,10 +178,11 @@ DATABASE_URL=postgresql+asyncpg://wms_user:your_password@localhost:5432/wms \
 乐天 RMS 出货 CSV：
 
 ```text
-直接把 CSV 发给机器人
-或把文件 caption 写成：/rakuten_csv
+把文件 caption 写成：/rakuten_csv
 或回复 CSV 文件：/rakuten_csv
 ```
+
+单独发送 CSV 文件不会自动导入为乐天出库，避免以后其它文件功能误触发。
 
 机器人会生成一个草稿 ID，并预览按 JAN 汇总后的出库数量。确认无误后执行：
 

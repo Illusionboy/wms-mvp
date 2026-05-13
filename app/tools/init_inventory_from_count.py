@@ -98,15 +98,18 @@ async def import_count_file(
 def _read_count_rows(file_path: Path) -> list[CountRow]:
     workbook = load_workbook(file_path, read_only=True, data_only=True)
     sheet = workbook.worksheets[0]
-    rows: list[CountRow] = []
+    quantities_by_jan: dict[str, int] = {}
     for row in sheet.iter_rows(min_row=1, values_only=True):
         jan_code = _normalize_jan(row[0] if len(row) > 0 else None)
         quantity = _normalize_quantity(row[1] if len(row) > 1 else None)
         if not jan_code or quantity is None:
             continue
-        rows.append(CountRow(jan_code=jan_code, quantity=quantity))
+        quantities_by_jan[jan_code] = quantities_by_jan.get(jan_code, 0) + quantity
     workbook.close()
-    return rows
+    return [
+        CountRow(jan_code=jan_code, quantity=quantity)
+        for jan_code, quantity in quantities_by_jan.items()
+    ]
 
 
 def _normalize_jan(value: object) -> str:

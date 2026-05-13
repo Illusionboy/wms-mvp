@@ -12,6 +12,7 @@ from app.schemas.inventory import (
     InventoryImportRead,
     InventoryRecordRead,
     ProductInventoryRead,
+    ProductRead,
     RakutenShipmentImportResult,
     StockAdjustCreate,
     StockAdjustResult,
@@ -30,6 +31,7 @@ from app.services.inventory import (
     adjust_stock_item,
     create_inventory_import_job,
     search_inventory_items,
+    search_products,
     stock_in_item,
     stock_out_item,
 )
@@ -44,6 +46,15 @@ async def search_inventory(
     session: AsyncSession = Depends(get_db_session),
 ) -> list[Product]:
     return await search_inventory_items(session=session, keyword=keyword)
+
+
+@router.get("/products/search", response_model=list[ProductRead])
+@router.get("/search_sku", response_model=list[ProductRead])
+async def search_product_master(
+    keyword: str = Query(min_length=1, max_length=255),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[Product]:
+    return await search_products(session=session, keyword=keyword)
 
 
 @router.post("/chat-reports/parse", response_model=ChatReportDraftRead)

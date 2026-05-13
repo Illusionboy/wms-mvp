@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -53,6 +53,23 @@ class StockMutationResult:
 
 
 async def search_inventory_items(session: AsyncSession, keyword: str, limit: int = 20) -> list[Product]:
+    statement = (
+        _product_search_statement(keyword=keyword, limit=limit)
+        .options(
+            selectinload(Product.inventory_records).selectinload(InventoryRecord.warehouse),
+            selectinload(Product.inventory_records).selectinload(InventoryRecord.customer),
+        )
+    )
+    result = await session.scalars(statement)
+    return list(result.all())
+
+
+async def search_products(session: AsyncSession, keyword: str, limit: int = 20) -> list[Product]:
+    result = await session.scalars(_product_search_statement(keyword=keyword, limit=limit))
+    return list(result.all())
+
+
+def _product_search_statement(keyword: str, limit: int):
     normalized_keyword = keyword.strip()
     name_pattern = f"%{normalized_keyword}%"
 
@@ -61,39 +78,40 @@ async def search_inventory_items(session: AsyncSession, keyword: str, limit: int
         Product.name_zh.ilike(name_pattern),
     ]
 
+    rank_conditions = []
     if normalized_keyword.isdigit():
         conditions.append(Product.jan_code == normalized_keyword)
+        rank_conditions.append((Product.jan_code == normalized_keyword, 0))
         # 假设 normalized_keyword 是用户输入的 JAN 码片段
         keyword_len = len(normalized_keyword)
         
         if keyword_len == 6:
             # 如果输入了 6 位：说明是扫的/输入的单品后六位，直接精确匹配结尾
             conditions.append(Product.jan_code.endswith(normalized_keyword))
+            rank_conditions.append((Product.jan_code.endswith(normalized_keyword), 1))
             
         elif keyword_len == 5:
             # 如果输入了 5 位：说明是为了规避外箱最后一位校验码不同的情况
             # 目标：匹配倒数第 6 位到倒数第 2 位
             # 拼接 LIKE 模式：前面任意字符 + 用户的5位数字 + 最后刚好1个字符
             like_pattern = f"%{normalized_keyword}_"
-            conditions.append(
-                or_(
-                    Product.jan_code.like(like_pattern),             # 命中情况 1
-                    Product.jan_code.endswith(normalized_keyword)    # 命中情况 2：同事直接输入了最后 5 位
-                )
+            suffix_condition = or_(
+                Product.jan_code.like(like_pattern),             # 命中情况 1
+                Product.jan_code.endswith(normalized_keyword)    # 命中情况 2：同事直接输入了最后 5 位
             )
+            conditions.append(suffix_condition)
+            rank_conditions.append((suffix_condition, 1))
 
     statement = (
         select(Product)
-        .options(
-            selectinload(Product.inventory_records).selectinload(InventoryRecord.warehouse),
-            selectinload(Product.inventory_records).selectinload(InventoryRecord.customer),
-        )
         .where(or_(*conditions))
-        .order_by(Product.name_jp.asc())
         .limit(limit)
     )
-    result = await session.scalars(statement)
-    return list(result.all())
+    if rank_conditions:
+        statement = statement.order_by(case(*rank_conditions, else_=9), Product.jan_code.asc())
+    else:
+        statement = statement.order_by(Product.jan_code.asc())
+    return statement
 
 
 async def stock_in_item(session: AsyncSession, payload: StockInCreate) -> StockMutationResult:

@@ -1,7 +1,7 @@
 from io import BytesIO
 from uuid import uuid4
 
-from aiogram import Bot, Dispatcher, F, Router
+from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import Command
 from aiogram.types import Document, Message
 from sqlalchemy import select
@@ -38,6 +38,7 @@ from app.services.inventory import (
     InventoryTargetNotFoundError,
     adjust_stock_item,
     search_inventory_items,
+    search_products,
     stock_in_item,
     stock_out_item,
 )
@@ -64,13 +65,13 @@ telegram_router = Router(name="telegram")
 async def start(message: Message) -> None:
     await message.answer(
         "WMS inventory bot is ready.\n"
-        "Use /search JAN_OR_NAME, /stock_in SKU WAREHOUSE QUANTITY, "
+        "Use /search JAN_OR_NAME, /search_sku JAN_OR_NAME, /stock_in SKU WAREHOUSE QUANTITY, "
         "/stock_out SKU WAREHOUSE QUANTITY, /stock_adjust SKU WAREHOUSE ACTUAL_QUANTITY, "
         "/add_product JAN NAME_JP [NAME_ZH], /add_customer NAME [CONTACT], or "
         "/transfer SKU FROM_WAREHOUSE TO_WAREHOUSE QUANTITY, or "
         "/transfer_customer SKU WAREHOUSE FROM_CUSTOMER TO_CUSTOMER QUANTITY.\n"
         "Batch chat import: /parse_report then paste records; /apply_report ID to apply saved draft.\n"
-        "Rakuten CSV: send a CSV file with caption /rakuten_csv, then /apply_rakuten_csv ID."
+        "Rakuten CSV: send a CSV file with caption /rakuten_csv, or reply /rakuten_csv to a CSV file."
     )
 
 
@@ -120,6 +121,32 @@ async def search(message: Message) -> None:
     await message.answer("\n".join(lines))
 
 
+@telegram_router.message(Command("search_sku", "search_SKU", "search_SUK"))
+async def search_sku(message: Message) -> None:
+    if not await _require_query_permission(message):
+        return
+
+    keyword = _command_args(message.text)
+    if not keyword:
+        await message.answer("Usage: /search_sku JAN_OR_NAME")
+        return
+
+    async with AsyncSessionLocal() as session:
+        products = await search_products(session=session, keyword=keyword, limit=10)
+
+    if not products:
+        await message.answer(_product_missing_message(keyword))
+        return
+
+    lines = ["Product matches:"]
+    for product in products:
+        case_text = f"{product.units_per_case}/箱" if product.units_per_case else "-"
+        lines.append(
+            f"{product.jan_code} | JP: {product.name_jp} | ZH: {product.name_zh or '-'} | case: {case_text}"
+        )
+    await message.answer("\n".join(lines))
+
+
 @telegram_router.message(Command("stock_in"))
 async def stock_in(message: Message) -> None:
     if not await _require_operator_permission(message):
@@ -137,19 +164,20 @@ async def stock_in(message: Message) -> None:
 
     async with AsyncSessionLocal() as session:
         warehouse = await _resolve_warehouse(session, warehouse_name)
+        if warehouse is None:
+            await message.answer(f"Warehouse not found: {warehouse_name}")
+            return
+        customer_name = customer_name or _default_customer_name_for_warehouse(warehouse)
         customer = await _resolve_customer(session, customer_name)
-        product = await _resolve_product_for_operation(session, sku)
+        if customer is None:
+            await message.answer(f"Customer not found: {customer_name}")
+            return
+        product = await _resolve_product_for_operation(session, sku, warehouse.id, customer.id)
         if product is None:
             await message.answer(_product_missing_message(sku))
             return
         if isinstance(product, list):
             await message.answer(_product_ambiguous_message(sku, product, "/stock_in"))
-            return
-        if warehouse is None:
-            await message.answer(f"Warehouse not found: {warehouse_name}")
-            return
-        if customer is None:
-            await message.answer(f"Customer not found: {customer_name}")
             return
 
         try:
@@ -300,21 +328,6 @@ async def apply_rakuten_csv(message: Message) -> None:
         return
 
     await _answer_long(message, _format_rakuten_csv_apply_success(draft_id=draft_id, result=result))
-
-
-@telegram_router.message(F.document)
-async def rakuten_csv_document(message: Message) -> None:
-    if not await _require_operator_permission(message):
-        return
-    if message.document is None or not _looks_like_csv(message.document):
-        return
-
-    await _create_and_preview_rakuten_csv_draft(
-        message=message,
-        document=message.document,
-        warehouse_name=DEFAULT_RAKUTEN_WAREHOUSE,
-        customer_name=DEFAULT_RAKUTEN_CUSTOMER,
-    )
 
 
 @telegram_router.message(Command("show_report"))
@@ -469,19 +482,20 @@ async def stock_out(message: Message) -> None:
 
     async with AsyncSessionLocal() as session:
         warehouse = await _resolve_warehouse(session, warehouse_name)
+        if warehouse is None:
+            await message.answer(f"Warehouse not found: {warehouse_name}")
+            return
+        customer_name = customer_name or _default_customer_name_for_warehouse(warehouse)
         customer = await _resolve_customer(session, customer_name)
-        product = await _resolve_product_for_operation(session, sku)
+        if customer is None:
+            await message.answer(f"Customer not found: {customer_name}")
+            return
+        product = await _resolve_product_for_operation(session, sku, warehouse.id, customer.id)
         if product is None:
             await message.answer(_product_missing_message(sku))
             return
         if isinstance(product, list):
             await message.answer(_product_ambiguous_message(sku, product, "/stock_out"))
-            return
-        if warehouse is None:
-            await message.answer(f"Warehouse not found: {warehouse_name}")
-            return
-        if customer is None:
-            await message.answer(f"Customer not found: {customer_name}")
             return
 
         record = await _resolve_first_inventory_record(session, product.jan_code, warehouse.id, customer.id)
@@ -534,19 +548,20 @@ async def stock_adjust(message: Message) -> None:
     sku, warehouse_name, actual_quantity, customer_name = parsed
     async with AsyncSessionLocal() as session:
         warehouse = await _resolve_warehouse(session, warehouse_name)
+        if warehouse is None:
+            await message.answer(f"Warehouse not found: {warehouse_name}")
+            return
+        customer_name = customer_name or _default_customer_name_for_warehouse(warehouse)
         customer = await _resolve_customer(session, customer_name)
-        product = await _resolve_product_for_operation(session, sku)
+        if customer is None:
+            await message.answer(f"Customer not found: {customer_name}")
+            return
+        product = await _resolve_product_for_operation(session, sku, warehouse.id, customer.id)
         if product is None:
             await message.answer(_product_missing_message(sku))
             return
         if isinstance(product, list):
             await message.answer(_product_ambiguous_message(sku, product, "/stock_adjust"))
-            return
-        if warehouse is None:
-            await message.answer(f"Warehouse not found: {warehouse_name}")
-            return
-        if customer is None:
-            await message.answer(f"Customer not found: {customer_name}")
             return
 
         record = await _resolve_first_inventory_record(session, product.jan_code, warehouse.id, customer.id)
@@ -651,7 +666,7 @@ async def transfer_stock(message: Message) -> None:
         return
 
     sku, from_warehouse_name, to_warehouse_name, raw_quantity = args[:4]
-    customer_name = args[4] if len(args) == 5 else DEFAULT_CUSTOMER_NAME
+    customer_name = args[4] if len(args) == 5 else None
     try:
         quantity = int(raw_quantity)
     except ValueError:
@@ -662,24 +677,25 @@ async def transfer_stock(message: Message) -> None:
         return
 
     async with AsyncSessionLocal() as session:
-        product = await _resolve_product_for_operation(session, sku)
         from_warehouse = await _resolve_warehouse(session, from_warehouse_name)
         to_warehouse = await _resolve_warehouse(session, to_warehouse_name)
-        customer = await _resolve_customer(session, customer_name)
-        if product is None:
-            await message.answer(_product_missing_message(sku))
-            return
-        if isinstance(product, list):
-            await message.answer(_product_ambiguous_message(sku, product, "/transfer"))
-            return
         if from_warehouse is None:
             await message.answer(f"Source warehouse not found: {from_warehouse_name}")
             return
         if to_warehouse is None:
             await message.answer(f"Target warehouse not found: {to_warehouse_name}")
             return
+        customer_name = customer_name or _default_customer_name_for_warehouse(from_warehouse)
+        customer = await _resolve_customer(session, customer_name)
         if customer is None:
             await message.answer(f"Customer not found: {customer_name}")
+            return
+        product = await _resolve_product_for_operation(session, sku, from_warehouse.id, customer.id)
+        if product is None:
+            await message.answer(_product_missing_message(sku))
+            return
+        if isinstance(product, list):
+            await message.answer(_product_ambiguous_message(sku, product, "/transfer"))
             return
 
         source_record = await _resolve_first_inventory_record(session, product.jan_code, from_warehouse.id, customer.id)
@@ -840,15 +856,15 @@ def _command_args(text: str | None) -> str:
     return parts[1].strip()
 
 
-def _parse_stock_command(text: str | None) -> tuple[str, str, int, str] | None:
+def _parse_stock_command(text: str | None) -> tuple[str, str, int, str | None] | None:
     args = _command_args(text).split()
     if len(args) == 2:
         sku, raw_quantity = args
         warehouse_name = DEFAULT_WAREHOUSE_NAME
-        customer_name = DEFAULT_CUSTOMER_NAME
+        customer_name = None
     elif len(args) == 3:
         sku, warehouse_name, raw_quantity = args
-        customer_name = DEFAULT_CUSTOMER_NAME
+        customer_name = None
     elif len(args) == 4:
         sku, warehouse_name, raw_quantity, customer_name = args
     else:
@@ -1153,12 +1169,35 @@ async def _resolve_customer(session: AsyncSession, customer_name: str) -> Custom
     )
 
 
-async def _resolve_product_for_operation(session: AsyncSession, keyword: str) -> Product | list[Product] | None:
+def _default_customer_name_for_warehouse(warehouse: Warehouse) -> str:
+    if "乐天" in warehouse.name:
+        return DEFAULT_RAKUTEN_CUSTOMER
+    return DEFAULT_CUSTOMER_NAME
+
+
+async def _resolve_product_for_operation(
+    session: AsyncSession,
+    keyword: str,
+    warehouse_id: int | None = None,
+    customer_id: int | None = None,
+) -> Product | list[Product] | None:
     products = await search_inventory_items(session=session, keyword=keyword, limit=6)
     if not products:
         return None
     if len(products) == 1:
         return products[0]
+    if warehouse_id is not None:
+        stocked_products: list[Product] = []
+        for product in products:
+            if any(
+                record.warehouse_id == warehouse_id
+                and (customer_id is None or record.customer_id == customer_id)
+                and record.quantity > 0
+                for record in product.inventory_records
+            ):
+                stocked_products.append(product)
+        if len(stocked_products) == 1:
+            return stocked_products[0]
     return products
 
 
