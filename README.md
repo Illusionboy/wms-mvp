@@ -1,101 +1,62 @@
 # WMS MVP
 
-Telegram Bot を前端にした在庫検索・入出庫・AI 報庫整理システムです。
+仓库管理系统 — Web UI 为主操作界面，Telegram Bot 为查询伴侣。NAS / Docker 自托管。
 
 ## 技术栈
 
-- FastAPI
-- PostgreSQL 16
-- SQLAlchemy 2.0 async
-- Telegram Bot polling
-- Gemini API structured JSON parsing
+- FastAPI + PostgreSQL 16 + SQLAlchemy 2.0 async
+- JWT 认证 (PyJWT 2.9.0, HS256) + bcrypt (passlib 1.7.4)
+- Telegram Bot (aiogram 3, polling) — 仅查询
+- Gemini API (gemini-2.5-flash) — 微信报库 AI 解析
+- BeautifulSoup4 + lxml — 秦丝生意通 HTML 盘点单解析
+- openpyxl — Excel 读写
 - Docker Compose
 
-## 启动
+## 快速启动
 
-1. 准备 `.env`
+### 1. 准备 `.env`
 
 ```bash
 cp .env.example .env
 ```
 
-至少需要确认：
+必填项：
 
 ```env
 POSTGRES_DB=wms
 POSTGRES_USER=wms_user
 POSTGRES_PASSWORD=your_password
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-TELEGRAM_OPERATOR_USER_IDS=your_telegram_user_id
-TELEGRAM_ADMIN_USER_IDS=your_telegram_user_id
+TELEGRAM_QUERY_USER_IDS=your_telegram_user_id
 GEMINI_API_KEY=your_gemini_api_key
+JWT_SECRET_KEY=your_jwt_secret         # 生成：python -c "import secrets; print(secrets.token_hex(32))"
+ADMIN_USERNAME=admin                    # 首次启动自动创建此账号
+ADMIN_PASSWORD=your_admin_password
+API_KEY=your_api_key                    # 仅 CLI 工具脚本需要
 ```
 
-2. 启动服务
+### 2. 启动服务
 
 ```bash
 docker compose up --build
 ```
 
-服务：
+服务地址：
 
-- API: `http://localhost:8000`
-- Swagger: `http://localhost:8000/docs`
-- Admin: `http://localhost:8000/api/v1/admin`
-- Telegram bot: polling，不需要公网域名
+- **主 Web UI**: <http://localhost:8000/app> （或直接访问 <http://localhost:8000>）
+- **API Swagger**: <http://localhost:8000/docs>
+- **盘点导入**: <http://localhost:8000/count-import>
+- **Telegram Bot**: 自动 polling，不需要公网域名
 
-PostgreSQL 数据保存在 Docker named volume `newproject_postgres_data` 中。`docker compose down` 不会删除数据，`docker compose down -v` 会删除数据。
+PostgreSQL 数据保存在 Docker named volume `newproject_postgres_data`。`docker compose down` 保留数据，`docker compose down -v` 删除数据。
 
-## 4 月 30 日初始盘点表导入
+## 首次登录
 
-### 商品字典/箱规导入
+首次启动后，用 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录 Web UI。初始管理员账号由 `init_db()` 自动创建。
 
-如果有 `商品箱规数据5.12.xlsx` 这类商品主数据表，表头包含 `JAN`、`商品名`、`中文`、`箱入れ数`，先导入它：
+如需添加其他用户：登录后进入 **设置 → 添加用户**，或调用 `POST /api/v1/auth/users`。
 
-```bash
-python -m app.tools.import_product_catalog \
-  --file "/path/to/商品箱规数据5.12.xlsx"
-```
-
-Docker 容器里执行：
-
-```bash
-docker compose exec api python -m app.tools.import_product_catalog \
-  --file "/app/imports/商品箱规数据5.12.xlsx"
-```
-
-这个脚本会更新 `products.name_jp`、`products.name_zh`、`products.units_per_case`。`/search_sku` 查的就是 `products` 表。
-
-### 盘点库存导入
-
-你现在有两张无表头 Excel：
-
-- 乐天仓库盘点表
-- 普通仓库盘点表
-
-格式要求：
-
-- 第 1 列：JAN Code
-- 第 2 列：数量
-- 没有表头
-
-导入规则：
-
-| Excel | Warehouse | Customer | Location |
-| --- | --- | --- | --- |
-| 乐天仓库盘点表 | `乐天仓库` | `乐天` | `A-00-00` |
-| 普通仓库盘点表 | `普通仓库` | `店铺` | `A-00-00` |
-
-如果商品主数据里还没有对应 JAN，脚本会先创建一个占位商品：
-
-- `jan_code`: Excel 第一列
-- `name_jp`: 同 JAN
-- `name_zh`: 空
-- `units_per_case`: 空
-
-后续可以再用 `/add_product` 或商品主数据导入补全商品名和箱入数。
-
-### 推荐导入方式
+## 首次数据导入
 
 先启动数据库：
 
@@ -103,234 +64,151 @@ docker compose exec api python -m app.tools.import_product_catalog \
 docker compose up -d postgres
 ```
 
-然后在本机 conda 环境运行。注意本机连接数据库要用 `localhost`，不是 Docker 内部的 `postgres`：
+### 商品字典导入
+
+#### 方式一：Web UI（推荐）
+
+登录后进入 **商品管理** → 上传 Excel 文件。
+
+#### 方式二：API
 
 ```bash
-DATABASE_URL=postgresql+asyncpg://wms_user:your_password@localhost:5432/wms \
-/Users/mac/anaconda3/bin/conda run -n wms-mvp python -m app.tools.init_inventory_from_count \
-  --rakuten-file "/absolute/path/to/rakuten.xlsx" \
-  --normal-file "/absolute/path/to/normal.xlsx" \
-  --replace
+curl -X POST http://localhost:8000/api/v1/inventory/imports/product-catalog \
+  -H "Authorization: Bearer <your_jwt>" \
+  -F "file=@商品箱规数据.xlsx"
 ```
 
-`--replace` 表示用这次盘点数量覆盖这两个仓库/客户组合的现有库存。首次初始化建议使用。
-
-如果你的文件就在项目根目录，例如：
+#### 方式三：命令行工具
 
 ```bash
 DATABASE_URL=postgresql+asyncpg://wms_user:your_password@localhost:5432/wms \
-/Users/mac/anaconda3/bin/conda run -n wms-mvp python -m app.tools.init_inventory_from_count \
+python -m app.tools.import_product_catalog --file "./商品箱规数据.xlsx"
+```
+
+表头需含 `JAN`（或 `条码`）、`商品名`（或 `日文`），可选 `中文`、`箱入れ数`。
+
+### 初始盘点库存导入
+
+```bash
+DATABASE_URL=postgresql+asyncpg://wms_user:your_password@localhost:5432/wms \
+python -m app.tools.init_inventory_from_count \
   --rakuten-file "./4-30-rakuten.xlsx" \
   --normal-file "./4-30-normal.xlsx" \
   --replace
 ```
 
-导入后可以通过 Telegram 查询：
+`--replace` 覆盖现有库存。两张表无表头，第 1 列 JAN，第 2 列数量。
+
+## Web UI 功能
+
+| 功能 | 说明 |
+| ------ | ------ |
+| 仪表盘 | 各仓库最后入/出库时间、数据延迟天数、负库存 SKU 数 |
+| 入库 | 搜索商品 → 选仓库/客户/库位 → 提交 |
+| 出库 | 搜索商品 → 选仓库/客户 → 提交 |
+| 调整 | 设定库存实际数量，写入 ADJUST 事务 |
+| 查询 | 按 JAN/商品名搜索库存 |
+| 微信报库 | 粘贴聊天记录 → AI 解析草稿 → 预览 → 确认导入 |
+| 乐天 CSV | 上传 RMS 出货 CSV → 直接写入出库记录 |
+| 盘点导入 | 上传秦丝 HTML 或 Excel → 对账预览 → 确认应用 |
+| 商品管理 | 上传商品字典 Excel，搜索商品主数据 |
+| 设置 | 添加用户、新增仓库/客户 |
+
+## Telegram Bot（查询）
+
+Bot 仅支持读操作：
 
 ```text
-/search 123456
+/whoami          — 查看自己的 Telegram user id（无需权限）
+/status          — 各仓库数据状态（需授权）
+/search <关键词>  — 搜索库存（JAN/商品名）
+/search_sku <关键词> — 搜索商品字典
 ```
 
-## Telegram 常用命令
+权限通过 `TELEGRAM_QUERY_USER_IDS` / `TELEGRAM_OPERATOR_USER_IDS` / `TELEGRAM_ADMIN_USER_IDS` 控制（三级均有查询权限）。
 
-查看自己的 Telegram user id：
+## 秦丝生意通同步
 
-```text
-/whoami
-```
+### 工作原理
 
-查询：
+WMS 通过 httpx 直接调用秦丝生意通后端 API（无浏览器），拉取采购单（入库）和销售单（出库）的商品明细，写入 WMS 事务（`source="qinsi_scrape"`）。
 
-```text
-/search JAN_OR_NAME
-```
+认证使用秦丝的 `gisALogin` session cookie，**有效期 7 天**。
 
-只查商品字典，不看库存：
+### 首次授权（初始化 / 每 7 天续期）
 
-```text
-/search_sku JAN_OR_NAME
-```
+秦丝登录需要阿里云滑块验证码，只能在有图形界面的 Mac 上完成。登录成功后 cookies 上传到 NAS。
 
-`/search` 和 `/search_sku` 都支持完整 JAN、后六位、倒数第六到倒数第二位/后五位、日文名、中文名。
-
-添加商品：
-
-```text
-/add_product JAN 商品名
-/add_product JAN 商品名 箱入数
-/add_product JAN 商品名 箱入数 中文名
-```
-
-没有箱入数的商品不会触发采购预警。
-
-入库：
-
-```text
-/stock_in JAN 仓库名 数量
-```
-
-出库：
-
-```text
-/stock_out JAN 仓库名 数量
-```
-
-如果仓库名匹配 `乐天仓库`，省略客户时默认客户为 `乐天`；其它仓库默认客户为 `店铺`。
-
-盘点修正：
-
-```text
-/stock_adjust JAN 仓库名 实际数量
-```
-
-仓库调拨：
-
-```text
-/transfer JAN 源仓库 目标仓库 数量
-```
-
-客户归属调拨：
-
-```text
-/transfer_customer JAN 仓库 源客户 目标客户 数量
-```
-
-乐天 RMS 出货 CSV：
-
-```text
-把文件 caption 写成：/rakuten_csv
-或回复 CSV 文件：/rakuten_csv
-```
-
-单独发送 CSV 文件不会自动导入为乐天出库，避免以后其它文件功能误触发。
-
-机器人会生成一个草稿 ID，并预览按 JAN 汇总后的出库数量。确认无误后执行：
-
-```text
-/apply_rakuten_csv DRAFT_ID
-```
-
-如果预览里有 `product_not_found`、`inventory_record_not_found` 或 `insufficient_stock`，默认不会出库。确认这些问题行后续手动处理时，可以只应用正常行并跳过问题行：
-
-```text
-/apply_rakuten_csv DRAFT_ID ignore
-```
-
-历史乐天 CSV 草稿里的商品名可以回填到商品字典：
-
-```text
-/sync_rakuten_names
-```
-
-默认从 `乐天仓库` 的 `乐天` 客户库存扣减。如果需要临时指定：
-
-```text
-/rakuten_csv 仓库名 客户名
-```
-
-## AI 报库导入
-
-先解析并保存 draft：
-
-```text
-/parse_report 普通仓库 店铺
-粘贴多条聊天记录
-```
-
-确认 draft：
-
-```text
-/show_report DRAFT_ID
-```
-
-应用 draft：
-
-```text
-/apply_report DRAFT_ID
-```
-
-修改 draft：
-
-```text
-/set_report_meta DRAFT_ID IN|OUT 仓库 客户
-/set_report_line DRAFT_ID 行号 JAN 数量 商品名
-/add_report_line DRAFT_ID JAN 数量 商品名
-/del_report_line DRAFT_ID 行号
-```
-
-## 乐天 RMS 出货 CSV 导入
-
-RMS 下载的出货 CSV 可以直接导入为乐天出库。
-
-日常使用建议走 Telegram：把 CSV 文件发给机器人，确认预览后 `/apply_rakuten_csv DRAFT_ID`。
-
-默认规则：
-
-- 仓库：`乐天仓库`
-- 客户：`乐天`
-- source：`rakuten_csv`
-- `商品番号` 解析规则沿用旧快递单脚本：
-  - `JAN-套数` 乘以 `個数`
-  - `JAN` 没有 `-` 时套数按 1
-  - `-0` 按 1 处理
-
-先预览解析结果，不更新数据库：
+**本地运行（Mac）→ 自动上传到 NAS：**
 
 ```bash
-python -m app.tools.import_rakuten_shipment_csv \
-  --file "/path/to/rakuten.csv" \
-  --preview
+# 替换为 NAS 的 IP 和端口，以及 WMS 登录后的 JWT token
+conda run -n wms-mvp python -m tools.refresh_qinsi_session \
+  --api http://192.168.1.x:8000 \
+  --token YOUR_JWT_TOKEN
 ```
 
-在 Docker 容器里执行：
+脚本会：
+
+1. 在 Mac 上打开 Chromium 窗口，自动填写账号密码
+2. 你手动完成滑块验证并点登录
+3. 检测到登录成功后，cookies 自动 POST 到 `NAS:8000/api/v1/qinsi/upload-session`
+4. NAS 的 Docker 服务立即生效
+
+**JWT token 获取**：打开 WMS 网页 → F12 → Console → `localStorage.getItem('token')`
+
+**本地开发（API 在本机）**：
 
 ```bash
-docker compose exec api python -m app.tools.import_rakuten_shipment_csv \
-  --file "/app/imports/rakuten_20260511.csv" \
-  --preview
+conda run -n wms-mvp python -m tools.refresh_qinsi_session
 ```
 
-确认无误后正式出库：
+直接写入本地 `app/data/qinsi_session.json`，无需 token。
+
+### 检查授权状态
 
 ```bash
-docker compose exec api python -m app.tools.import_rakuten_shipment_csv \
-  --file "/app/imports/rakuten_20260511.csv"
+curl http://localhost:8000/api/v1/qinsi/auth-status
 ```
 
-也可以通过 API 上传：
+### 使用同步功能
 
-```text
-POST /api/v1/inventory/imports/rakuten-shipment
-```
+登录 Web UI → **秦丝同步** 标签：选择日期范围 → 抓取 → 勾选需要导入的记录 → 确认写入。
 
-这个接口会自动尝试 `cp932`、`utf-8-sig`、`shift_jis`、`utf-8` 解码。
+## 月度盘点对账
 
-## 库存预警
+访问 <http://localhost:8000/count-import> 或 Web UI **盘点导入** 标签：
 
-商品有 `units_per_case` 时，出库后如果总库存少于 2 箱，会给 Telegram 操作者发送采购提醒。
+1. 上传秦丝生意通 `.html` 或 `.xlsx` 盘点单
+1. 选择盘点日期（实物盘点当天）、仓库、客户
+1. 系统计算对账量：`目标库存 = 盘点数量 + Σ(盘点日期之后的WMS入出库变动)`；`ADJUST量 = 目标库存 - 当前WMS库存`
+1. 预览表格（可按"有差异"筛选），可导出 Excel 留存
+1. 确认应用 → 写入 `source="physical_count"` 的 ADJUST 事务
 
-为了避免重复提醒，商品有 `low_stock_alert_sent` 标记。库存重新回到 2 箱以上后，提醒状态会自动解除。
+## 负库存模式
 
-## 数据分析思路
+月底盘点数据到次月 5 日才到，这段窗口期出入库不能停。管理员可按仓库开启负库存：
 
-后续做客户、仓库、商品分析时，建议从 `stock_transactions` 出发：
+- Web UI：**设置 → 仓库管理**
+- API：`PATCH /api/v1/warehouses/{id}/allow-negative?enabled=true`
 
-```text
-stock_transactions
-  -> inventory_records
-  -> products
-  -> warehouses
-  -> customers
-```
+开启后出库可超过当前库存量，余额变为负值（合法业务数据）。盘点数据到位后用盘点导入修正。
 
-可以分析：
+## API 认证
 
-- 某客户入库/出库趋势
-- 某仓库库存分布
-- 某商品流转
-- Telegram / AI 报库 / CSV 等不同 source 的来源占比
-- 采购预警商品列表
+所有变库存端点需要认证头：
 
-## 注意事项
+- `Authorization: Bearer <jwt>` — 通过 `POST /api/v1/auth/login` 获取
+- `X-API-Key: <key>` — 兼容 CLI 工具脚本
 
-当前 MVP 启动时会自动创建表，并对部分新增列做轻量 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`。正式生产环境建议切换到 Alembic migration。
+查询端点（search、status、count preview）无需认证。
+
+## 数据分析
+
+从 `stock_transactions` 出发，关联 `inventory_records → products → warehouses → customers`。
+
+`source` 值：`telegram` / `rakuten_csv` / `chat_report` / `physical_count` / `web_ui`
+
+`physical_count` 事务的 `note` 格式：`盘点日期:YYYY-MM-DD 盘点量:N 盘后变动:±N`
+
+`stock_transactions.user_id` 关联 `users.id`，可追踪每笔操作的操作员。

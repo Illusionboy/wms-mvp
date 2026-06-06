@@ -6,6 +6,14 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 postgres_data/
+# 秦丝 session（含敏感 cookies）和调试截图
+app/data/qinsi_session.json
+app/data/scraper_debug/
+app/data/qinsi_selectors.json
+app/data/qinsi_schema_cache.json
+# macOS
+.DS_Store
+**/.DS_Store
 4-30-normal.xlsx
 4-30-rakuten.xlsx
 rakuten_20260511.csv
@@ -14,3 +22,6 @@ import_products.py
 process_excel.py
 rakuten_delivery_dtl.py
 merge_tool.py
+商品箱规数据5.12.xlsx
+秦丝生意通-库存盘点单.html
+秦丝生意通-库存盘点单_files/

@@ -35,8 +35,15 @@ services:
       TELEGRAM_QUERY_USER_IDS: ${TELEGRAM_QUERY_USER_IDS:-}
       TELEGRAM_OPERATOR_USER_IDS: ${TELEGRAM_OPERATOR_USER_IDS:-}
       TELEGRAM_ADMIN_USER_IDS: ${TELEGRAM_ADMIN_USER_IDS:-}
+      API_KEY: ${API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      QINSI_USERNAME: ${QINSI_USERNAME:-}
+      QINSI_PASSWORD: ${QINSI_PASSWORD:-}
+      QINSI_BASE_URL: ${QINSI_BASE_URL:-https://web.syt.qinsilk.com/gis/admin/}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
