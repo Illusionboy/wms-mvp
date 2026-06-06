@@ -1,6 +1,7 @@
+from aiogram import Bot
 from fastapi import APIRouter, HTTPException, Request, status
 
-from app.bot.dispatcher import create_bot, create_dispatcher
+from app.bot.dispatcher import create_dispatcher
 from app.core.config import settings
 
 router = APIRouter()
@@ -19,8 +20,8 @@ async def telegram_webhook(secret: str, request: Request) -> dict[str, str]:
     from aiogram.types import Update
 
     payload = await request.json()
-    bot = create_bot(settings.telegram_bot_token)
-    dispatcher = create_dispatcher()
+    bot = Bot(token=settings.telegram_bot_token)
+    dispatcher = create_dispatcher(bot)
     update = Update.model_validate(payload, context={"bot": bot})
     try:
         await dispatcher.feed_update(bot, update)
