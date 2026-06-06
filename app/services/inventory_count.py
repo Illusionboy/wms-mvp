@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.inventory_count_draft import InventoryCountDraft
 from app.models.inventory_record import InventoryRecord
+from app.models.product import Product
 from app.models.stock_transaction import StockTransaction, StockTransactionType
 from app.schemas.inventory_count import (
     CountDraftLine,
@@ -475,6 +476,10 @@ async def _compute_draft_lines(
             .limit(1)
         ))
 
+        known_product = bool(await session.scalar(
+            select(Product.jan_code).where(Product.jan_code == jan_code).limit(1)
+        ))
+
         # Net stock change recorded in WMS after the count date
         delta_result = await session.scalar(
             select(func.coalesce(func.sum(StockTransaction.quantity_change), 0))
@@ -498,6 +503,7 @@ async def _compute_draft_lines(
                 current_quantity=current_qty,
                 adjust_delta=target_qty - current_qty,
                 has_wms_record=has_record,
+                known_product=known_product,
             )
         )
     return lines

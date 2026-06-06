@@ -1159,10 +1159,10 @@ function renderCountDraft(draft) {
 }
 function renderCountLines(lines) {
   const tbody = document.getElementById('ci-lines');
-  tbody.innerHTML = lines.map(l => `<tr${l.has_wms_record === false ? ' style="background:var(--accent-bg)"' : ''}>
+  tbody.innerHTML = lines.map(l => `<tr${l.known_product === false ? ' style="background:var(--warn-bg)"' : ''}>
     <td><code style="font-size:11px">${l.jan_code}</code></td>
     <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.product_name)}">
-      ${l.has_wms_record === false ? '<span class="badge badge-neutral" style="margin-right:4px;font-size:10px">新</span>' : ''}${l.product_name}
+      ${l.known_product === false ? '<span class="badge badge-warn" style="margin-right:4px;font-size:10px">新品</span>' : ''}${l.product_name}
     </td>
     <td>${l.count_quantity}</td>
     <td style="color:${l.delta_after_count>0?'var(--success)':l.delta_after_count<0?'var(--danger)':'var(--muted)'}">${l.delta_after_count >= 0 ? '+' : ''}${l.delta_after_count}</td>
@@ -1174,7 +1174,7 @@ function renderCountLines(lines) {
 function filterCount(mode) {
   let filtered = _countLines;
   if (mode === 'diff') filtered = _countLines.filter(l => l.adjust_delta !== 0);
-  if (mode === 'new') filtered = _countLines.filter(l => !l.has_wms_record);
+  if (mode === 'new') filtered = _countLines.filter(l => l.known_product === false);
   renderCountLines(filtered);
 }
 async function exportCountDraft() {
