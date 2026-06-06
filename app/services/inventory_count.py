@@ -377,7 +377,9 @@ def _parse_count_excel(content: bytes) -> list[tuple[str, str, int]]:
 
     result: list[tuple[str, str, int]] = []
     for row in rows_iter:
-        jan = str(row[jan_col] or "").strip().rstrip(".0")
+        jan_raw = str(row[jan_col] or "").strip()
+        # Strip Excel float suffix (.0) without removing legitimate trailing zeros from JAN
+        jan = jan_raw.split(".")[0] if "." in jan_raw else jan_raw
         if not jan or not jan.isdigit():
             continue
         try:
@@ -565,6 +567,7 @@ async def apply_inventory_count_draft(
         )
 
     adjusted = created = no_change = 0
+    issues: list[str] = []
     customer_id = customer.id if customer else None
 
     for line in document.lines:
@@ -585,6 +588,12 @@ async def apply_inventory_count_draft(
         )
 
         if record is None:
+            product_exists = bool(await session.scalar(
+                select(Product.jan_code).where(Product.jan_code == line.jan_code).limit(1)
+            ))
+            if not product_exists:
+                issues.append(f"跳过 {line.jan_code} ({line.product_name[:20]}): 商品字典中不存在")
+                continue
             record = InventoryRecord(
                 product_jan=line.jan_code,
                 warehouse_id=warehouse.id,
@@ -622,6 +631,7 @@ async def apply_inventory_count_draft(
         adjusted_count=adjusted,
         no_change_count=no_change,
         created_count=created,
+        issues=issues,
     )
 
 
