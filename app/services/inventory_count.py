@@ -353,18 +353,19 @@ def _parse_count_excel(content: bytes) -> list[tuple[str, str, int]]:
     ws = wb.active
     rows_iter = ws.iter_rows(values_only=True)
 
-    # Detect header row
+    # Detect header row — first match wins to avoid generic keywords overwriting specific ones
     jan_col = count_col = name_col = None
     header = next(rows_iter, None)
     if header is None:
         raise ValueError("Excel 文件为空")
     for i, cell in enumerate(header):
         val = str(cell or "").lower()
-        if any(k in val for k in ["jan", "条码", "barcode", "货号"]):
+        if jan_col is None and any(k in val for k in ["jan", "条码", "barcode", "货号"]):
             jan_col = i
-        if any(k in val for k in ["盘点数", "实盘", "数量", "count"]):
+        # Use specific "盘点数量"/"盘点数"/"实盘" — avoid generic "数量" which also matches 盘点前数量/盈亏数量
+        if count_col is None and any(k in val for k in ["盘点数量", "盘点数", "实盘", "count"]):
             count_col = i
-        if any(k in val for k in ["商品", "名称", "name"]):
+        if name_col is None and any(k in val for k in ["商品", "名称", "name"]):
             name_col = i
 
     if jan_col is None or count_col is None:
