@@ -6,6 +6,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 postgres_data/
+# 部署手册（含 NAS IP、用户名等私人信息，仅本地保留）
+GIT_DEPLOY.md
 # 秦丝 session（含敏感 cookies）和调试截图
 app/data/qinsi_session.json
 app/data/scraper_debug/
