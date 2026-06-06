@@ -1159,9 +1159,11 @@ function renderCountDraft(draft) {
 }
 function renderCountLines(lines) {
   const tbody = document.getElementById('ci-lines');
-  tbody.innerHTML = lines.map(l => `<tr>
+  tbody.innerHTML = lines.map(l => `<tr${l.has_wms_record === false ? ' style="background:var(--accent-bg)"' : ''}>
     <td><code style="font-size:11px">${l.jan_code}</code></td>
-    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.product_name)}">${l.product_name}</td>
+    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.product_name)}">
+      ${l.has_wms_record === false ? '<span class="badge badge-neutral" style="margin-right:4px;font-size:10px">新</span>' : ''}${l.product_name}
+    </td>
     <td>${l.count_quantity}</td>
     <td style="color:${l.delta_after_count>0?'var(--success)':l.delta_after_count<0?'var(--danger)':'var(--muted)'}">${l.delta_after_count >= 0 ? '+' : ''}${l.delta_after_count}</td>
     <td>${l.target_quantity}</td>
