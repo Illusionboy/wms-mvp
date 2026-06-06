@@ -3,6 +3,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_auth
+from app.services.auth import CurrentUser
 from app.db.session import get_db_session
 from app.models.customer import Customer
 from app.schemas.inventory import CustomerCreate, CustomerRead
@@ -10,7 +12,7 @@ from app.schemas.inventory import CustomerCreate, CustomerRead
 router = APIRouter()
 
 
-@router.post("", response_model=CustomerRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=CustomerRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_auth)])
 async def create_customer(
     payload: CustomerCreate,
     session: AsyncSession = Depends(get_db_session),

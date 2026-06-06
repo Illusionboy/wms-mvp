@@ -21,7 +21,14 @@ from app.schemas.inventory import (
     StockOutCreate,
     StockTransactionRead,
 )
-from app.services.inventory import InsufficientStockError, InventoryRecordNotFoundError, search_inventory_items, stock_out_item
+from app.services.inventory import (
+    InsufficientStockError,
+    InventoryRecordNotFoundError,
+    resolve_customer,
+    resolve_warehouse,
+    search_inventory_items,
+    stock_out_item,
+)
 from app.tools.convert_rakuten_csv_encoding import decode_csv_bytes
 
 
@@ -91,13 +98,15 @@ async def import_rakuten_shipment_csv(
 ) -> RakutenShipmentImportResult:
     lines = parse_rakuten_shipment_csv(content)
     merged_lines = _merge_shipment_lines(lines)
-    await _sync_product_names_from_rakuten_lines(session=session, lines=merged_lines)
-    return await apply_rakuten_shipment_lines(
+    result = await apply_rakuten_shipment_lines(
         session=session,
         lines=merged_lines,
         warehouse_name=warehouse_name,
         customer_name=customer_name,
     )
+    if result.applied:
+        await session.commit()
+    return result
 
 
 async def create_rakuten_shipment_draft(
@@ -109,7 +118,6 @@ async def create_rakuten_shipment_draft(
     telegram_user_id: int | None = None,
 ) -> RakutenShipmentDraft:
     lines = _merge_shipment_lines(parse_rakuten_shipment_csv(content))
-    await _sync_product_names_from_rakuten_lines(session=session, lines=lines)
     document = RakutenShipmentDraftDocument(
         warehouse_name=warehouse_name,
         customer_name=customer_name,
@@ -129,8 +137,16 @@ async def create_rakuten_shipment_draft(
     return draft
 
 
-async def get_rakuten_shipment_draft(session: AsyncSession, draft_id: int) -> RakutenShipmentDraft | None:
-    return await session.scalar(select(RakutenShipmentDraft).where(RakutenShipmentDraft.id == draft_id))
+async def get_rakuten_shipment_draft(
+    session: AsyncSession,
+    draft_id: int,
+    *,
+    with_for_update: bool = False,
+) -> RakutenShipmentDraft | None:
+    stmt = select(RakutenShipmentDraft).where(RakutenShipmentDraft.id == draft_id)
+    if with_for_update:
+        stmt = stmt.with_for_update()
+    return await session.scalar(stmt)
 
 
 async def preview_rakuten_shipment_draft(
@@ -151,6 +167,7 @@ async def apply_rakuten_shipment_draft(
     session: AsyncSession,
     draft: RakutenShipmentDraft,
     ignore_missing: bool = False,
+    user_id: int | None = None,
 ) -> RakutenShipmentImportResult:
     document = RakutenShipmentDraftDocument.model_validate(draft.document)
     result = await apply_rakuten_shipment_lines(
@@ -159,6 +176,7 @@ async def apply_rakuten_shipment_draft(
         warehouse_name=document.warehouse_name,
         customer_name=document.customer_name,
         ignore_missing=ignore_missing,
+        user_id=user_id,
     )
     if result.applied:
         draft.status = "applied_with_skips" if result.issues else "applied"
@@ -173,8 +191,9 @@ async def apply_rakuten_shipment_lines(
     warehouse_name: str = DEFAULT_RAKUTEN_WAREHOUSE,
     customer_name: str = DEFAULT_RAKUTEN_CUSTOMER,
     ignore_missing: bool = False,
+    user_id: int | None = None,
 ) -> RakutenShipmentImportResult:
-    await _sync_product_names_from_rakuten_lines(session=session, lines=lines)
+    names_synced = await _sync_product_names_from_rakuten_lines(session=session, lines=lines)
     issues, resolved = await _validate_rakuten_shipment_lines(
         session=session,
         lines=lines,
@@ -191,8 +210,10 @@ async def apply_rakuten_shipment_lines(
         ]
 
     if issues:
-        return RakutenShipmentImportResult(applied=False, total_lines=len(lines), issues=issues)
+        return RakutenShipmentImportResult(applied=False, total_lines=len(lines), issues=issues, names_synced=names_synced)
 
+    # All deductions run without individual commits so they succeed or fail as a unit.
+    # The caller (apply_rakuten_shipment_draft) commits after this returns.
     mutations: list[RakutenShipmentMutation] = []
     reference_id = f"rakuten_csv:{uuid4().hex}"
     for _, jan_code, quantity, record in resolved:
@@ -210,6 +231,8 @@ async def apply_rakuten_shipment_lines(
                     reference_id=reference_id,
                     note="rakuten shipment csv",
                 ),
+                commit=False,
+                user_id=user_id,
             )
         except (InsufficientStockError, InventoryRecordNotFoundError) as exc:
             raise RuntimeError(f"Rakuten shipment import failed after validation: {exc}") from exc
@@ -227,6 +250,7 @@ async def apply_rakuten_shipment_lines(
         total_lines=len(lines),
         mutations=mutations,
         issues=ignored_issues,
+        names_synced=names_synced,
     )
 
 
@@ -236,8 +260,8 @@ async def _validate_rakuten_shipment_lines(
     warehouse_name: str,
     customer_name: str,
 ) -> tuple[list[RakutenShipmentIssue], list[tuple[int, str, int, InventoryRecord]]]:
-    warehouse = await _resolve_warehouse(session, warehouse_name)
-    customer = await _resolve_customer(session, customer_name)
+    warehouse = await resolve_warehouse(session, warehouse_name)
+    customer = await resolve_customer(session, customer_name)
     issues: list[RakutenShipmentIssue] = []
 
     if not lines:
@@ -382,24 +406,6 @@ async def sync_product_names_from_rakuten_drafts(session: AsyncSession) -> int:
 def _is_placeholder_product_name(product: Product) -> bool:
     name_jp = _clean_text(product.name_jp)
     return not name_jp or name_jp == product.jan_code
-
-
-async def _resolve_warehouse(session: AsyncSession, warehouse_name: str) -> Warehouse | None:
-    return await session.scalar(
-        select(Warehouse)
-        .where(Warehouse.name.ilike(f"%{warehouse_name}%"))
-        .order_by(Warehouse.id.asc())
-        .limit(1)
-    )
-
-
-async def _resolve_customer(session: AsyncSession, customer_name: str) -> Customer | None:
-    return await session.scalar(
-        select(Customer)
-        .where(Customer.name.ilike(f"%{customer_name}%"))
-        .order_by(Customer.id.asc())
-        .limit(1)
-    )
 
 
 async def _resolve_first_inventory_record(

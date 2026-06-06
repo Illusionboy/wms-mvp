@@ -1,0 +1,1408 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WMS</title>
+<style>
+:root {
+  --bg: #f5f5f5;
+  --surface: #fff;
+  --sidebar: #fafafa;
+  --border: #e4e4e7;
+  --text: #18181b;
+  --muted: #71717a;
+  --accent: #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-bg: #eef2ff;
+  --danger: #ef4444;
+  --danger-bg: #fef2f2;
+  --success: #16a34a;
+  --success-bg: #f0fdf4;
+  --warn: #d97706;
+  --warn-bg: #fffbeb;
+  --sidebar-w: 208px;
+  --radius: 8px;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #09090b;
+    --surface: #18181b;
+    --sidebar: #111113;
+    --border: #27272a;
+    --text: #fafafa;
+    --muted: #a1a1aa;
+    --accent: #818cf8;
+    --accent-hover: #6366f1;
+    --accent-bg: #1e1b4b;
+    --danger: #f87171;
+    --danger-bg: #450a0a;
+    --success: #4ade80;
+    --success-bg: #052e16;
+    --warn: #fbbf24;
+    --warn-bg: #451a03;
+  }
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; height: 100vh; display: flex; overflow: hidden; }
+
+/* ── Login ── */
+#login-screen {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--bg); z-index: 100;
+}
+.login-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 40px; width: 360px; box-shadow: 0 4px 24px rgba(0,0,0,.08);
+}
+.login-card h1 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+.login-card p { color: var(--muted); margin-bottom: 28px; font-size: 13px; }
+
+/* ── Sidebar ── */
+#sidebar {
+  width: var(--sidebar-w); flex-shrink: 0; background: var(--sidebar);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column;
+  padding: 16px 8px; overflow-y: auto;
+}
+.brand { font-size: 15px; font-weight: 700; padding: 4px 8px 16px; color: var(--text); letter-spacing: -.3px; }
+.nav-group { margin-bottom: 4px; }
+.nav-label { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding: 4px 8px 2px; }
+.nav-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+  cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 500; transition: all .12s;
+  border: none; background: none; width: 100%; text-align: left;
+}
+.nav-item:hover { background: var(--border); color: var(--text); }
+.nav-item.active { background: var(--accent-bg); color: var(--accent); }
+.nav-item .icon { font-size: 15px; width: 18px; text-align: center; }
+.sidebar-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
+.user-chip {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+  font-size: 12px; color: var(--muted);
+}
+.user-chip strong { color: var(--text); font-size: 13px; }
+.logout-btn {
+  display: block; width: 100%; padding: 6px 8px; border: none; background: none;
+  color: var(--danger); font-size: 12px; text-align: left; cursor: pointer; border-radius: 6px;
+}
+.logout-btn:hover { background: var(--danger-bg); }
+
+/* ── Main ── */
+#main { flex: 1; overflow-y: auto; }
+.section { display: none; padding: 32px 40px; max-width: 820px; }
+.section.active { display: block; }
+.section-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+.section-sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+hr.divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
+
+/* ── Cards ── */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+.card-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+.stat-value { font-size: 22px; font-weight: 700; }
+.stat-value.warn { color: var(--warn); }
+.stat-value.ok { color: var(--success); }
+
+/* ── Forms ── */
+.form-row { margin-bottom: 16px; }
+.form-row label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
+input[type=text], input[type=password], input[type=number], select, textarea {
+  width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: 14px;
+  outline: none; transition: border-color .15s;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+textarea { resize: vertical; min-height: 100px; }
+.form-row select option { background: var(--surface); }
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 16px; border-radius: 6px; font: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer; border: 1px solid transparent; transition: all .12s;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
+.btn-ghost:hover { background: var(--border); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover { opacity: .85; }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+
+/* ── Product Search Widget ── */
+.search-widget { position: relative; }
+.search-results {
+  position: absolute; top: 100%; left: 0; right: 0; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px; z-index: 20; max-height: 240px;
+  overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,.12); margin-top: 4px;
+}
+.search-result-item {
+  padding: 8px 12px; cursor: pointer; transition: background .1s;
+  border-bottom: 1px solid var(--border);
+}
+.search-result-item:last-child { border-bottom: none; }
+.search-result-item:hover { background: var(--accent-bg); }
+.sri-jan { font-size: 11px; color: var(--muted); font-family: monospace; }
+.sri-name { font-size: 13px; font-weight: 500; }
+.selected-product {
+  background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 6px;
+  padding: 10px 12px; margin-top: 8px; display: none;
+}
+.selected-product.show { display: block; }
+.sp-jan { font-size: 11px; color: var(--accent); font-family: monospace; }
+.sp-name { font-weight: 600; }
+
+/* ── Tables ── */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); }
+td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--accent-bg); }
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600;
+}
+.badge-ok { background: var(--success-bg); color: var(--success); }
+.badge-warn { background: var(--warn-bg); color: var(--warn); }
+.badge-danger { background: var(--danger-bg); color: var(--danger); }
+.badge-neutral { background: var(--border); color: var(--muted); }
+
+/* ── Toast ── */
+#toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 999; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  padding: 12px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; max-width: 340px;
+  animation: slideIn .2s ease; box-shadow: 0 4px 16px rgba(0,0,0,.15);
+}
+.toast-ok { background: var(--success-bg); color: var(--success); border: 1px solid var(--success); }
+.toast-err { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+.toast-info { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent); }
+@keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ── Draft preview table container ── */
+.table-wrap { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; overflow-x: auto; }
+.result-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-top: 16px; white-space: pre-wrap; font-size: 13px; line-height: 1.7; }
+.loading { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+
+<!-- Login Screen -->
+<div id="login-screen">
+  <div class="login-card">
+    <h1>WMS</h1>
+    <p>仓库管理系统 — 请登录</p>
+    <div class="form-row">
+      <label>用户名</label>
+      <input type="text" id="login-username" autocomplete="username" placeholder="admin">
+    </div>
+    <div class="form-row">
+      <label>密码</label>
+      <input type="password" id="login-password" autocomplete="current-password" placeholder="••••••">
+    </div>
+    <div id="login-error" style="color:var(--danger);font-size:13px;margin-bottom:12px;display:none"></div>
+    <button class="btn btn-primary" style="width:100%" onclick="doLogin()">登录</button>
+  </div>
+</div>
+
+<!-- App Shell -->
+<div id="app-shell" style="display:none;width:100%;height:100%;overflow:hidden;display:flex">
+
+  <!-- Sidebar -->
+  <nav id="sidebar">
+    <div class="brand">WMS</div>
+
+    <div class="nav-group">
+      <div class="nav-label">总览</div>
+      <button class="nav-item active" data-section="dashboard" onclick="nav(this)">
+        <span class="icon">◈</span> 仪表盘
+      </button>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-label">库存操作</div>
+      <button class="nav-item" data-section="stock-in" onclick="nav(this)">
+        <span class="icon">↑</span> 入库
+      </button>
+      <button class="nav-item" data-section="stock-out" onclick="nav(this)">
+        <span class="icon">↓</span> 出库
+      </button>
+      <button class="nav-item" data-section="stock-adjust" onclick="nav(this)">
+        <span class="icon">⇌</span> 调整
+      </button>
+      <button class="nav-item" data-section="search" onclick="nav(this)">
+        <span class="icon">○</span> 查询
+      </button>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-label">批量导入</div>
+      <button class="nav-item" data-section="chat-report" onclick="nav(this)">
+        <span class="icon">✦</span> 微信报库
+      </button>
+      <button class="nav-item" data-section="rakuten" onclick="nav(this)">
+        <span class="icon">▤</span> 乐天 CSV
+      </button>
+      <button class="nav-item" data-section="count-import" onclick="nav(this)">
+        <span class="icon">≡</span> 盘点导入
+      </button>
+    </div>
+
+      <button class="nav-item" data-section="qinsi" onclick="nav(this)">
+        <span class="icon">⬇</span> 秦丝同步
+      </button>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-label">管理</div>
+      <button class="nav-item" data-section="products" onclick="nav(this)">
+        <span class="icon">□</span> 商品管理
+      </button>
+      <button class="nav-item" data-section="settings" onclick="nav(this)">
+        <span class="icon">◎</span> 设置
+      </button>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="user-chip">
+        <span>👤</span>
+        <div><strong id="sidebar-username">—</strong><br><span style="font-size:11px">已登录</span></div>
+      </div>
+      <button class="logout-btn" onclick="doLogout()">退出登录</button>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div id="main">
+
+    <!-- Dashboard -->
+    <div class="section active" id="section-dashboard">
+      <div class="section-title">仪表盘</div>
+      <div class="section-sub">各仓库实时数据状态</div>
+      <div id="dashboard-content"><p class="loading">加载中…</p></div>
+    </div>
+
+    <!-- Stock In -->
+    <div class="section" id="section-stock-in">
+      <div class="section-title">入库</div>
+      <div class="section-sub">将商品录入指定仓库</div>
+      <div class="card">
+        <div class="form-row">
+          <label>搜索商品 (JAN / 商品名)</label>
+          <div class="search-widget">
+            <input type="text" id="si-search" placeholder="扫描或输入…" oninput="debounceSearch('si')">
+            <div class="search-results" id="si-results" style="display:none"></div>
+          </div>
+          <div class="selected-product" id="si-selected">
+            <div class="sri-jan" id="si-jan-display"></div>
+            <div class="sp-name" id="si-name-display"></div>
+          </div>
+          <input type="hidden" id="si-jan">
+        </div>
+        <div class="form-row">
+          <label>仓库</label>
+          <select id="si-warehouse"></select>
+        </div>
+        <div class="form-row">
+          <label>客户</label>
+          <select id="si-customer"></select>
+        </div>
+        <div class="form-row">
+          <label>数量</label>
+          <input type="number" id="si-qty" min="1" value="1" placeholder="1">
+        </div>
+        <div class="form-row">
+          <label>库位 (默认 A-00-00)</label>
+          <input type="text" id="si-location" value="A-00-00" placeholder="A-01-02">
+        </div>
+        <div class="form-row">
+          <label>备注 (可选)</label>
+          <input type="text" id="si-note" placeholder="来源备注…">
+        </div>
+        <button class="btn btn-primary" onclick="submitStockIn()">确认入库</button>
+      </div>
+      <div id="si-result"></div>
+    </div>
+
+    <!-- Stock Out -->
+    <div class="section" id="section-stock-out">
+      <div class="section-title">出库</div>
+      <div class="section-sub">从指定仓库扣减库存</div>
+      <div class="card">
+        <div class="form-row">
+          <label>搜索商品 (JAN / 商品名)</label>
+          <div class="search-widget">
+            <input type="text" id="so-search" placeholder="扫描或输入…" oninput="debounceSearch('so')">
+            <div class="search-results" id="so-results" style="display:none"></div>
+          </div>
+          <div class="selected-product" id="so-selected">
+            <div class="sri-jan" id="so-jan-display"></div>
+            <div class="sp-name" id="so-name-display"></div>
+          </div>
+          <input type="hidden" id="so-jan">
+        </div>
+        <div class="form-row">
+          <label>仓库</label>
+          <select id="so-warehouse"></select>
+        </div>
+        <div class="form-row">
+          <label>客户</label>
+          <select id="so-customer"></select>
+        </div>
+        <div class="form-row">
+          <label>数量</label>
+          <input type="number" id="so-qty" min="1" value="1" placeholder="1">
+        </div>
+        <div class="form-row">
+          <label>备注 (可选)</label>
+          <input type="text" id="so-note" placeholder="出库原因…">
+        </div>
+        <button class="btn btn-primary" onclick="submitStockOut()">确认出库</button>
+      </div>
+      <div id="so-result"></div>
+    </div>
+
+    <!-- Stock Adjust -->
+    <div class="section" id="section-stock-adjust">
+      <div class="section-title">库存调整</div>
+      <div class="section-sub">直接设定库存实际数量（写入 ADJUST 事务）</div>
+      <div class="card">
+        <div class="form-row">
+          <label>搜索商品 (JAN / 商品名)</label>
+          <div class="search-widget">
+            <input type="text" id="sa-search" placeholder="扫描或输入…" oninput="debounceSearch('sa')">
+            <div class="search-results" id="sa-results" style="display:none"></div>
+          </div>
+          <div class="selected-product" id="sa-selected">
+            <div class="sri-jan" id="sa-jan-display"></div>
+            <div class="sp-name" id="sa-name-display"></div>
+          </div>
+          <input type="hidden" id="sa-jan">
+        </div>
+        <div class="form-row">
+          <label>仓库</label>
+          <select id="sa-warehouse"></select>
+        </div>
+        <div class="form-row">
+          <label>客户</label>
+          <select id="sa-customer"></select>
+        </div>
+        <div class="form-row">
+          <label>实际数量 (调整后应有的值)</label>
+          <input type="number" id="sa-qty" min="0" value="0" placeholder="0">
+        </div>
+        <button class="btn btn-primary" onclick="submitAdjust()">确认调整</button>
+      </div>
+      <div id="sa-result"></div>
+    </div>
+
+    <!-- Search -->
+    <div class="section" id="section-search">
+      <div class="section-title">库存查询</div>
+      <div class="section-sub">按 JAN / 商品名 搜索</div>
+      <div class="card" style="display:flex;gap:8px;align-items:flex-end">
+        <div class="form-row" style="flex:1;margin:0">
+          <label>关键词</label>
+          <input type="text" id="search-kw" placeholder="JAN、后6位、商品名…" onkeydown="if(event.key==='Enter')doSearch()">
+        </div>
+        <button class="btn btn-primary" onclick="doSearch()" style="margin-bottom:0">搜索</button>
+      </div>
+      <div id="search-result" style="margin-top:16px"></div>
+    </div>
+
+    <!-- Chat Report -->
+    <div class="section" id="section-chat-report">
+      <div class="section-title">微信报库解析</div>
+      <div class="section-sub">用 AI 解析微信聊天报库记录，生成草稿后确认导入</div>
+      <div class="card" id="chat-form-card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>默认仓库</label>
+            <select id="cr-warehouse"></select>
+          </div>
+          <div class="form-row">
+            <label>默认客户</label>
+            <select id="cr-customer"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>粘贴聊天记录</label>
+          <textarea id="cr-text" placeholder="粘贴微信聊天记录…"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="parseChatReport()">AI 解析</button>
+      </div>
+      <div id="cr-draft-area" style="display:none">
+        <hr class="divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div>
+            <strong>草稿 #<span id="cr-draft-id"></span></strong>
+            <span id="cr-draft-status" class="badge badge-neutral" style="margin-left:8px"></span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="resetChatReport()">重新解析</button>
+            <button class="btn btn-primary btn-sm" id="cr-apply-btn" onclick="applyChatReport()">确认导入</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>方向</th><th>JAN提示</th><th>数量</th><th>商品名</th><th>状态</th></tr></thead>
+            <tbody id="cr-lines"></tbody>
+          </table>
+        </div>
+        <div id="cr-issues" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- Rakuten CSV -->
+    <div class="section" id="section-rakuten">
+      <div class="section-title">乐天 CSV 导入</div>
+      <div class="section-sub">上传乐天 RMS 出货 CSV，直接写入出库记录</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>仓库</label>
+            <select id="rak-warehouse"></select>
+          </div>
+          <div class="form-row">
+            <label>客户</label>
+            <select id="rak-customer"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>CSV 文件</label>
+          <input type="file" id="rak-file" accept=".csv" style="padding:6px 0;border:none;background:none">
+        </div>
+        <button class="btn btn-primary" onclick="uploadRakutenCSV()">上传导入</button>
+      </div>
+      <div id="rak-result-area" style="display:none">
+        <hr class="divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <strong id="rak-result-title"></strong>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('rak-result-area').style.display='none'">收起</button>
+        </div>
+        <div id="rak-mutations-wrap" style="display:none">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>JAN</th><th>商品名</th><th>数量</th></tr></thead>
+              <tbody id="rak-mutations"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="rak-issues" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <!-- Count Import -->
+    <div class="section" id="section-count-import">
+      <div class="section-title">盘点导入</div>
+      <div class="section-sub">上传秦丝 HTML 或 Excel 盘点单，进行月末对账</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>盘点日期</label>
+            <input type="date" id="ci-date">
+          </div>
+          <div class="form-row">
+            <label>仓库</label>
+            <select id="ci-warehouse"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>客户 (留空=无客户)</label>
+          <select id="ci-customer">
+            <option value="">— 无客户 —</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>盘点文件 (.html 或 .xlsx)</label>
+          <input type="file" id="ci-file" accept=".html,.htm,.xlsx,.xls" style="padding:6px 0;border:none;background:none" onchange="onCountFileChange()">
+        </div>
+        <div id="ci-session-row" style="display:none" class="form-row">
+          <label>盘点批次（文件包含多条记录）</label>
+          <select id="ci-session-index"></select>
+        </div>
+        <button class="btn btn-primary" onclick="uploadCountFile()">解析预览</button>
+      </div>
+      <div id="ci-draft-area" style="display:none">
+        <hr class="divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div>
+            <strong>草稿 #<span id="ci-draft-id"></span></strong>
+            <span class="badge badge-neutral" style="margin-left:8px">parsed</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="exportCountDraft()">导出 Excel</button>
+            <button class="btn btn-primary btn-sm" id="ci-apply-btn" onclick="applyCountDraft()">确认应用</button>
+          </div>
+        </div>
+        <div style="margin-bottom:8px;display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="filterCount('all')">全部</button>
+          <button class="btn btn-ghost btn-sm" onclick="filterCount('diff')">有差异</button>
+          <button class="btn btn-ghost btn-sm" onclick="filterCount('new')">新增SKU</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>JAN</th><th>商品名</th><th>盘点量</th><th>盘后变动</th><th>目标库存</th><th>当前库存</th><th>ADJUST</th></tr></thead>
+            <tbody id="ci-lines"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Qinsi Scraper -->
+    <div class="section" id="section-qinsi">
+      <div class="section-title">秦丝生意通同步</div>
+      <div class="section-sub">从秦丝生意通爬取出入库记录，勾选后导入 WMS</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>开始日期</label>
+            <input type="date" id="qs-from">
+          </div>
+          <div class="form-row">
+            <label>结束日期</label>
+            <input type="date" id="qs-to">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>导入仓库</label>
+            <select id="qs-warehouse"></select>
+          </div>
+          <div class="form-row">
+            <label>客户 (可选)</label>
+            <select id="qs-customer">
+              <option value="">— 无客户 —</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-primary" id="qs-scrape-btn" onclick="triggerQinsiScrape()">爬取记录</button>
+          <span id="qs-scrape-status" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+      </div>
+
+      <div id="qs-result-area" style="display:none">
+        <hr class="divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div>
+            共 <strong id="qs-total"></strong> 条记录
+            <span style="font-size:12px;color:var(--muted);margin-left:8px" id="qs-date-range"></span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="qsToggleAll(true)">全选</button>
+            <button class="btn btn-ghost btn-sm" onclick="qsToggleAll(false)">取消</button>
+            <button class="btn btn-primary btn-sm" onclick="applyQinsiSelected()">导入勾选</button>
+          </div>
+        </div>
+        <div id="qs-error-box" style="display:none;margin-bottom:12px"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:32px"><input type="checkbox" id="qs-check-all" onchange="qsToggleAll(this.checked)"></th>
+                <th>日期</th><th>方向</th><th>JAN</th><th>商品名</th><th>数量</th><th>仓库</th><th>客户</th><th>备注</th>
+              </tr>
+            </thead>
+            <tbody id="qs-rows"></tbody>
+          </table>
+        </div>
+        <div id="qs-apply-result" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- Products -->
+    <div class="section" id="section-products">
+      <div class="section-title">商品管理</div>
+      <div class="section-sub">上传商品字典 Excel 更新商品名和箱规</div>
+      <div class="card">
+        <div class="card-title">上传商品字典</div>
+        <div class="form-row">
+          <label>Excel 文件 (含 JAN、商品名、中文、箱入れ数)</label>
+          <input type="file" id="prod-file" accept=".xlsx,.xls" style="padding:6px 0;border:none;background:none">
+        </div>
+        <button class="btn btn-primary" onclick="uploadProductCatalog()">导入更新</button>
+        <div id="prod-result" style="margin-top:12px"></div>
+      </div>
+      <hr class="divider">
+      <div class="card">
+        <div class="card-title">商品搜索</div>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="prod-search-kw" placeholder="JAN 或商品名…" style="flex:1" onkeydown="if(event.key==='Enter')searchProducts()">
+          <button class="btn btn-ghost" onclick="searchProducts()">搜索</button>
+        </div>
+        <div id="prod-search-result" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="section" id="section-settings">
+      <div class="section-title">设置</div>
+      <div class="section-sub">系统配置与用户管理</div>
+      <div class="card">
+        <div class="card-title">添加用户</div>
+        <div class="form-row">
+          <label>用户名</label>
+          <input type="text" id="new-username" placeholder="alice">
+        </div>
+        <div class="form-row">
+          <label>密码 (最少6位)</label>
+          <input type="password" id="new-password" placeholder="••••••••">
+        </div>
+        <button class="btn btn-primary" onclick="addUser()">添加用户</button>
+        <div id="user-result" style="margin-top:12px"></div>
+      </div>
+      <hr class="divider">
+      <div class="card">
+        <div class="card-title">仓库管理</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <input type="text" id="new-warehouse" placeholder="仓库名称" style="flex:1">
+          <button class="btn btn-ghost" onclick="addWarehouse()">新增仓库</button>
+        </div>
+        <div id="warehouse-list"></div>
+      </div>
+      <hr class="divider">
+      <div class="card">
+        <div class="card-title">客户管理</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <input type="text" id="new-customer" placeholder="客户名称" style="flex:1">
+          <button class="btn btn-ghost" onclick="addCustomer()">新增客户</button>
+        </div>
+        <div id="customer-list"></div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app-shell -->
+
+<div id="toast-container"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let _token = localStorage.getItem('wms_token') || '';
+let _username = localStorage.getItem('wms_username') || '';
+let _warehouses = [], _customers = [];
+let _searchTimers = {}, _searchCache = {};
+let _currentDraft = { type: null, id: null };
+let _countLines = [];
+
+// ── Init ───────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', async () => {
+  if (_token) {
+    try { await api('GET', '/auth/me'); showApp(); }
+    catch { showLogin(); }
+  } else {
+    showLogin();
+  }
+  document.getElementById('login-password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+});
+
+function showLogin() {
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app-shell').style.display = 'none';
+}
+function showApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-shell').style.display = 'flex';
+  document.getElementById('sidebar-username').textContent = _username;
+  loadGlobals();
+  loadDashboard();
+}
+
+// ── API helper ─────────────────────────────────────────────────────────────
+async function api(method, path, body, isFormData) {
+  const opts = {
+    method,
+    headers: { Authorization: `Bearer ${_token}` },
+  };
+  if (body && !isFormData) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  } else if (body && isFormData) {
+    opts.body = body; // FormData
+  }
+  const res = await fetch(`/api/v1${path}`, opts);
+  if (res.status === 401) { doLogout(); throw new Error('Auth expired'); }
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const j = await res.json();
+      msg = j.detail || (typeof j === 'string' ? j : JSON.stringify(j));
+      if (typeof msg === 'object') msg = msg.message || JSON.stringify(msg);
+    } catch {}
+    throw new Error(msg);
+  }
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('json')) return res.json();
+  if (ct.includes('spreadsheetml') || ct.includes('octet')) return res.blob();
+  return res.text();
+}
+
+// ── Auth ───────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const u = document.getElementById('login-username').value.trim();
+  const p = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  if (!u || !p) { errEl.textContent = '请填写用户名和密码'; errEl.style.display = 'block'; return; }
+  try {
+    const data = await fetch('/api/v1/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p }),
+    });
+    if (!data.ok) { errEl.textContent = '用户名或密码错误'; errEl.style.display = 'block'; return; }
+    const json = await data.json();
+    _token = json.access_token;
+    _username = json.username;
+    localStorage.setItem('wms_token', _token);
+    localStorage.setItem('wms_username', _username);
+    showApp();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+  }
+}
+function doLogout() {
+  _token = ''; _username = '';
+  localStorage.removeItem('wms_token');
+  localStorage.removeItem('wms_username');
+  showLogin();
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function nav(btn) {
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const sectionId = 'section-' + btn.dataset.section;
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.getElementById(sectionId).classList.add('active');
+  if (btn.dataset.section === 'dashboard') loadDashboard();
+  if (btn.dataset.section === 'settings') loadSettingsLists();
+}
+
+// ── Globals (warehouses & customers) ──────────────────────────────────────
+async function loadGlobals() {
+  try {
+    [_warehouses, _customers] = await Promise.all([
+      api('GET', '/warehouses'),
+      api('GET', '/customers'),
+    ]);
+    populateSelects();
+  } catch (e) { toast('加载仓库/客户失败: ' + e.message, 'err'); }
+}
+
+function populateSelects() {
+  const wSelects = ['si-warehouse','so-warehouse','sa-warehouse','cr-warehouse','rak-warehouse','ci-warehouse'];
+  const cSelects = ['si-customer','so-customer','sa-customer','cr-customer','rak-customer'];
+
+  wSelects.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = _warehouses.map(w => `<option value="${w.id}" data-name="${w.name}">${w.name}</option>`).join('');
+  });
+  cSelects.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const noCustomerIds = ['si-customer','so-customer','sa-customer'];
+    const prefix = noCustomerIds.includes(id) ? '<option value="">— 无客户 —</option>' : '';
+    el.innerHTML = prefix + _customers.map(c => `<option value="${c.id}" data-name="${c.name}">${c.name}</option>`).join('');
+  });
+  // ci-customer has "no customer" option
+  const ciC = document.getElementById('ci-customer');
+  if (ciC) {
+    ciC.innerHTML = '<option value="">— 无客户 —</option>' +
+      _customers.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  }
+  // set defaults for rakuten
+  setSelect('rak-warehouse', '乐天仓库');
+  setSelect('rak-customer', '乐天');
+  setSelect('cr-warehouse', '普通仓库');
+  setSelect('cr-customer', '店铺');
+}
+function setSelect(id, name) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  Array.from(el.options).forEach(o => { if (o.text === name) el.value = o.value; });
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const el = document.getElementById('dashboard-content');
+  el.innerHTML = '<p class="loading">加载中…</p>';
+  try {
+    const rows = await api('GET', '/status');
+    if (!rows.length) { el.innerHTML = '<p class="loading">暂无仓库数据</p>'; return; }
+    el.innerHTML = rows.map(r => {
+      const gapText = r.data_gap_days === null ? '无记录'
+        : r.data_gap_days === 0 ? '今天' : `${r.data_gap_days} 天前`;
+      const gapClass = r.data_gap_days === null ? 'warn'
+        : r.data_gap_days === 0 ? 'ok' : r.data_gap_days > 3 ? 'warn' : '';
+      const negClass = r.negative_stock_count > 0 ? 'warn' : 'ok';
+      return `<div class="card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <strong style="font-size:15px">${r.warehouse_name}</strong>
+          ${r.allow_negative_stock ? '<span class="badge badge-warn">负库存模式</span>' : ''}
+        </div>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-label">最后入库</div>
+            <div style="font-size:13px;font-weight:600">${r.last_stock_in_at ? fmtDate(r.last_stock_in_at) : '—'}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">最后出库</div>
+            <div style="font-size:13px;font-weight:600">${r.last_stock_out_at ? fmtDate(r.last_stock_out_at) : '—'}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">数据延迟</div>
+            <div class="stat-value ${gapClass}">${gapText}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">负库存 SKU</div>
+            <div class="stat-value ${negClass}">${r.negative_stock_count}</div>
+          </div>
+        </div>
+        ${r.last_csv_apply_at ? `<div style="font-size:12px;color:var(--muted)">最后 CSV 导入: ${fmtDate(r.last_csv_apply_at)}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch (e) { el.innerHTML = `<p style="color:var(--danger)">${e.message}</p>`; }
+}
+
+// ── Product search widget ──────────────────────────────────────────────────
+let _debounceTimers = {};
+function debounceSearch(prefix) {
+  clearTimeout(_debounceTimers[prefix]);
+  _debounceTimers[prefix] = setTimeout(() => runProductSearch(prefix), 280);
+}
+async function runProductSearch(prefix) {
+  const kw = document.getElementById(`${prefix}-search`).value.trim();
+  const resultsEl = document.getElementById(`${prefix}-results`);
+  if (!kw) { resultsEl.style.display = 'none'; return; }
+  try {
+    const items = await api('GET', `/inventory/search?keyword=${encodeURIComponent(kw)}`);
+    if (!items.length) { resultsEl.innerHTML = '<div class="search-result-item" style="color:var(--muted)">无结果</div>'; resultsEl.style.display = 'block'; return; }
+    resultsEl.innerHTML = items.map(p => `
+      <div class="search-result-item" onclick="selectProduct('${prefix}','${p.jan_code}','${esc(p.name_jp)}','${esc(p.name_zh||'')}')">
+        <div class="sri-jan">${p.jan_code}</div>
+        <div class="sri-name">${p.name_jp}${p.name_zh ? ' / ' + p.name_zh : ''}</div>
+      </div>`).join('');
+    resultsEl.style.display = 'block';
+  } catch {}
+}
+function selectProduct(prefix, jan, nameJp, nameZh) {
+  document.getElementById(`${prefix}-jan`).value = jan;
+  document.getElementById(`${prefix}-jan-display`).textContent = jan;
+  document.getElementById(`${prefix}-name-display`).textContent = nameJp + (nameZh ? ' / ' + nameZh : '');
+  document.getElementById(`${prefix}-selected`).classList.add('show');
+  document.getElementById(`${prefix}-results`).style.display = 'none';
+  document.getElementById(`${prefix}-search`).value = nameJp;
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-widget')) {
+    document.querySelectorAll('.search-results').forEach(r => r.style.display = 'none');
+  }
+});
+
+// ── Stock In ───────────────────────────────────────────────────────────────
+async function submitStockIn() {
+  const jan = document.getElementById('si-jan').value;
+  const wId = +document.getElementById('si-warehouse').value;
+  const cRaw = document.getElementById('si-customer').value;
+  const qty = +document.getElementById('si-qty').value;
+  const loc = document.getElementById('si-location').value.trim() || 'A-00-00';
+  const note = document.getElementById('si-note').value;
+  if (!jan) { toast('请先选择商品', 'err'); return; }
+  if (!qty || qty < 1) { toast('数量必须大于 0', 'err'); return; }
+  try {
+    const res = await api('POST', '/inventory/stock-in', {
+      sku: jan, warehouse_id: wId, customer_id: cRaw ? +cRaw : null,
+      quantity: qty, source: 'web_ui', note: note || null, location_code: loc,
+    });
+    document.getElementById('si-result').innerHTML = resultCard('ok', `入库成功 ✓  ${jan} +${qty}，当前库存: ${res.record.quantity}`);
+    toast('入库成功', 'ok');
+    resetForm('si');
+  } catch (e) { document.getElementById('si-result').innerHTML = resultCard('err', e.message); }
+}
+
+// ── Stock Out ──────────────────────────────────────────────────────────────
+async function submitStockOut() {
+  const jan = document.getElementById('so-jan').value;
+  const wId = +document.getElementById('so-warehouse').value;
+  const cRaw = document.getElementById('so-customer').value;
+  const qty = +document.getElementById('so-qty').value;
+  const note = document.getElementById('so-note').value;
+  if (!jan) { toast('请先选择商品', 'err'); return; }
+  if (!qty || qty < 1) { toast('数量必须大于 0', 'err'); return; }
+  try {
+    const res = await api('POST', '/inventory/stock-out', {
+      sku: jan, warehouse_id: wId, customer_id: cRaw ? +cRaw : null,
+      quantity: qty, source: 'web_ui', note: note || null,
+    });
+    document.getElementById('so-result').innerHTML = resultCard('ok', `出库成功 ✓  ${jan} -${qty}，当前库存: ${res.record.quantity}`);
+    toast('出库成功', 'ok');
+    resetForm('so');
+  } catch (e) { document.getElementById('so-result').innerHTML = resultCard('err', e.message); }
+}
+
+// ── Stock Adjust ───────────────────────────────────────────────────────────
+async function submitAdjust() {
+  const jan = document.getElementById('sa-jan').value;
+  const wId = +document.getElementById('sa-warehouse').value;
+  const cRaw = document.getElementById('sa-customer').value;
+  const qty = +document.getElementById('sa-qty').value;
+  if (!jan) { toast('请先选择商品', 'err'); return; }
+  try {
+    const res = await api('POST', '/inventory/stock-adjust', {
+      sku: jan, warehouse_id: wId, customer_id: cRaw ? +cRaw : null,
+      actual_quantity: qty, source: 'web_ui',
+    });
+    document.getElementById('sa-result').innerHTML = resultCard('ok', `调整成功 ✓  ${jan}，之前: ${res.previous_quantity}，调整后: ${res.actual_quantity}（delta: ${res.quantity_delta >= 0 ? '+' : ''}${res.quantity_delta}）`);
+    toast('调整成功', 'ok');
+    resetForm('sa');
+  } catch (e) { document.getElementById('sa-result').innerHTML = resultCard('err', e.message); }
+}
+
+// ── Search ─────────────────────────────────────────────────────────────────
+async function doSearch() {
+  const kw = document.getElementById('search-kw').value.trim();
+  if (!kw) return;
+  const el = document.getElementById('search-result');
+  el.innerHTML = '<p class="loading">搜索中…</p>';
+  try {
+    const items = await api('GET', `/inventory/search?keyword=${encodeURIComponent(kw)}`);
+    if (!items.length) { el.innerHTML = '<p class="loading">无结果</p>'; return; }
+    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品名</th><th>仓库</th><th>客户</th><th>库位</th><th>数量</th></tr></thead><tbody>' + items.map(p => {
+      const records = p.inventory_records || [];
+      return records.length
+        ? records.map(r => `<tr>
+            <td><code style="font-size:11px">${p.jan_code}</code></td>
+            <td>${p.name_jp}<br><small style="color:var(--muted)">${p.name_zh||''}</small></td>
+            <td>${r.warehouse?.name||'—'}</td>
+            <td>${r.customer?.name||'—'}</td>
+            <td>${r.location_code}</td>
+            <td><strong style="color:${r.quantity < 0 ? 'var(--danger)' : 'inherit'}">${r.quantity}</strong></td>
+          </tr>`).join('')
+        : `<tr><td colspan="6" style="color:var(--muted)"><code style="font-size:11px">${p.jan_code}</code> ${p.name_jp} — 无库存记录</td></tr>`;
+    }).join('') + '</tbody></table></div>';
+  } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+
+// ── Chat Report ────────────────────────────────────────────────────────────
+async function parseChatReport() {
+  const wOpt = document.getElementById('cr-warehouse').selectedOptions[0];
+  const cOpt = document.getElementById('cr-customer').selectedOptions[0];
+  const text = document.getElementById('cr-text').value.trim();
+  if (!text) { toast('请粘贴聊天记录', 'err'); return; }
+  toast('AI 解析中…', 'info');
+  try {
+    const draft = await api('POST', '/inventory/chat-reports/parse', {
+      text,
+      default_warehouse_name: wOpt?.text || '',
+      default_customer_name: cOpt?.text || '',
+      source: 'web_ui',
+    });
+    _currentDraft = { type: 'chat', id: draft.id };
+    renderChatDraft(draft);
+    document.getElementById('cr-draft-area').style.display = 'block';
+    toast('解析完成', 'ok');
+  } catch (e) { toast('解析失败: ' + e.message, 'err'); }
+}
+function renderChatDraft(draft) {
+  document.getElementById('cr-draft-id').textContent = draft.id;
+  document.getElementById('cr-draft-status').textContent = draft.status;
+  const doc = draft.document;
+  const tbody = document.getElementById('cr-lines');
+  const lines = doc.lines || [];
+  tbody.innerHTML = lines.map((l, i) => `<tr>
+    <td><span class="badge ${l.direction === 'IN' || doc.direction === 'IN' ? 'badge-ok' : 'badge-danger'}">${l.direction || doc.direction}</span></td>
+    <td><code style="font-size:11px">${l.jan_hint}</code></td>
+    <td>${l.quantity}</td>
+    <td>${l.product_name_hint || '—'}</td>
+    <td><span class="badge badge-neutral">待确认</span></td>
+  </tr>`).join('') || '<tr><td colspan="5" style="color:var(--muted)">无行数据</td></tr>';
+  const issuesEl = document.getElementById('cr-issues');
+  issuesEl.innerHTML = '';
+}
+async function applyChatReport() {
+  if (!_currentDraft.id) return;
+  const btn = document.getElementById('cr-apply-btn');
+  btn.disabled = true;
+  try {
+    const res = await api('POST', `/inventory/chat-reports/${_currentDraft.id}/apply`);
+    if (res.applied) {
+      toast(`导入成功，共 ${res.mutations?.length || 0} 条`, 'ok');
+      document.getElementById('cr-draft-status').textContent = 'applied';
+      document.getElementById('cr-draft-status').className = 'badge badge-ok';
+      btn.disabled = true; btn.textContent = '已应用';
+    } else {
+      const issues = res.issues || [];
+      document.getElementById('cr-issues').innerHTML = issues.map(i =>
+        `<div style="color:var(--danger);font-size:13px;margin-top:4px">⚠ ${i.message || JSON.stringify(i)}</div>`
+      ).join('');
+      toast('导入失败，请查看问题', 'err');
+      btn.disabled = false;
+    }
+  } catch (e) { toast('导入失败: ' + e.message, 'err'); btn.disabled = false; }
+}
+function resetChatReport() {
+  document.getElementById('cr-draft-area').style.display = 'none';
+  _currentDraft = { type: null, id: null };
+  document.getElementById('cr-apply-btn').disabled = false;
+  document.getElementById('cr-apply-btn').textContent = '确认导入';
+}
+
+// ── Rakuten CSV ────────────────────────────────────────────────────────────
+async function uploadRakutenCSV() {
+  const file = document.getElementById('rak-file').files[0];
+  if (!file) { toast('请选择 CSV 文件', 'err'); return; }
+  const wOpt = document.getElementById('rak-warehouse').selectedOptions[0];
+  const cOpt = document.getElementById('rak-customer').selectedOptions[0];
+  const fd = new FormData();
+  fd.append('file', file);
+  toast('上传中…', 'info');
+  try {
+    const url = `/api/v1/inventory/imports/rakuten-shipment?warehouse_name=${encodeURIComponent(wOpt.text)}&customer_name=${encodeURIComponent(cOpt.text)}`;
+    const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${_token}` }, body: fd });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    renderRakutenResult(data);
+    document.getElementById('rak-result-area').style.display = 'block';
+    if (data.applied) toast(`导入成功：${data.mutations?.length || 0} 条出库`, 'ok');
+    else toast(`导入遇到问题，共 ${data.issues?.length || 0} 个错误`, 'err');
+  } catch (e) { toast('上传失败: ' + e.message, 'err'); }
+}
+function renderRakutenResult(data) {
+  const mutations = data.mutations || [];
+  const issues = data.issues || [];
+  const titleEl = document.getElementById('rak-result-title');
+  if (data.applied) {
+    titleEl.innerHTML = `<span style="color:var(--success)">✓ 出库成功 ${mutations.length} 条</span>`;
+  } else {
+    titleEl.innerHTML = `<span style="color:var(--danger)">✗ 导入失败 — ${issues.length} 个问题</span>`;
+  }
+  const mutWrap = document.getElementById('rak-mutations-wrap');
+  if (mutations.length) {
+    mutWrap.style.display = 'block';
+    document.getElementById('rak-mutations').innerHTML = mutations.map(m => `<tr>
+      <td><code style="font-size:11px">${m.jan_code}</code></td>
+      <td>—</td>
+      <td>${m.quantity}</td>
+    </tr>`).join('');
+  } else { mutWrap.style.display = 'none'; }
+  document.getElementById('rak-issues').innerHTML = issues.map(i =>
+    `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">⚠ <code style="font-size:11px">${i.jan_code}</code> ${i.message}</div>`
+  ).join('');
+}
+
+// ── Count Import ───────────────────────────────────────────────────────────
+async function onCountFileChange() {
+  const file = document.getElementById('ci-file').files[0];
+  const sessionRow = document.getElementById('ci-session-row');
+  const sessionSel = document.getElementById('ci-session-index');
+  sessionRow.style.display = 'none';
+  sessionSel.innerHTML = '';
+  if (!file || !(file.name.endsWith('.html') || file.name.endsWith('.htm'))) return;
+  // Pre-scan HTML for multiple sessions
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/v1/inventory-count/list-sessions', {
+      method: 'POST', headers: { Authorization: `Bearer ${_token}` }, body: fd,
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.session_count <= 1) return;
+    sessionSel.innerHTML = data.sessions.map(s =>
+      `<option value="${s.session_index}">
+        #${s.session_index + 1}  ${s.date_hint || ''}  ${s.title_hint || ''}  (${s.item_count} 行)
+      </option>`
+    ).join('');
+    sessionRow.style.display = 'block';
+    toast(`文件包含 ${data.session_count} 个盘点批次，请选择`, 'info');
+  } catch {}
+}
+
+async function uploadCountFile() {
+  const file = document.getElementById('ci-file').files[0];
+  const dateVal = document.getElementById('ci-date').value;
+  const wOpt = document.getElementById('ci-warehouse').selectedOptions[0];
+  const cVal = document.getElementById('ci-customer').value;
+  const cOpt = cVal ? document.getElementById('ci-customer').selectedOptions[0] : null;
+  if (!file) { toast('请选择文件', 'err'); return; }
+  if (!dateVal) { toast('请选择盘点日期', 'err'); return; }
+  if (!wOpt) { toast('请选择仓库', 'err'); return; }
+  const sessionIdx = document.getElementById('ci-session-index').value || '0';
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('count_date', dateVal);
+  fd.append('warehouse_name', wOpt.text);
+  fd.append('session_index', sessionIdx);
+  if (cOpt) fd.append('customer_name', cOpt.text);
+  toast('解析中…', 'info');
+  try {
+    const draft = await api('POST', '/inventory-count/upload', fd, true);
+    _currentDraft = { type: 'count', id: draft.id };
+    _countLines = draft.document?.lines || [];
+    renderCountDraft(draft);
+    document.getElementById('ci-draft-area').style.display = 'block';
+    toast('解析完成', 'ok');
+  } catch (e) { toast('解析失败: ' + e.message, 'err'); }
+}
+function renderCountDraft(draft) {
+  document.getElementById('ci-draft-id').textContent = draft.id;
+  renderCountLines(_countLines);
+}
+function renderCountLines(lines) {
+  const tbody = document.getElementById('ci-lines');
+  tbody.innerHTML = lines.map(l => `<tr>
+    <td><code style="font-size:11px">${l.jan_code}</code></td>
+    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.product_name)}">${l.product_name}</td>
+    <td>${l.count_quantity}</td>
+    <td style="color:${l.delta_after_count>0?'var(--success)':l.delta_after_count<0?'var(--danger)':'var(--muted)'}">${l.delta_after_count >= 0 ? '+' : ''}${l.delta_after_count}</td>
+    <td>${l.target_quantity}</td>
+    <td>${l.current_quantity}</td>
+    <td style="font-weight:700;color:${l.adjust_delta>0?'var(--success)':l.adjust_delta<0?'var(--danger)':'var(--muted)'}">${l.adjust_delta >= 0 ? '+' : ''}${l.adjust_delta}</td>
+  </tr>`).join('') || '<tr><td colspan="7" style="color:var(--muted)">无数据</td></tr>';
+}
+function filterCount(mode) {
+  let filtered = _countLines;
+  if (mode === 'diff') filtered = _countLines.filter(l => l.adjust_delta !== 0);
+  if (mode === 'new') filtered = _countLines.filter(l => !l.has_wms_record);
+  renderCountLines(filtered);
+}
+async function exportCountDraft() {
+  if (!_currentDraft.id) return;
+  try {
+    const blob = await api('GET', `/inventory-count/${_currentDraft.id}/export`);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = `盘点对账_${_currentDraft.id}.xlsx`; a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) { toast('导出失败: ' + e.message, 'err'); }
+}
+async function applyCountDraft() {
+  if (!_currentDraft.id) return;
+  const btn = document.getElementById('ci-apply-btn');
+  btn.disabled = true;
+  try {
+    const res = await api('POST', `/inventory-count/${_currentDraft.id}/apply`);
+    if (res.applied) {
+      toast(`盘点应用成功：调整 ${res.adjusted_count}，新增 ${res.created_count}，无变化 ${res.no_change_count}`, 'ok');
+      btn.textContent = '已应用';
+    } else {
+      toast('应用失败: ' + (res.issues || []).join('; '), 'err');
+      btn.disabled = false;
+    }
+  } catch (e) { toast('应用失败: ' + e.message, 'err'); btn.disabled = false; }
+}
+
+// ── Products ───────────────────────────────────────────────────────────────
+async function uploadProductCatalog() {
+  const file = document.getElementById('prod-file').files[0];
+  if (!file) { toast('请选择 Excel 文件', 'err'); return; }
+  const fd = new FormData();
+  fd.append('file', file);
+  toast('导入中…', 'info');
+  try {
+    const res = await api('POST', '/inventory/imports/product-catalog', fd, true);
+    document.getElementById('prod-result').innerHTML = resultCard('ok',
+      `导入完成 ✓  新增: ${res.created}  更新: ${res.updated}  跳过: ${res.skipped}  共: ${res.total}`);
+    toast('商品字典导入成功', 'ok');
+  } catch (e) { document.getElementById('prod-result').innerHTML = resultCard('err', e.message); }
+}
+async function searchProducts() {
+  const kw = document.getElementById('prod-search-kw').value.trim();
+  if (!kw) return;
+  try {
+    const items = await api('GET', `/inventory/search_sku?keyword=${encodeURIComponent(kw)}`);
+    const el = document.getElementById('prod-search-result');
+    if (!items.length) { el.innerHTML = '<p class="loading">无结果</p>'; return; }
+    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>日文名</th><th>中文名</th><th>箱入数</th></tr></thead><tbody>' +
+      items.map(p => `<tr>
+        <td><code style="font-size:11px">${p.jan_code}</code></td>
+        <td>${p.name_jp}</td>
+        <td>${p.name_zh||'—'}</td>
+        <td>${p.units_per_case||'—'}</td>
+      </tr>`).join('') + '</tbody></table></div>';
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ── Settings ───────────────────────────────────────────────────────────────
+async function addUser() {
+  const username = document.getElementById('new-username').value.trim();
+  const password = document.getElementById('new-password').value;
+  if (!username || !password) { toast('请填写用户名和密码', 'err'); return; }
+  try {
+    const user = await api('POST', '/auth/users', { username, password });
+    document.getElementById('user-result').innerHTML = resultCard('ok', `用户 "${user.username}" 已创建 (ID: ${user.id})`);
+    document.getElementById('new-username').value = '';
+    document.getElementById('new-password').value = '';
+    toast('用户已添加', 'ok');
+  } catch (e) { document.getElementById('user-result').innerHTML = resultCard('err', e.message); }
+}
+async function addWarehouse() {
+  const name = document.getElementById('new-warehouse').value.trim();
+  if (!name) return;
+  try {
+    await api('POST', '/warehouses', { name });
+    document.getElementById('new-warehouse').value = '';
+    toast('仓库已添加', 'ok');
+    await loadGlobals();
+    loadSettingsLists();
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function addCustomer() {
+  const name = document.getElementById('new-customer').value.trim();
+  if (!name) return;
+  try {
+    await api('POST', '/customers', { name });
+    document.getElementById('new-customer').value = '';
+    toast('客户已添加', 'ok');
+    await loadGlobals();
+    loadSettingsLists();
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function loadSettingsLists() {
+  const wEl = document.getElementById('warehouse-list');
+  const cEl = document.getElementById('customer-list');
+  wEl.innerHTML = '<div class="table-wrap"><table><thead><tr><th>仓库</th><th>负库存</th></tr></thead><tbody>' +
+    _warehouses.map(w => `<tr><td>${w.name}</td><td>${w.allow_negative_stock ? '<span class="badge badge-warn">开启</span>' : '<span class="badge badge-neutral">关闭</span>'}</td></tr>`).join('') +
+    '</tbody></table></div>';
+  cEl.innerHTML = '<div class="table-wrap"><table><thead><tr><th>客户</th></tr></thead><tbody>' +
+    _customers.map(c => `<tr><td>${c.name}</td></tr>`).join('') +
+    '</tbody></table></div>';
+}
+
+// ── Utils ──────────────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+function resultCard(type, msg) {
+  const cls = type === 'ok' ? 'success-bg' : 'danger-bg';
+  const color = type === 'ok' ? 'var(--success)' : 'var(--danger)';
+  return `<div style="padding:12px;border-radius:6px;background:var(--${type==='ok'?'success':'danger'}-bg);color:${color};font-size:13px;margin-top:8px">${msg}</div>`;
+}
+function resetForm(prefix) {
+  document.getElementById(`${prefix}-jan`).value = '';
+  document.getElementById(`${prefix}-search`).value = '';
+  document.getElementById(`${prefix}-selected`).classList.remove('show');
+}
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function p(n) { return String(n).padStart(2,'0'); }
+function esc(s) { return String(s||'').replace(/'/g,"&#39;").replace(/"/g,'&quot;'); }
+
+// ── 秦丝生意通 爬虫 ─────────────────────────────────────────────────────────
+let _qsRecords = [];
+
+// Populate qs-warehouse / qs-customer when globals loaded
+const _origPopulateSelects = populateSelects;
+populateSelects = function() {
+  _origPopulateSelects();
+  const wEl = document.getElementById('qs-warehouse');
+  const cEl = document.getElementById('qs-customer');
+  if (wEl) wEl.innerHTML = _warehouses.map(w => `<option value="${w.id}">${w.name}</option>`).join('');
+  if (cEl) cEl.innerHTML = '<option value="">— 无客户 —</option>' +
+    _customers.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+};
+
+async function triggerQinsiScrape() {
+  const fromDate = document.getElementById('qs-from').value;
+  const toDate = document.getElementById('qs-to').value;
+  if (!fromDate || !toDate) { toast('请选择日期范围', 'err'); return; }
+  const btn = document.getElementById('qs-scrape-btn');
+  const status = document.getElementById('qs-scrape-status');
+  btn.disabled = true;
+  status.textContent = '登录并爬取中，请稍候…（约30-60秒）';
+  document.getElementById('qs-result-area').style.display = 'none';
+  try {
+    const res = await api('POST', '/qinsi/scrape', { from_date: fromDate, to_date: toDate });
+    if (!res.success) {
+      toast('爬取失败: ' + res.error, 'err');
+      status.textContent = '失败: ' + res.error;
+      if (res.debug_screenshots?.length) {
+        status.textContent += `（截图已保存: ${res.debug_screenshots.join(', ')}）`;
+      }
+      return;
+    }
+    _qsRecords = res.records || [];
+    renderQinsiRecords(_qsRecords, fromDate, toDate);
+    document.getElementById('qs-result-area').style.display = 'block';
+    status.textContent = `爬取完成 ${_qsRecords.length} 条`;
+    toast(`爬取完成：${_qsRecords.length} 条记录`, 'ok');
+  } catch (e) {
+    toast('请求失败: ' + e.message, 'err');
+    status.textContent = '失败';
+  } finally { btn.disabled = false; }
+}
+
+function renderQinsiRecords(records, fromDate, toDate) {
+  document.getElementById('qs-total').textContent = records.length;
+  document.getElementById('qs-date-range').textContent = `${fromDate} ~ ${toDate}`;
+  document.getElementById('qs-error-box').style.display = 'none';
+  const tbody = document.getElementById('qs-rows');
+  tbody.innerHTML = records.map((r, i) => `<tr>
+    <td><input type="checkbox" class="qs-check" data-idx="${i}" checked></td>
+    <td>${r.record_date}</td>
+    <td><span class="badge ${r.direction==='IN'?'badge-ok':'badge-danger'}">${r.direction==='IN'?'入库':'出库'}</span></td>
+    <td><code style="font-size:11px">${r.jan_code || '<span style="color:var(--danger)">'+esc(r.raw_jan)+'</span>'}</code></td>
+    <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.product_name)}">${r.product_name}</td>
+    <td>${r.quantity}</td>
+    <td>${r.warehouse_name}</td>
+    <td>${r.customer_name||'—'}</td>
+    <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.note||'')}">
+      ${r.note||'—'}
+    </td>
+  </tr>`).join('') || '<tr><td colspan="9" style="color:var(--muted)">无记录</td></tr>';
+}
+
+function qsToggleAll(checked) {
+  document.querySelectorAll('.qs-check').forEach(el => el.checked = checked);
+  const allBox = document.getElementById('qs-check-all');
+  if (allBox) allBox.checked = checked;
+}
+
+async function applyQinsiSelected() {
+  const selected = [...document.querySelectorAll('.qs-check:checked')]
+    .map(el => _qsRecords[+el.dataset.idx])
+    .filter(Boolean);
+  if (!selected.length) { toast('请先勾选要导入的记录', 'err'); return; }
+  const wId = +document.getElementById('qs-warehouse').value;
+  const cRaw = document.getElementById('qs-customer').value;
+  if (!wId) { toast('请选择导入仓库', 'err'); return; }
+  try {
+    const res = await api('POST', '/qinsi/apply', {
+      records: selected,
+      warehouse_id: wId,
+      customer_id: cRaw ? +cRaw : null,
+    });
+    const errHtml = res.errors?.length
+      ? res.errors.map(e => `<div style="color:var(--danger);font-size:12px">⚠ ${e}</div>`).join('')
+      : '';
+    document.getElementById('qs-apply-result').innerHTML =
+      resultCard('ok', `导入成功 ${res.applied} 条，跳过 ${res.skipped} 条`) + errHtml;
+    if (res.errors?.length) {
+      document.getElementById('qs-error-box').style.display = 'block';
+      document.getElementById('qs-error-box').innerHTML = errHtml;
+    }
+    toast(`导入 ${res.applied} 条`, 'ok');
+  } catch (e) {
+    document.getElementById('qs-apply-result').innerHTML = resultCard('err', e.message);
+  }
+}
+</script>
+</body>
+</html>

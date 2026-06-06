@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_auth
 from app.db.session import get_db_session
 from app.models.product import Product
 from app.schemas.inventory import (
@@ -8,9 +9,8 @@ from app.schemas.inventory import (
     ChatReportDocument,
     ChatReportDraftRead,
     ChatReportParseRequest,
-    InventoryImportCreate,
-    InventoryImportRead,
     InventoryRecordRead,
+    ProductCatalogImportResult,
     ProductInventoryRead,
     ProductRead,
     RakutenShipmentImportResult,
@@ -22,14 +22,15 @@ from app.schemas.inventory import (
     StockOutResult,
     StockTransactionRead,
 )
+from app.services.auth import CurrentUser
 from app.services.chat_reports import apply_chat_report, create_chat_report_draft, get_chat_report_draft, mark_chat_report_draft_applied
+from app.services.product_catalog import import_product_catalog_from_bytes
 from app.services.inventory import (
     AmbiguousInventoryRecordError,
     InsufficientStockError,
     InventoryRecordNotFoundError,
     InventoryTargetNotFoundError,
     adjust_stock_item,
-    create_inventory_import_job,
     search_inventory_items,
     search_products,
     stock_in_item,
@@ -38,6 +39,8 @@ from app.services.inventory import (
 from app.services.rakuten_shipments import import_rakuten_shipment_csv
 
 router = APIRouter()
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 @router.get("/search", response_model=list[ProductInventoryRead])
@@ -61,14 +64,12 @@ async def search_product_master(
 async def parse_chat_report(
     payload: ChatReportParseRequest,
     session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
 ) -> ChatReportDraftRead:
     try:
         draft = await create_chat_report_draft(session=session, payload=payload)
     except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     return ChatReportDraftRead(
         id=draft.id,
         status=draft.status,
@@ -78,23 +79,51 @@ async def parse_chat_report(
     )
 
 
-@router.post(
-    "/imports/rakuten-shipment",
-    response_model=RakutenShipmentImportResult,
-    status_code=status.HTTP_202_ACCEPTED,
-)
+@router.post("/chat-reports/{draft_id}/apply", response_model=ChatReportApplyResult)
+async def apply_chat_report_draft(
+    draft_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> ChatReportApplyResult:
+    draft = await get_chat_report_draft(session=session, draft_id=draft_id, with_for_update=True)
+    if draft is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found.")
+    if draft.status == "applied":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Draft already applied.")
+    result = await apply_chat_report(
+        session=session,
+        document=ChatReportDocument.model_validate(draft.document),
+        user_id=current_user.id,
+    )
+    if result.applied:
+        await mark_chat_report_draft_applied(session=session, draft=draft, commit=False)
+        await session.commit()
+    return result
+
+
+@router.post("/chat-reports/apply", response_model=ChatReportApplyResult)
+async def apply_parsed_chat_report(
+    payload: ChatReportDocument,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> ChatReportApplyResult:
+    result = await apply_chat_report(session=session, document=payload, user_id=current_user.id)
+    if result.applied:
+        await session.commit()
+    return result
+
+
+@router.post("/imports/rakuten-shipment", response_model=RakutenShipmentImportResult, status_code=status.HTTP_202_ACCEPTED)
 async def upload_rakuten_shipment_csv(
     file: UploadFile = File(...),
     warehouse_name: str = "乐天仓库",
     customer_name: str = "乐天",
     session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
 ) -> RakutenShipmentImportResult:
-    if file.content_type not in {"text/csv", "application/vnd.ms-excel", "application/octet-stream"}:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only Rakuten RMS CSV files are accepted.",
-        )
-    content = await file.read()
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File exceeds 10 MB limit.")
     return await import_rakuten_shipment_csv(
         session=session,
         content=content,
@@ -103,64 +132,27 @@ async def upload_rakuten_shipment_csv(
     )
 
 
-@router.post("/chat-reports/{draft_id}/apply", response_model=ChatReportApplyResult)
-async def apply_chat_report_draft(
-    draft_id: int,
-    session: AsyncSession = Depends(get_db_session),
-) -> ChatReportApplyResult:
-    draft = await get_chat_report_draft(session=session, draft_id=draft_id)
-    if draft is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found.")
-    if draft.status == "applied":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Draft already applied.")
-    result = await apply_chat_report(session=session, document=ChatReportDocument.model_validate(draft.document))
-    if result.applied:
-        await mark_chat_report_draft_applied(session=session, draft=draft)
-    return result
-
-
-@router.post("/chat-reports/apply", response_model=ChatReportApplyResult)
-async def apply_parsed_chat_report(
-    payload: ChatReportDocument,
-    session: AsyncSession = Depends(get_db_session),
-) -> ChatReportApplyResult:
-    return await apply_chat_report(session=session, document=payload)
-
-
-@router.post("/stock-in", response_model=StockInResult, status_code=status.HTTP_200_OK)
+@router.post("/stock-in", response_model=StockInResult)
 async def stock_in(
     payload: StockInCreate,
     session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
 ) -> StockInResult:
     products = await search_inventory_items(session=session, keyword=payload.sku, limit=6)
     if not products:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "message": "Product not found. Please add the product before stock-in.",
-                "add_product_hint": f"/add_product {payload.sku} 商品名日文 商品名中文",
-            },
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message": "Product not found."})
     if len(products) > 1:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "message": "Multiple products matched. Confirm by retrying with the full JAN code.",
-                "candidates": [
-                    {"jan_code": product.jan_code, "name_jp": product.name_jp, "name_zh": product.name_zh}
-                    for product in products
-                ],
-            },
+            detail={"message": "Multiple products matched. Use the full JAN code.", "candidates": [
+                {"jan_code": p.jan_code, "name_jp": p.name_jp, "name_zh": p.name_zh} for p in products
+            ]},
         )
     payload = payload.model_copy(update={"sku": products[0].jan_code})
     try:
-        result = await stock_in_item(session=session, payload=payload)
+        result = await stock_in_item(session=session, payload=payload, user_id=current_user.id)
     except InventoryTargetNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="SKU, warehouse, or customer not found. Please resolve before stock-in.",
-        ) from exc
-
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SKU, warehouse, or customer not found.") from exc
     return StockInResult(
         record=InventoryRecordRead.model_validate(result.record),
         transaction=StockTransactionRead.model_validate(result.transaction),
@@ -169,50 +161,31 @@ async def stock_in(
     )
 
 
-@router.post("/stock-out", response_model=StockOutResult, status_code=status.HTTP_200_OK)
+@router.post("/stock-out", response_model=StockOutResult)
 async def stock_out(
     payload: StockOutCreate,
     session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
 ) -> StockOutResult:
     products = await search_inventory_items(session=session, keyword=payload.sku, limit=6)
     if not products:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "message": "Product not found. Please add the product before stock-out.",
-                "add_product_hint": f"/add_product {payload.sku} 商品名日文 商品名中文",
-            },
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message": "Product not found."})
     if len(products) > 1:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "message": "Multiple products matched. Confirm by retrying with the full JAN code.",
-                "candidates": [
-                    {"jan_code": product.jan_code, "name_jp": product.name_jp, "name_zh": product.name_zh}
-                    for product in products
-                ],
-            },
+            detail={"message": "Multiple products matched. Use the full JAN code.", "candidates": [
+                {"jan_code": p.jan_code, "name_jp": p.name_jp, "name_zh": p.name_zh} for p in products
+            ]},
         )
     payload = payload.model_copy(update={"sku": products[0].jan_code})
     try:
-        result = await stock_out_item(session=session, payload=payload)
+        result = await stock_out_item(session=session, payload=payload, user_id=current_user.id)
     except InventoryRecordNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory record not found for the given SKU and warehouse.",
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory record not found.") from exc
     except AmbiguousInventoryRecordError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Multiple inventory records matched. Add location_code, expiration_date, or customer_id.",
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Multiple records matched. Specify location or customer.") from exc
     except InsufficientStockError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Insufficient stock for this stock-out request.",
-        ) from exc
-
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient stock.") from exc
     return StockOutResult(
         record=InventoryRecordRead.model_validate(result.record),
         transaction=StockTransactionRead.model_validate(result.transaction),
@@ -221,45 +194,29 @@ async def stock_out(
     )
 
 
-@router.post("/stock-adjust", response_model=StockAdjustResult, status_code=status.HTTP_200_OK)
+@router.post("/stock-adjust", response_model=StockAdjustResult)
 async def stock_adjust(
     payload: StockAdjustCreate,
     session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
 ) -> StockAdjustResult:
     products = await search_inventory_items(session=session, keyword=payload.sku, limit=6)
     if not products:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "message": "Product not found. Please add the product before stock-adjust.",
-                "add_product_hint": f"/add_product {payload.sku} 商品名日文 商品名中文",
-            },
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message": "Product not found."})
     if len(products) > 1:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "message": "Multiple products matched. Confirm by retrying with the full JAN code.",
-                "candidates": [
-                    {"jan_code": product.jan_code, "name_jp": product.name_jp, "name_zh": product.name_zh}
-                    for product in products
-                ],
-            },
+            detail={"message": "Multiple products matched. Use the full JAN code.", "candidates": [
+                {"jan_code": p.jan_code, "name_jp": p.name_jp, "name_zh": p.name_zh} for p in products
+            ]},
         )
     payload = payload.model_copy(update={"sku": products[0].jan_code})
     try:
-        result = await adjust_stock_item(session=session, payload=payload)
+        result = await adjust_stock_item(session=session, payload=payload, user_id=current_user.id)
     except InventoryRecordNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory record not found for the given SKU and warehouse.",
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory record not found.") from exc
     except AmbiguousInventoryRecordError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Multiple inventory records matched. Add location_code, expiration_date, or customer_id.",
-        ) from exc
-
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Multiple records matched.") from exc
     return StockAdjustResult(
         record=InventoryRecordRead.model_validate(result.record),
         transaction=StockTransactionRead.model_validate(result.transaction),
@@ -270,31 +227,25 @@ async def stock_adjust(
     )
 
 
-@router.post(
-    "/imports/monthly-count",
-    response_model=InventoryImportRead,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def upload_monthly_count(
+@router.post("/imports/product-catalog", response_model=ProductCatalogImportResult)
+async def upload_product_catalog(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_db_session),
-) -> InventoryImportRead:
-    allowed_content_types = {
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-excel",
-        "text/csv",
-    }
-    if file.content_type not in allowed_content_types:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only .xlsx, .xls, and .csv inventory count files are accepted.",
-        )
-
-    content = await file.read()
-    payload = InventoryImportCreate(
-        original_filename=file.filename or "inventory-count",
-        content_type=file.content_type,
-        file_size=len(content),
+    current_user: CurrentUser = Depends(require_auth),
+) -> ProductCatalogImportResult:
+    fname = (file.filename or "").lower()
+    if not (fname.endswith(".xlsx") or fname.endswith(".xls")):
+        raise HTTPException(status_code=400, detail="仅支持 .xlsx / .xls 文件")
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="文件超过 10 MB 限制")
+    try:
+        counts = await import_product_catalog_from_bytes(session=session, content=content)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ProductCatalogImportResult(
+        created=counts["created"],
+        updated=counts["updated"],
+        skipped=counts["skipped"],
+        total=counts["created"] + counts["updated"] + counts["skipped"],
     )
-    job = await create_inventory_import_job(session=session, payload=payload)
-    return InventoryImportRead.model_validate(job)

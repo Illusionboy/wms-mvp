@@ -36,15 +36,15 @@ class InventoryRecord(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     product_jan: Mapped[str] = mapped_column(
         String(32),
-        ForeignKey("products.jan_code", ondelete="CASCADE"),
+        ForeignKey("products.jan_code", ondelete="RESTRICT"),
         nullable=False,
     )
     warehouse_id: Mapped[int] = mapped_column(
-        ForeignKey("warehouses.id", ondelete="CASCADE"),
+        ForeignKey("warehouses.id", ondelete="RESTRICT"),
         nullable=False,
     )
     customer_id: Mapped[int | None] = mapped_column(
-        ForeignKey("customers.id", ondelete="SET NULL"),
+        ForeignKey("customers.id", ondelete="RESTRICT"),
         nullable=True,
     )
     location_code: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -56,5 +56,4 @@ class InventoryRecord(TimestampMixin, Base):
     customer: Mapped[Customer | None] = relationship(back_populates="inventory_records")
     transactions: Mapped[list[StockTransaction]] = relationship(
         back_populates="inventory_record",
-        cascade="all, delete-orphan",
     )

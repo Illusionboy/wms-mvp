@@ -29,8 +29,13 @@ class StockTransaction(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     inventory_record_id: Mapped[int] = mapped_column(
-        ForeignKey("inventory_records.id", ondelete="CASCADE"),
+        ForeignKey("inventory_records.id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     transaction_type: Mapped[StockTransactionType] = mapped_column(
         Enum(

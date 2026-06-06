@@ -26,10 +26,22 @@ class InventorySearchQuery(BaseModel):
 class WarehouseRead(BaseModel):
     id: int
     name: str
+    allow_negative_stock: bool
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class WarehouseStatusRead(BaseModel):
+    warehouse_id: int
+    warehouse_name: str
+    allow_negative_stock: bool
+    last_stock_in_at: datetime | None
+    last_stock_out_at: datetime | None
+    last_csv_apply_at: datetime | None
+    data_gap_days: int | None
+    negative_stock_count: int
 
 
 class WarehouseCreate(BaseModel):
@@ -49,6 +61,13 @@ class CustomerRead(BaseModel):
 class CustomerCreate(BaseModel):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
     contact_info: str | None = Field(default=None, max_length=2000)
+
+
+class ProductCatalogImportResult(BaseModel):
+    created: int
+    updated: int
+    skipped: int
+    total: int
 
 
 class ProductRead(BaseModel):
@@ -266,6 +285,7 @@ class RakutenShipmentImportResult(BaseModel):
     total_lines: int
     mutations: list[RakutenShipmentMutation] = Field(default_factory=list)
     issues: list[RakutenShipmentIssue] = Field(default_factory=list)
+    names_synced: int = 0
 
 
 class RakutenShipmentDraftDocument(BaseModel):

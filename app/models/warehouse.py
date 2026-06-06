@@ -16,8 +16,8 @@ class Warehouse(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    allow_negative_stock: Mapped[bool] = mapped_column(default=False, server_default="false", nullable=False)
 
     inventory_records: Mapped[list[InventoryRecord]] = relationship(
         back_populates="warehouse",
-        cascade="all, delete-orphan",
     )

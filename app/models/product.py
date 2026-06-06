@@ -31,5 +31,4 @@ class Product(TimestampMixin, Base):
 
     inventory_records: Mapped[list[InventoryRecord]] = relationship(
         back_populates="product",
-        cascade="all, delete-orphan",
     )

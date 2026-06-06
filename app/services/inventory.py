@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +11,36 @@ from app.models.inventory_import_job import InventoryImportJob
 from app.models.product import Product
 from app.models.stock_transaction import StockTransaction, StockTransactionType
 from app.models.warehouse import Warehouse
-from app.schemas.inventory import InventoryImportCreate, StockAdjustCreate, StockInCreate, StockOutCreate
+from app.schemas.inventory import InventoryImportCreate, StockAdjustCreate, StockInCreate, StockOutCreate, WarehouseStatusRead
+
+
+async def resolve_warehouse(session: AsyncSession, name: str) -> Warehouse | None:
+    """Exact match first; falls back to case-insensitive substring match.
+
+    Exact-first prevents "乐天" from silently resolving to "乐天仓库" when both exist.
+    """
+    exact = await session.scalar(select(Warehouse).where(Warehouse.name == name))
+    if exact is not None:
+        return exact
+    return await session.scalar(
+        select(Warehouse)
+        .where(Warehouse.name.ilike(f"%{name}%"))
+        .order_by(Warehouse.id.asc())
+        .limit(1)
+    )
+
+
+async def resolve_customer(session: AsyncSession, name: str) -> Customer | None:
+    """Exact match first; falls back to case-insensitive substring match."""
+    exact = await session.scalar(select(Customer).where(Customer.name == name))
+    if exact is not None:
+        return exact
+    return await session.scalar(
+        select(Customer)
+        .where(Customer.name.ilike(f"%{name}%"))
+        .order_by(Customer.id.asc())
+        .limit(1)
+    )
 
 
 class InventoryServiceError(Exception):
@@ -117,7 +146,13 @@ def _product_search_statement(keyword: str, limit: int):
     return statement
 
 
-async def stock_in_item(session: AsyncSession, payload: StockInCreate) -> StockMutationResult:
+async def stock_in_item(
+    session: AsyncSession,
+    payload: StockInCreate,
+    *,
+    commit: bool = True,
+    user_id: int | None = None,
+) -> StockMutationResult:
     product = await session.scalar(select(Product).where(Product.jan_code == payload.sku))
     warehouse = await session.scalar(select(Warehouse).where(Warehouse.id == payload.warehouse_id))
     customer = None
@@ -126,13 +161,14 @@ async def stock_in_item(session: AsyncSession, payload: StockInCreate) -> StockM
     if product is None or warehouse is None or (payload.customer_id is not None and customer is None):
         raise InventoryTargetNotFoundError
 
+    # Lock the row to prevent concurrent stock-in from creating duplicate / racing update
     statement = select(InventoryRecord).where(
         InventoryRecord.product_jan == payload.sku,
         InventoryRecord.warehouse_id == payload.warehouse_id,
         InventoryRecord.customer_id == payload.customer_id,
         InventoryRecord.location_code == payload.location_code,
         InventoryRecord.expiration_date == payload.expiration_date,
-    )
+    ).with_for_update()
     record = await session.scalar(statement)
     if record is None:
         record = InventoryRecord(
@@ -158,10 +194,12 @@ async def stock_in_item(session: AsyncSession, payload: StockInCreate) -> StockM
         source=payload.source,
         reference_id=payload.reference_id,
         note=payload.note,
+        user_id=user_id,
     )
     session.add(transaction)
     await session.flush()
-    await session.commit()
+    if commit:
+        await session.commit()
     refreshed_record = await _get_inventory_record_for_response(session, record.id)
     refreshed_transaction = await session.get(StockTransaction, transaction.id)
     if refreshed_record is None or refreshed_transaction is None:
@@ -174,7 +212,14 @@ async def stock_in_item(session: AsyncSession, payload: StockInCreate) -> StockM
     )
 
 
-async def stock_out_item(session: AsyncSession, payload: StockOutCreate) -> StockMutationResult:
+async def stock_out_item(
+    session: AsyncSession,
+    payload: StockOutCreate,
+    *,
+    commit: bool = True,
+    user_id: int | None = None,
+) -> StockMutationResult:
+    # with_for_update() inside _find_single_inventory_record prevents concurrent deduction
     record = await _find_single_inventory_record(
         session=session,
         sku=payload.sku,
@@ -185,7 +230,9 @@ async def stock_out_item(session: AsyncSession, payload: StockOutCreate) -> Stoc
     )
     previous_quantity = record.quantity
     if record.quantity < payload.quantity:
-        raise InsufficientStockError
+        warehouse = await session.get(Warehouse, payload.warehouse_id)
+        if warehouse is None or not warehouse.allow_negative_stock:
+            raise InsufficientStockError
 
     record.quantity -= payload.quantity
     await session.flush()
@@ -199,10 +246,12 @@ async def stock_out_item(session: AsyncSession, payload: StockOutCreate) -> Stoc
         source=payload.source,
         reference_id=payload.reference_id,
         note=payload.note,
+        user_id=user_id,
     )
     session.add(transaction)
     await session.flush()
-    await session.commit()
+    if commit:
+        await session.commit()
     refreshed_record = await _get_inventory_record_for_response(session, record.id)
     refreshed_transaction = await session.get(StockTransaction, transaction.id)
     if refreshed_record is None or refreshed_transaction is None:
@@ -216,7 +265,13 @@ async def stock_out_item(session: AsyncSession, payload: StockOutCreate) -> Stoc
     )
 
 
-async def adjust_stock_item(session: AsyncSession, payload: StockAdjustCreate) -> StockMutationResult:
+async def adjust_stock_item(
+    session: AsyncSession,
+    payload: StockAdjustCreate,
+    *,
+    commit: bool = True,
+    user_id: int | None = None,
+) -> StockMutationResult:
     record = await _find_single_inventory_record(
         session=session,
         sku=payload.sku,
@@ -237,10 +292,12 @@ async def adjust_stock_item(session: AsyncSession, payload: StockAdjustCreate) -
         source=payload.source,
         reference_id=payload.reference_id,
         note=payload.note,
+        user_id=user_id,
     )
     session.add(transaction)
     await session.flush()
-    await session.commit()
+    if commit:
+        await session.commit()
     refreshed_record = await _get_inventory_record_for_response(session, record.id)
     refreshed_transaction = await session.get(StockTransaction, transaction.id)
     if refreshed_record is None or refreshed_transaction is None:
@@ -255,7 +312,9 @@ async def adjust_stock_item(session: AsyncSession, payload: StockAdjustCreate) -
 
 
 async def _refresh_low_stock_state(session: AsyncSession, jan_code: str) -> None:
-    product = await session.get(Product, jan_code)
+    product = await session.scalar(
+        select(Product).where(Product.jan_code == jan_code).with_for_update()
+    )
     if product is None or product.units_per_case is None:
         return
     total_quantity = await _get_product_total_quantity(session=session, jan_code=jan_code)
@@ -264,7 +323,9 @@ async def _refresh_low_stock_state(session: AsyncSession, jan_code: str) -> None
 
 
 async def _maybe_create_low_stock_alert(session: AsyncSession, jan_code: str) -> LowStockAlert | None:
-    product = await session.get(Product, jan_code)
+    product = await session.scalar(
+        select(Product).where(Product.jan_code == jan_code).with_for_update()
+    )
     if product is None or product.units_per_case is None:
         return None
     total_quantity = await _get_product_total_quantity(session=session, jan_code=jan_code)
@@ -313,7 +374,8 @@ async def _find_single_inventory_record(
     if expiration_date is not None:
         statement = statement.where(InventoryRecord.expiration_date == expiration_date)
 
-    result = await session.scalars(statement.limit(2))
+    # Lock matched rows to prevent concurrent deductions from racing past the quantity check
+    result = await session.scalars(statement.with_for_update().limit(2))
     records = list(result.all())
     if not records:
         raise InventoryRecordNotFoundError
@@ -340,6 +402,7 @@ def _create_stock_transaction(
     source: str,
     reference_id: str | None = None,
     note: str | None = None,
+    user_id: int | None = None,
 ) -> StockTransaction:
     return StockTransaction(
         inventory_record_id=record.id,
@@ -348,7 +411,60 @@ def _create_stock_transaction(
         source=source,
         reference_id=reference_id,
         note=note,
+        user_id=user_id,
     )
+
+
+async def get_system_status(session: AsyncSession) -> list[WarehouseStatusRead]:
+    stmt = (
+        select(
+            Warehouse.id.label("warehouse_id"),
+            Warehouse.name.label("warehouse_name"),
+            Warehouse.allow_negative_stock,
+            func.max(
+                case((StockTransaction.transaction_type == StockTransactionType.in_, StockTransaction.created_at), else_=None)
+            ).label("last_stock_in_at"),
+            func.max(
+                case((StockTransaction.transaction_type == StockTransactionType.out, StockTransaction.created_at), else_=None)
+            ).label("last_stock_out_at"),
+            func.max(
+                case((StockTransaction.source == "rakuten_csv", StockTransaction.created_at), else_=None)
+            ).label("last_csv_apply_at"),
+            func.count(
+                case((InventoryRecord.quantity < 0, 1), else_=None)
+            ).label("negative_stock_count"),
+        )
+        .select_from(Warehouse)
+        .outerjoin(InventoryRecord, InventoryRecord.warehouse_id == Warehouse.id)
+        .outerjoin(StockTransaction, StockTransaction.inventory_record_id == InventoryRecord.id)
+        .group_by(Warehouse.id, Warehouse.name, Warehouse.allow_negative_stock)
+        .order_by(Warehouse.id.asc())
+    )
+    rows = await session.execute(stmt)
+    now = datetime.now(tz=timezone.utc)
+    result: list[WarehouseStatusRead] = []
+    for row in rows.all():
+        last_activity = max(
+            (t for t in (row.last_stock_in_at, row.last_stock_out_at) if t is not None),
+            default=None,
+        )
+        data_gap_days: int | None = None
+        if last_activity is not None:
+            last_dt = last_activity if last_activity.tzinfo else last_activity.replace(tzinfo=timezone.utc)
+            data_gap_days = (now - last_dt).days
+        result.append(
+            WarehouseStatusRead(
+                warehouse_id=row.warehouse_id,
+                warehouse_name=row.warehouse_name,
+                allow_negative_stock=row.allow_negative_stock,
+                last_stock_in_at=row.last_stock_in_at,
+                last_stock_out_at=row.last_stock_out_at,
+                last_csv_apply_at=row.last_csv_apply_at,
+                data_gap_days=data_gap_days,
+                negative_stock_count=row.negative_stock_count,
+            )
+        )
+    return result
 
 
 async def create_inventory_import_job(
