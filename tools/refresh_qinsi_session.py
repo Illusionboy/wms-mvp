@@ -48,6 +48,8 @@ env = load_env(project_root / ".env")
 QINSI_USERNAME = env.get("QINSI_USERNAME", "")
 QINSI_PASSWORD = env.get("QINSI_PASSWORD", "")
 QINSI_BASE_URL = env.get("QINSI_BASE_URL", "https://web.syt.qinsilk.com/gis/admin/")
+_DEFAULT_API = env.get("NAS_API_URL", "http://localhost:8000")
+_DEFAULT_TOKEN = env.get("NAS_JWT_TOKEN") or None
 
 
 async def _check_qinsi_auth(cookies: dict[str, str]) -> bool:
@@ -194,13 +196,13 @@ def main():
     parser = argparse.ArgumentParser(description="秦丝生意通 Session 续期工具")
     parser.add_argument(
         "--api",
-        default="http://localhost:8000",
-        help="WMS API 地址（默认: http://localhost:8000）。NAS 示例: http://192.168.1.5:8000",
+        default=_DEFAULT_API,
+        help=f"WMS API 地址（默认读取 .env NAS_API_URL: {_DEFAULT_API}）",
     )
     parser.add_argument(
         "--token",
-        default=None,
-        help="WMS JWT token（登录后在浏览器 localStorage 里的 token 值）",
+        default=_DEFAULT_TOKEN,
+        help="WMS JWT token（默认读取 .env NAS_JWT_TOKEN）",
     )
     args = parser.parse_args()
     asyncio.run(do_login_and_upload(args.api, args.token))
