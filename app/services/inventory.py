@@ -155,28 +155,21 @@ async def stock_in_item(
 ) -> StockMutationResult:
     product = await session.scalar(select(Product).where(Product.jan_code == payload.sku))
     warehouse = await session.scalar(select(Warehouse).where(Warehouse.id == payload.warehouse_id))
-    customer = None
-    if payload.customer_id is not None:
-        customer = await session.scalar(select(Customer).where(Customer.id == payload.customer_id))
-    if product is None or warehouse is None or (payload.customer_id is not None and customer is None):
+    if product is None or warehouse is None:
         raise InventoryTargetNotFoundError
 
-    # Lock the row to prevent concurrent stock-in from creating duplicate / racing update
-    # customer_id is no longer part of bucket identity — it's a note on the transaction
+    # One bucket per (product, warehouse) — lock to prevent concurrent duplicate creation
     statement = select(InventoryRecord).where(
         InventoryRecord.product_jan == payload.sku,
         InventoryRecord.warehouse_id == payload.warehouse_id,
-        InventoryRecord.location_code == payload.location_code,
-        InventoryRecord.expiration_date == payload.expiration_date,
     ).with_for_update()
     record = await session.scalar(statement)
     if record is None:
         record = InventoryRecord(
             product_jan=payload.sku,
             warehouse_id=payload.warehouse_id,
-            location_code=payload.location_code,
+            location_code="A-00-00",
             quantity=payload.quantity,
-            expiration_date=payload.expiration_date,
         )
         session.add(record)
         previous_quantity = 0
@@ -224,9 +217,6 @@ async def stock_out_item(
             session=session,
             sku=payload.sku,
             warehouse_id=payload.warehouse_id,
-            customer_id=payload.customer_id,
-            location_code=payload.location_code,
-            expiration_date=payload.expiration_date,
         )
     except InventoryRecordNotFoundError:
         # No existing record — only allowed when warehouse has negative stock enabled
@@ -295,9 +285,6 @@ async def adjust_stock_item(
         session=session,
         sku=payload.sku,
         warehouse_id=payload.warehouse_id,
-        customer_id=payload.customer_id,
-        location_code=payload.location_code,
-        expiration_date=payload.expiration_date,
     )
     previous_quantity = record.quantity
     quantity_delta = payload.actual_quantity - previous_quantity
@@ -378,22 +365,14 @@ async def _find_single_inventory_record(
     session: AsyncSession,
     sku: str,
     warehouse_id: int,
-    customer_id: int | None,
-    location_code: str | None,
-    expiration_date: date | None,
 ) -> InventoryRecord:
-    # customer_id is no longer a bucket key — removed from filter
-    statement = select(InventoryRecord).where(
-        InventoryRecord.product_jan == sku,
-        InventoryRecord.warehouse_id == warehouse_id,
+    # One bucket per (product, warehouse) — lock to prevent concurrent quantity races
+    result = await session.scalars(
+        select(InventoryRecord).where(
+            InventoryRecord.product_jan == sku,
+            InventoryRecord.warehouse_id == warehouse_id,
+        ).with_for_update().limit(2)
     )
-    if location_code is not None:
-        statement = statement.where(InventoryRecord.location_code == location_code)
-    if expiration_date is not None:
-        statement = statement.where(InventoryRecord.expiration_date == expiration_date)
-
-    # Lock matched rows to prevent concurrent deductions from racing past the quantity check
-    result = await session.scalars(statement.with_for_update().limit(2))
     records = list(result.all())
     if not records:
         raise InventoryRecordNotFoundError

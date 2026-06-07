@@ -304,7 +304,7 @@ tr:hover td { background: var(--accent-bg); }
           <label>仓库</label>
           <select id="si-warehouse"></select>
         </div>
-        <div class="form-row">
+        <div class="form-row" style="display:none">
           <label>客户</label>
           <select id="si-customer"></select>
         </div>
@@ -346,7 +346,7 @@ tr:hover td { background: var(--accent-bg); }
           <label>仓库</label>
           <select id="so-warehouse"></select>
         </div>
-        <div class="form-row">
+        <div class="form-row" style="display:none">
           <label>客户</label>
           <select id="so-customer"></select>
         </div>
@@ -384,7 +384,7 @@ tr:hover td { background: var(--accent-bg); }
           <label>仓库</label>
           <select id="sa-warehouse"></select>
         </div>
-        <div class="form-row">
+        <div class="form-row" style="display:none">
           <label>客户</label>
           <select id="sa-customer"></select>
         </div>
@@ -421,7 +421,7 @@ tr:hover td { background: var(--accent-bg); }
             <label>默认仓库</label>
             <select id="cr-warehouse"></select>
           </div>
-          <div class="form-row">
+          <div class="form-row" style="display:none">
             <label>默认客户</label>
             <select id="cr-customer"></select>
           </div>
@@ -464,7 +464,7 @@ tr:hover td { background: var(--accent-bg); }
             <label>仓库</label>
             <select id="rak-warehouse"></select>
           </div>
-          <div class="form-row">
+          <div class="form-row" style="display:none">
             <label>客户</label>
             <select id="rak-customer"></select>
           </div>
@@ -508,7 +508,7 @@ tr:hover td { background: var(--accent-bg); }
             <select id="ci-warehouse"></select>
           </div>
         </div>
-        <div class="form-row">
+        <div class="form-row" style="display:none">
           <label>客户 (留空=无客户)</label>
           <select id="ci-customer">
             <option value="">— 无客户 —</option>
@@ -610,7 +610,7 @@ tr:hover td { background: var(--accent-bg); }
             <label>导入仓库</label>
             <select id="qs-warehouse"></select>
           </div>
-          <div class="form-row">
+          <div class="form-row" style="display:none">
             <label>客户 (可选)</label>
             <select id="qs-customer">
               <option value="">— 无客户 —</option>
@@ -727,8 +727,8 @@ tr:hover td { background: var(--accent-bg); }
         </div>
         <div id="warehouse-list"></div>
       </div>
-      <hr class="divider">
-      <div class="card">
+      <hr class="divider" style="display:none">
+      <div class="card" style="display:none">
         <div class="card-title">客户管理</div>
         <div style="display:flex;gap:8px;margin-bottom:12px">
           <input type="text" id="new-customer" placeholder="客户名称" style="flex:1">
@@ -1062,7 +1062,6 @@ async function doSearch() {
 // ── Chat Report ────────────────────────────────────────────────────────────
 async function parseChatReport() {
   const wOpt = document.getElementById('cr-warehouse').selectedOptions[0];
-  const cOpt = document.getElementById('cr-customer').selectedOptions[0];
   const text = document.getElementById('cr-text').value.trim();
   if (!text) { toast('请粘贴聊天记录', 'err'); return; }
   toast('AI 解析中…', 'info');
@@ -1070,7 +1069,7 @@ async function parseChatReport() {
     const draft = await api('POST', '/inventory/chat-reports/parse', {
       text,
       default_warehouse_name: wOpt?.text || '',
-      default_customer_name: cOpt?.text || '',
+      default_customer_name: '店铺',
       source: 'web_ui',
     });
     _currentDraft = { type: 'chat', id: draft.id };
@@ -1128,12 +1127,11 @@ async function uploadRakutenCSV() {
   const file = document.getElementById('rak-file').files[0];
   if (!file) { toast('请选择 CSV 文件', 'err'); return; }
   const wOpt = document.getElementById('rak-warehouse').selectedOptions[0];
-  const cOpt = document.getElementById('rak-customer').selectedOptions[0];
   const fd = new FormData();
   fd.append('file', file);
   toast('上传中…', 'info');
   try {
-    const url = `/api/v1/inventory/imports/rakuten-shipment?warehouse_name=${encodeURIComponent(wOpt.text)}&customer_name=${encodeURIComponent(cOpt.text)}`;
+    const url = `/api/v1/inventory/imports/rakuten-shipment?warehouse_name=${encodeURIComponent(wOpt.text)}&customer_name=%E4%B9%90%E5%A4%A9`;
     const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${_token}` }, body: fd });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
