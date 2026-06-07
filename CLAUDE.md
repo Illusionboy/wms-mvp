@@ -36,7 +36,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```text
 app/
 ├── main.py                 # FastAPI app + StaticFiles mount + /app and /count-import routes
-├── core/config.py          # Settings loaded from .env (Pydantic v2) incl. JWT config
+├── core/config.py          # Settings loaded from .env (Pydantic v2) incl. JWT + qinsi_warehouse_map
 ├── db/
 │   ├── base.py             # SQLAlchemy DeclarativeBase + TimestampMixin
 │   ├── session.py          # Async engine and session factory
@@ -44,18 +44,18 @@ app/
 ├── models/
 │   ├── product.py          # Products (JAN code as PK, name_jp/zh, units_per_case)
 │   ├── user.py             # Users table (id, username, password_hash, is_active)
-│   ├── inventory_record.py # Stock buckets (warehouse/customer/location/expiration)
-│   ├── stock_transaction.py # Audit log (IN/OUT/ADJUST, source, user_id FK)
+│   ├── inventory_record.py # Stock buckets keyed by (product_jan, warehouse_id)
+│   ├── stock_transaction.py # Audit log (IN/OUT/ADJUST, source, user_id FK, transaction_date)
 │   ├── warehouse.py        # Warehouses (+ allow_negative_stock flag)
 │   ├── chat_report_draft.py
 │   ├── rakuten_shipment_draft.py
 │   └── inventory_count_draft.py  # Monthly count reconciliation drafts
 ├── schemas/
-│   ├── inventory.py        # Core request/response DTOs + WarehouseStatusRead
+│   ├── inventory.py        # Core request/response DTOs + WarehouseStatusRead + ProductUpdate
 │   └── inventory_count.py  # Count reconciliation DTOs
 ├── services/
 │   ├── auth.py             # JWT encode/decode, bcrypt hash/verify, CurrentUser dataclass
-│   ├── inventory.py        # Stock in/out/adjust (accept user_id), search, low-stock alerts
+│   ├── inventory.py        # Stock in/out/adjust (accept user_id, transaction_date), search, alerts
 │   ├── chat_reports.py     # Gemini-powered chat parsing, draft apply
 │   ├── rakuten_shipments.py # Rakuten CSV parsing + product reconciliation
 │   └── inventory_count.py  # HTML/Excel parsing, reconciliation calc, draft apply
@@ -65,28 +65,28 @@ app/
 │       ├── router.py
 │       └── endpoints/
 │           ├── auth.py            # POST /auth/login, POST /auth/users, GET /auth/me
-│           ├── inventory.py       # GET /search, POST /stock-in/out/adjust, imports
+│           ├── inventory.py       # GET /search, POST /stock-in/out/adjust, PATCH /products/{jan}
 │           ├── warehouses.py      # CRUD + PATCH /{id}/allow-negative
 │           ├── customers.py
 │           ├── admin.py
 │           ├── health.py
 │           ├── status.py          # GET /status — data freshness per warehouse
-│           └── inventory_count.py # Upload/preview/export/apply count sheets
+│           ├── inventory_count.py # Upload/preview/export/apply count sheets
+│           └── qinsi_scrape.py    # GET /auth-status, POST /upload-session /scrape /apply
 ├── static/
 │   ├── app.html            # Main SPA — login, dashboard, all stock operations
 │   └── count_import.html   # Legacy monthly count reconciliation page
-└── bot/
-    ├── dispatcher.py       # Query-only: /search, /search_sku, /status, /whoami, /start
-    └── polling.py          # Async polling loop entry point
-├── scrapers/
-│   └── qinsi_scraper.py    # httpx client for 秦丝生意通 API (no browser); session management
+├── bot/
+│   ├── dispatcher.py       # Query-only: /search, /search_sku, /status, /whoami, /start
+│   └── polling.py          # Async polling loop entry point
+└── scrapers/
+    └── qinsi_scraper.py    # httpx client for 秦丝生意通 API (no browser); session management
 tools/                      # Standalone CLI scripts (run with python -m tools.*)
-├── refresh_qinsi_session.py       # Run on Mac to renew 秦丝 cookies and upload to NAS API
-├── intercept_qinsi_api.py         # Debug tool: capture 秦丝 API calls via Playwright proxy
-├── init_inventory_from_count.py
-├── import_product_catalog.py
-├── import_rakuten_shipment_csv.py
-└── convert_rakuten_csv_encoding.py
+├── refresh_qinsi_session.py          # Run on Mac to renew 秦丝 cookies and upload to NAS API
+├── consolidate_inventory_buckets.py  # One-time migration: merge multi-bucket records to (product, warehouse)
+├── intercept_qinsi_api.py            # Debug tool: capture 秦丝 API calls via Playwright proxy
+docs/
+└── supply_chain_analytics.md  # Analytics gap analysis and dev roadmap for demand forecasting
 ```
 
 ## Operational Design Decisions
@@ -104,26 +104,43 @@ All mutation endpoints require authentication. The `require_auth` dependency in 
 
 **JWT config**: `JWT_SECRET_KEY` (env var, default `change-me-in-production`), 30-day expiry.
 
-Read-only endpoints (search, status, count preview) are unauthenticated.
+Read-only endpoints (search, status, count preview, negative-stock list) are unauthenticated.
 
-Generate an API key (for tool scripts): `python -c "import secrets; print(secrets.token_hex(32))"`
+### Inventory Record as Stock Bucket
+
+`InventoryRecord` is effectively keyed by **`(product_jan, warehouse_id)`** — one record per product per warehouse.
+
+The `UniqueConstraint` in the model still spans `(product_jan, warehouse_id, customer_id, location_code, expiration_date)` at the DB level, but `customer_id`, `location_code`, and `expiration_date` are always `NULL` / `"A-00-00"` / `NULL` on all new records. `_find_single_inventory_record` only filters by `(product_jan, warehouse_id)`.
+
+**Customer is note-only**: customer information is stored in `StockTransaction.note` for reference; it does not affect which inventory bucket is selected. All customer UI elements in the frontend are hidden.
+
+**Migration script**: If existing data has multiple buckets per `(product, warehouse)` (from the old schema), run:
+
+```bash
+docker compose exec api python -m tools.consolidate_inventory_buckets
+```
+
+This merges duplicate records, re-routes transactions, and normalises `location_code="A-00-00"`, `customer_id=NULL`.
+
+All quantities are in individual units (not cases). Every change writes an immutable `StockTransaction`; the `source` field values are: `telegram` / `rakuten_csv` / `chat_report` / `physical_count` / `web_ui` / `qinsi_scrape`.
+
+Low-stock alert: `total_quantity < 2 * units_per_case` (only when `units_per_case` is set). `low_stock_alert_sent` flag prevents duplicates; resets automatically when stock recovers.
 
 ### 冷启动期负库存策略 (Cold-Start & Negative Stock)
 
-**背景**: 公司每月底盘点，但统计结果可能到次月5日才完成。这段窗口期内进出库持续发生。如果强制要求库存非负，操作就会卡死。
+**背景**: 公司每月底盘点，但统计结果可能到次月5日才完成。这段窗口期内进出库持续发生。
 
 **已实现**:
 
-- `Warehouse.allow_negative_stock: bool = False` 列控制每个仓库的开关。
-- `stock_out_item` 中，当 `record.quantity < payload.quantity` 且该仓库开启了此标志时，**不抛出** `InsufficientStockError`，直接扣减至负值并写入 transaction。负库存是合法业务数据，代表"已记录但开期余额未知的出库"。
+- `Warehouse.allow_negative_stock: bool = False` 控制每个仓库的开关。
+- Web UI **设置 → 仓库管理** 中每个仓库有「开启/关闭」按钮（调用 `PATCH /api/v1/warehouses/{id}/allow-negative?enabled=true`）。
+- `stock_out_item` 中，当库存不足且该仓库开启了此标志时，**不抛出** `InsufficientStockError`，直接扣减至负值并写入 transaction。
+- 当无现存库存桶时（`InventoryRecordNotFoundError`），且负库存开启，自动创建桶（`quantity=0`）再扣减。
+- DB 层面**没有** `CHECK (quantity >= 0)` 约束（在 `init_db.py` 启动时通过 `DROP CONSTRAINT IF EXISTS` 移除）。
+- 负库存 SKU 清单：仪表盘中点击「负库存 SKU」数字展开（调用 `GET /api/v1/inventory/negative-stock?warehouse_id=`）。
 - 盘点数据到位后，通过盘点导入 web UI 用 `source="physical_count"` 的 ADJUST 事务将余额修正至实际值。
-- Telegram 管理员命令 `/allow_negative WAREHOUSE_NAME on|off` 控制开关。
-- API: `PATCH /api/v1/warehouses/{id}/allow-negative?enabled=true`。
-- `_maybe_create_low_stock_alert` 正确处理 `quantity < 0`：仅在余额首次过阈值时触发一次告警（`low_stock_alert_sent` 标志防止重复）。
 
 ### 月度盘点对账工作流 (Physical Count Reconciliation)
-
-**背景**: 盘点在月底（如5月31日）进行，但汇总数据到次月5日才出来。这段期间继续有出入库记录。不能直接用盘点数量覆盖当前库存。
 
 **对账公式**:
 
@@ -132,16 +149,14 @@ Generate an API key (for tool scripts): `python -c "import secrets; print(secret
 ADJUST量 = 目标库存 - 当前WMS库存
 ```
 
-**已实现** — 网页操作入口：`http://NAS-IP:8000/count-import`
-
 操作步骤：
 
 1. 上传文件（`.html` 来自秦丝生意通，或 `.xlsx` 通用格式）
-2. 选择盘点日期（实物盘点当天，不是录入日期）+ 仓库 + 客户
+2. 选择盘点日期（实物盘点当天，不是录入日期）+ 仓库
 3. 系统解析文件，计算每个 SKU 的对账数据，生成草稿（`InventoryCountDraft`）
 4. 预览表显示：JAN、商品名、盘点量、盘后WMS变动、目标库存、当前库存、ADJUST量
 5. 可导出 Excel 留存
-6. 确认导入 → 批量写 `source="physical_count"` 的 ADJUST 事务
+6. 确认导入 → 批量写 `source="physical_count"` 的 ADJUST 事务，`transaction_date` 设为盘点日期
 
 **秦丝HTML解析细节**：
 
@@ -152,63 +167,52 @@ ADJUST量 = 目标库存 - 当前WMS库存
 
 ### 秦丝生意通 API 同步 (Qinsi ERP Integration)
 
-**背景**: 秦丝生意通是公司的 ERP 系统，记录采购单（入库）和销售单（出库）。WMS 通过直接调用秦丝后端 API 来同步这些记录，作为微信报库解析的补充来源。
-
 **认证机制（关键）**:
 
-- 秦丝登录需要阿里云滑块 CAPTCHA，只能在有图形界面的真实浏览器中完成。Playwright 自动化环境下 CAPTCHA 始终失败。
-- 登录成功后，`gisALogin` cookie 有效期 **7 天**，可单独用于所有 API 调用（服务端自动续期 JSESSIONID）。
-- **NAS 部署续期流程**：在本地 Mac 运行 `tools/refresh_qinsi_session.py`，Playwright 在 Mac 上打开浏览器完成滑块验证，登录成功后将 cookies POST 到 NAS 的 `POST /api/v1/qinsi/upload-session` 接口保存。每 7 天操作一次，约 1 分钟。
-- **简化运行**：在 `.env` 中配置 `NAS_API_URL` 和 `NAS_JWT_TOKEN`，脚本自动读取作为默认值，直接运行 `./refresh_qinsi.sh` 即可（该脚本已加入 `.gitignore`，仅本地保留）。
+- 秦丝登录需要阿里云滑块 CAPTCHA，只能在有图形界面的真实浏览器中完成。
+- 登录成功后，`gisALogin` cookie 有效期 **7 天**。
+- **NAS 部署续期流程**：在本地 Mac 运行 `tools/refresh_qinsi_session.py`，登录成功后将 cookies POST 到 NAS 的 `POST /api/v1/qinsi/upload-session` 接口。每 7 天操作一次，约 1 分钟。
+- **简化运行**：在 `.env` 中配置 `NAS_API_URL` 和 `NAS_JWT_TOKEN`，直接运行 `./refresh_qinsi.sh`（已加入 `.gitignore`）。
 
-```bash
-# .env 中配置（一次性）：
-# NAS_API_URL=http://192.168.x.x:8000
-# NAS_JWT_TOKEN=eyJhbGci...
+**仓库自动映射**：`QINSI_WAREHOUSE_MAP` 环境变量（JSON 字符串）将秦丝仓库名映射到 WMS 仓库名。apply 时按每条记录的 `warehouse_name` 自动解析，无需手动选择仓库。
 
-# 之后每次只需运行（Mac 上，不是 NAS）：
-./refresh_qinsi.sh
+```env
+QINSI_WAREHOUSE_MAP={"北津守仓库":"普通仓库","乐天仓库":"乐天仓库"}
 ```
 
-**Session 文件**: `app/data/qinsi_session.json`（Playwright cookie 列表格式，在 Docker volume 内持久化）。
+**`transaction_date`**：apply 时自动使用秦丝订单的实际日期（`ScrapedRecord.record_date`），不是 WMS 录入时间。
 
-**已发现的关键 API 端点**（Base: `https://web.syt.qinsilk.com/gis/admin`）:
-
-| 用途 | 端点 |
-| --- | --- |
-| 验证 session | `GET /pubuser/getUserInfo.ac` → `statusCode == 1` |
-| 销售单列表（出库） | `GET /inner/sale/wholesaleOrdersListJSON.ac` |
-| 销售单商品明细 | `POST /inner/sale/wholesaleOrdersGet.ac?ordersSn=<sn>` → `orderGoods[]` |
-| 采购单列表（入库） | `GET /inner/orders/purchase/purchaseListJSON.ac` |
-| 采购单商品明细 | `POST /inner/orders/purchase/purchaseGet.ac?purchaseSn=<sn>` → `orderGoods[]` |
-
-**数量字段**：`orderGoods[].quantity`（不是 `number`）。验证：`quantity * price = trueAmount`。`number` 是下单时的仓库可用量快照，不用于计算。
-
-**StockTransaction.source**: `"qinsi_scrape"`
-
-**数据模型**：`ScrapedRecord` 中 `order_no` 为订单号（用于前端分组），`jan_code`/`product_name`/`quantity` 为单品级别字段。前端按 `order_no` 分组展示，勾选以订单为单位，apply 时展开为商品行发送。
+**数据模型**：`ScrapedRecord` 中 `order_no` 为订单号（用于前端分组），`jan_code`/`product_name`/`quantity`/`warehouse_name`/`customer_name`/`record_date` 为单品级别字段。`customer_name` 对 IN 方向为供应商名，对 OUT 方向为客户名（仅展示，不写入库存桶定位）。幂等：`reference_id = "qinsi:{order_no}:{jan_code}"`，重复提交自动跳过。
 
 **WMS API**:
 
-- `GET /api/v1/qinsi/auth-status` — 检查 session 有效性（无需认证）；前端进入「秦丝同步」页面时自动调用并显示状态栏
+- `GET /api/v1/qinsi/auth-status` — 检查 session 有效性（无需认证）
 - `POST /api/v1/qinsi/upload-session` — 接收 Mac 端上传的 cookies（需认证）
 - `POST /api/v1/qinsi/scrape` — 拉取指定日期范围的出入库记录（需认证）
-- `POST /api/v1/qinsi/apply` — 将勾选记录写入 WMS（需认证）
+- `POST /api/v1/qinsi/apply` — 将勾选记录写入 WMS；按每条 `warehouse_name` 自动匹配仓库（需认证）
 
 ### 状态与最后操作时间查询 (Last-Activity Status Query)
 
-**背景**: 忙碌期间数据录入会延迟数天。操作员无法判断系统数据是否与实际情况同步。乐天仓库（由Rakuten CSV驱动）和普通仓库（由微信报库驱动）的数据新鲜度完全独立，必须分开显示。
-
-**已实现**:
-
 - `GET /api/v1/status`：按仓库聚合查询 `stock_transactions`，返回：
-  - `last_stock_in_at`、`last_stock_out_at`：各仓库最后出入库时间
+  - `last_stock_in_at`、`last_stock_out_at`：各仓库最后出入库录入时间
   - `last_csv_apply_at`：最后一次 Rakuten CSV 导入时间
-  - `last_physical_count_at`：最后一次盘点（`source="physical_count"`）时间
-  - `data_gap_days`：距今天的数据滞后天数（取 IN/OUT/physical_count 三者最新时间计算）
-  - `negative_stock_count`：当前负库存 SKU 数量
-- Telegram `/status` 命令（查询级权限）：输出相同信息，格式化为聊天消息。
-- 实现在 `get_system_status()` service 函数中，单次 JOIN 聚合查询，无额外追踪表。
+  - `last_physical_count_at`：最后一次盘点时间
+  - `data_gap_days`：数据滞后天数
+  - `negative_stock_count`：当前负库存 SKU 数量（点击可查看明细）
+- 实现在 `get_system_status()` service 函数中，单次 JOIN 聚合查询。
+
+### Transaction Date（交易日期）
+
+`StockTransaction.transaction_date DATE` — 实际业务发生日期，与 `created_at`（WMS 录入时间）分开存储。
+
+| 来源 | `transaction_date` 填写逻辑 |
+| --- | --- |
+| 秦丝批量 | `ScrapedRecord.record_date`（秦丝订单实际日期） |
+| 盘点 ADJUST | `document.count_date`（盘点当天） |
+| 手动入/出/调整 | 前端可选日期选择器（留空为 NULL，查询时用 `created_at` 回退） |
+| 乐天 CSV / 微信报库 | 暂为 NULL（待后续补充） |
+
+这是时序分析和需求预测的核心轴。详见 `docs/supply_chain_analytics.md`。
 
 ## Concurrency Model
 
@@ -223,45 +227,24 @@ ADJUST量 = 目标库存 - 当前WMS库存
 
 ### 多用户并发 — 规划方案（暂不实现，思路存档）
 
-1. **Transfer死锁**: 用户A做A→B调拨，用户B同时做B→A。修复：始终按 `min(warehouse_id)` 规范顺序获取锁。
-
-2. **Telegram消息重投**: 写入 `reference_id=f"tg:{message.message_id}"`，在 `(source, reference_id)` 上加DB唯一约束实现幂等。
-
-3. **连接池耗尽**: 在 `session.py` 设置 `pool_size=10, max_overflow=5`，根据实测并发量调整。
-
-4. **全仓盘点期间的顾问锁**: 执行全量ADJUST时，用 `pg_advisory_xact_lock(warehouse_id)` 防止并发出入库干扰。
-
-5. **Draft长时间搁置**: 考虑在 apply 入口增加 re-validation，若草稿超龄则重新校验而非直接应用。
+1. **Transfer死锁**: 始终按 `min(warehouse_id)` 规范顺序获取锁。
+2. **Telegram消息重投**: `reference_id=f"tg:{message.message_id}"`，在 `(source, reference_id)` 上加DB唯一约束。
+3. **连接池耗尽**: 在 `session.py` 设置 `pool_size=10, max_overflow=5`。
+4. **全仓盘点期间的顾问锁**: 用 `pg_advisory_xact_lock(warehouse_id)` 防止并发干扰。
 
 ## Key Architectural Patterns
 
 ### Draft-Apply Pattern (Safety for Bulk Operations)
 
-三类批量操作都使用两阶段工作流：
-
 | 草稿模型 | 触发方式 | Apply 命令 |
 | --- | --- | --- |
-| `ChatReportDraft` | Telegram `/parse_report` | `/apply_report DRAFT_ID` |
-| `RakutenShipmentDraft` | Telegram 发送CSV文件 | `/apply_rakuten_csv DRAFT_ID` |
+| `ChatReportDraft` | Web UI 粘贴聊天记录 | Web UI 确认按钮 |
+| `RakutenShipmentDraft` | Web UI 上传 CSV | Web UI 确认按钮 |
 | `InventoryCountDraft` | Web UI 上传文件 | Web UI 确认按钮 |
 
 所有草稿模型有 `status` 字段（`"parsed"` → `"applied"`），apply 时用 `SELECT FOR UPDATE` 锁定草稿行防止重复提交。
 
-**Ambiguity handling**: When a JAN search returns multiple candidates, return `ambiguous_product` error and stop — never guess. The operator must supply a more specific identifier and retry.
-
-### Inventory Record as Stock Bucket
-
-`InventoryRecord` 由复合键唯一标识：
-
-```text
-(product_jan, warehouse_id, customer_id, location_code, expiration_date)
-```
-
-`customer_id` 可为 NULL。过滤时注意：`customer_id IS NULL` 不能用 `==`，需用 `.is_(None)`（否则 SQL 生成 `= NULL` 永远不匹配）。
-
-所有数量为单品级别（不是箱数）。每次变动写入不可变的 `StockTransaction`，`source` 字段可选值：`telegram` / `rakuten_csv` / `chat_report` / `physical_count`。
-
-低库存告警：`total_quantity < 2 * units_per_case`（仅 `units_per_case` 已设置时）。`low_stock_alert_sent` 标志防止重复，股票恢复时自动重置。
+**Ambiguity handling**: When a JAN search returns multiple candidates, return `ambiguous_product` error and stop — never guess.
 
 ### Product Search with Ranking
 
@@ -269,44 +252,40 @@ JAN codes support multiple formats: full 13-digit, last 6 digits, digits 7–11 
 
 ### Telegram Bot (Query Only)
 
-The bot handles **read-only** commands. All mutations moved to the web UI. Permitted commands:
-
 - `/start` — help text
 - `/whoami` — show caller's Telegram user ID (no permission check)
 - `/status` — warehouse data freshness (requires query permission)
 - `/search <kw>` — inventory search (requires query permission)
 - `/search_sku <kw>` — product master search (requires query permission)
 
-**Permission tiers** (defined in env vars, all checked by `_require_query_permission`):
-
-- `TELEGRAM_QUERY_USER_IDS`: query-only access
-- `TELEGRAM_OPERATOR_USER_IDS`: same as query (mutation commands removed)
-- `TELEGRAM_ADMIN_USER_IDS`: same as query (mutation commands removed)
+**Permission tiers**: `TELEGRAM_QUERY_USER_IDS` / `TELEGRAM_OPERATOR_USER_IDS` / `TELEGRAM_ADMIN_USER_IDS` — all three have query access.
 
 ### Web UI Pattern
 
-Static files mounted at `/static` via `StaticFiles(directory="app/static")` in `main.py`. Each UI page is a self-contained HTML file with inline CSS and vanilla JS (no CDN dependencies — works offline on NAS). The JS calls the REST API directly using `fetch()` with `Authorization: Bearer <jwt>` header stored in `localStorage`.
+Static files mounted at `/static` via `StaticFiles(directory="app/static")` in `main.py`. Each UI page is a self-contained HTML file with inline CSS and vanilla JS (no CDN dependencies — works offline on NAS). JWT stored in `localStorage`.
 
 Current UI pages:
 
-- `GET /` and `GET /app` → `app/static/app.html` — main SPA (login, dashboard, all stock ops, imports, settings)
+- `GET /` and `GET /app` → `app/static/app.html` — main SPA
 - `GET /count-import` → `app/static/count_import.html` — legacy monthly count reconciliation
 
-**SPA design**: CSS variables for light/dark mode, system font stack, indigo accent (#6366f1 light / #818cf8 dark). Login screen → sidebar nav → section panels. Stores JWT in `localStorage`. On load, validates token via `GET /auth/me` before showing app shell.
+**SPA design**: CSS variables for light/dark mode, system font stack, indigo accent (#6366f1 light / #818cf8 dark).
+
+**Customer fields are hidden in the UI**: All `*-customer` selects have `style="display:none"`. Customer information is note-only and does not affect inventory bucket selection.
 
 ## Running the Project
 
-### Start All Services
+### Start / Update Services
 
 ```bash
+# First run or after code changes (always use --build after pulling new code)
+docker compose up -d --build api
+
+# Full rebuild (all services)
 docker compose up --build
 ```
 
-- API + Web UI: <http://localhost:8000> (Swagger at `/docs`)
-- 盘点导入页面: <http://localhost:8000/count-import>
-- Telegram bot: polling (connects automatically)
-- Data persists in Docker named volume `newproject_postgres_data`
-  - `docker compose down` preserves data; `docker compose down -v` deletes it
+> `docker compose restart api` does NOT pick up code changes — the code is baked into the image at build time.
 
 ### Environment Setup
 
@@ -317,60 +296,41 @@ POSTGRES_DB=wms
 POSTGRES_USER=wms_user
 POSTGRES_PASSWORD=your_password
 TELEGRAM_BOT_TOKEN=your_token
-TELEGRAM_OPERATOR_USER_IDS=your_telegram_id
-TELEGRAM_ADMIN_USER_IDS=your_telegram_id
+TELEGRAM_QUERY_USER_IDS=your_telegram_id
 GEMINI_API_KEY=your_key
-API_KEY=your_api_key          # legacy X-API-Key for CLI tools
-JWT_SECRET_KEY=your_secret    # generate: python -c "import secrets; print(secrets.token_hex(32))"
-ADMIN_USERNAME=admin          # auto-created on first startup
-ADMIN_PASSWORD=your_password  # must set before first run
+API_KEY=your_api_key
+JWT_SECRET_KEY=your_secret
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=your_password
+NAS_API_URL=http://192.168.x.x:8000          # for refresh_qinsi.sh
+NAS_JWT_TOKEN=eyJhbGci...                    # for refresh_qinsi.sh
+QINSI_WAREHOUSE_MAP={"北津守仓库":"普通仓库","乐天仓库":"乐天仓库"}
 ```
 
 ### First-Time Data Import
 
-Run against a started postgres (from project root, using local conda env):
-
 ```bash
-# 1. Import product catalog
-DATABASE_URL=postgresql+asyncpg://wms_user:your_password@localhost:5432/wms \
-/Users/mac/anaconda3/bin/conda run -n wms-mvp \
-python -m app.tools.import_product_catalog --file "./商品箱规数据5.12.xlsx"
-
-# 2. Initialize inventory from count sheets (--replace overwrites existing)
-DATABASE_URL=postgresql+asyncpg://wms_user:your_password@localhost:5432/wms \
-/Users/mac/anaconda3/bin/conda run -n wms-mvp \
-python -m app.tools.init_inventory_from_count \
-  --rakuten-file "./4-30-rakuten.xlsx" \
-  --normal-file "./4-30-normal.xlsx" \
-  --replace
-```
-
-Or inside the Docker container:
-
-```bash
+# Import product catalog
 docker compose exec api python -m app.tools.import_product_catalog --file "/app/imports/products.xlsx"
+
+# Initialize inventory from count sheets
+docker compose exec api python -m app.tools.init_inventory_from_count \
+  --rakuten-file "/app/imports/4-30-rakuten.xlsx" \
+  --normal-file "/app/imports/4-30-normal.xlsx" \
+  --replace
+
+# Consolidate inventory buckets (run once after upgrading from old multi-bucket schema)
+docker compose exec api python -m tools.consolidate_inventory_buckets
 ```
 
 ## Adding New Features
-
-### New Telegram Command (query only)
-
-1. Add `@telegram_router.message(Command("command_name"))` handler in `app/bot/dispatcher.py`
-2. Call read-only service functions (search, status)
-3. Use `await _require_query_permission(message)` for access control — bot no longer supports mutations
 
 ### New API Endpoint
 
 1. Add route file in `app/api/v1/endpoints/`, register in `app/api/v1/router.py`
 2. Define Pydantic request/response models in `app/schemas/`
 3. Delegate business logic to `app/services/`
-4. Add `dependencies=[Depends(require_api_key)]` to mutation endpoints
-
-### New Web UI Page
-
-1. Create self-contained HTML in `app/static/` (inline CSS + vanilla JS, no CDN)
-2. Add `GET /your-page` route in `main.py` returning `FileResponse`
-3. JS calls `/api/v1/...` with `X-API-Key` from `localStorage`
+4. Add `dependencies=[Depends(require_auth)]` to mutation endpoints
 
 ### New Database Model
 
@@ -380,54 +340,56 @@ docker compose exec api python -m app.tools.import_product_catalog --file "/app/
 
 ## Important Configuration Notes
 
-- **API Key**: Required for all mutation endpoints. Set `API_KEY` in `.env`. If not configured, mutations return 503.
-- **Telegram Bot Mode**: `TELEGRAM_BOT_MODE=local_polling` for development. Switch to `webhook` for production.
+- **API Key**: Set `API_KEY` in `.env`. If not configured, mutations return 503.
 - **Gemini Model**: Defaults to `gemini-2.5-flash`. Override via `GEMINI_MODEL` env var.
 - **Schema Migrations**: Uses `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` in `init_db.py` on startup. Not suitable for column renames or drops.
 - **Rakuten CSV Encoding**: Auto-detects `cp932`, `utf-8-sig`, `shift_jis`, `utf-8`. Product number format: `JAN[-SetCount]` × order quantity (`-0` treated as ×1).
-- **Default Warehouse/Customer**: `普通仓库`/`店铺` for normal ops; `乐天仓库`/`乐天` for Rakuten CSV imports.
 - **Gemini Prompt Security**: `_build_chat_report_prompt` wraps user text in `<chat_log>` tags with an explicit guard instruction to prevent prompt injection.
+- **Qinsi Warehouse Map**: `QINSI_WAREHOUSE_MAP` must be valid JSON. Missing entries cause per-record errors (reported in apply result), not a total failure.
 
 ## Data Analysis
 
 For reporting, query from `stock_transactions` and join outward:
 
 ```text
-stock_transactions → inventory_records → products → warehouses → customers
+stock_transactions → inventory_records → products → warehouses
 ```
 
-Key `source` values: `telegram` / `rakuten_csv` / `chat_report` / `physical_count`
+Key fields for analytics:
 
-`physical_count` ADJUST transactions have `note` format: `盘点日期:YYYY-MM-DD 盘点量:N 盘后变动:±N`
+| 字段 | 说明 |
+| --- | --- |
+| `transaction_date` | 实际业务日期（时序分析的主轴） |
+| `created_at` | WMS 录入时间（`transaction_date` 为 NULL 时的回退） |
+| `transaction_type` | IN / OUT / ADJUST |
+| `quantity_change` | 变动量（OUT 为负） |
+| `source` | 数据来源渠道 |
+| `reference_id` | 秦丝：`qinsi:{order_no}:{jan_code}` |
+
+`physical_count` ADJUST 事务的 `note` 格式：`盘点日期:YYYY-MM-DD 盘点量:N 盘后变动:±N`
+
+详细分析规划见 `docs/supply_chain_analytics.md`。
 
 ## Supply Chain Domain Roadmap
 
 以下待提升项暂不实现，设计新功能时需考虑其兼容性。
 
+### transaction_date 补全（乐天 CSV / 微信报库）
+
+Rakuten CSV 和微信报库的 `transaction_date` 目前为 NULL。Rakuten CSV 中有配送日期列，微信报库 AI 解析结果中有交易日期字段，后续在对应 apply 逻辑中补全写入。
+
+### 渠道/供应商字段
+
+秦丝销售单的客户名、采购单的供应商名目前仅展示于前端，未结构化存入 transaction。后续可新增 `channel VARCHAR(64)` 或 `supplier VARCHAR(64)` 列用于渠道分解分析。
+
 ### FEFO出库顺序（先到期先出）
 
-`_resolve_first_inventory_record` 当前按 `id ASC`（录入顺序）选择库存桶。对于有 `expiration_date` 的食品，改为 `expiration_date ASC NULLS LAST` 即可。这是单行改动，但有食品安全合规含义，需在食品类商品全面录入后切换。
+`_find_single_inventory_record` 当前按 `id ASC` 选择。对有 `expiration_date` 的食品，改为 `expiration_date ASC NULLS LAST` 即可（单行改动，需在食品类商品全面录入后切换）。
 
-### 负库存与零库存告警扩展
+### 月度损耗追踪
 
-- **零库存/负库存告警**: `/stockout_report` 命令列出余量 ≤ 0 的所有SKU，分仓库展示。
-- **过剩库存告警**: `total_quantity > N * units_per_case`（N可配置）时提醒，防止资金占用。
-
-### 月度损耗追踪（盘点对账升级）
-
-现有盘点导入已写入 `source="physical_count"` 的 ADJUST 事务。下一步：在 apply 时自动计算并写入损耗统计：
-
-```text
-理论余量 = 上次盘点余量 + Σ本期入库 - Σ本期出库
-损耗 = 盘点数量 - 理论余量（负值=盗损/损耗，正值=入库漏录）
-```
-
-将差异写入 `note` 字段，并提供 `/shrinkage_report YYYY-MM` 命令输出。
-
-### 乐天订单与出库对账
-
-Rakuten CSV 记录"已配送数量"。若接入乐天RMS订单feed，可对比订单量 vs 实际出库量（发现少发/漏发）。需新增 `RakutenOrder` 模型和对账服务。
+在盘点 apply 时自动计算 `理论余量 = 上次盘点余量 + Σ本期入库 - Σ本期出库`，将损耗写入 `note`。
 
 ### ABC速度分级
 
-每月按SKU移动量排序，分A（前20%）、B、C三级，存储在 `Product.velocity_class` 列。A类商品分配近码头库位、优先循环盘点、低库存阈值更高。
+每月按 SKU 移动量排序，分 A/B/C 三级，存储在 `Product.velocity_class` 列。

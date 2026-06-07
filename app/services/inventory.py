@@ -188,6 +188,7 @@ async def stock_in_item(
         note=payload.note,
         user_id=user_id,
         transaction_date=payload.transaction_date,
+        supplier=payload.supplier,
     )
     session.add(transaction)
     await session.flush()
@@ -258,6 +259,7 @@ async def stock_out_item(
         note=payload.note,
         user_id=user_id,
         transaction_date=payload.transaction_date,
+        customer=payload.customer,
     )
     session.add(transaction)
     await session.flush()
@@ -404,6 +406,8 @@ def _create_stock_transaction(
     note: str | None = None,
     user_id: int | None = None,
     transaction_date: date | None = None,
+    supplier: str | None = None,
+    customer: str | None = None,
 ) -> StockTransaction:
     return StockTransaction(
         inventory_record_id=record.id,
@@ -414,6 +418,8 @@ def _create_stock_transaction(
         note=note,
         user_id=user_id,
         transaction_date=transaction_date,
+        supplier=supplier,
+        customer=customer,
     )
 
 

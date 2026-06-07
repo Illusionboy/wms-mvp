@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import admin, auth, customers, health, inventory, inventory_count, qinsi_scrape, status, telegram, warehouses
+from app.api.v1.endpoints import admin, analytics, auth, customers, health, inventory, inventory_count, qinsi_scrape, status, telegram, warehouses
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -12,4 +12,5 @@ api_router.include_router(customers.router, prefix="/customers", tags=["customer
 api_router.include_router(warehouses.router, prefix="/warehouses", tags=["warehouses"])
 api_router.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(qinsi_scrape.router, prefix="/qinsi", tags=["qinsi-scrape"])
+api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(telegram.router, prefix="/telegram", tags=["telegram"])

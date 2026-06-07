@@ -127,6 +127,7 @@ class StockInCreate(BaseModel):
     reference_id: str | None = Field(default=None, max_length=64)
     note: str | None = Field(default=None, max_length=1000)
     transaction_date: date | None = None
+    supplier: str | None = Field(default=None, max_length=255)
 
 
 class StockOutCreate(BaseModel):
@@ -141,6 +142,7 @@ class StockOutCreate(BaseModel):
     note: str | None = Field(default=None, max_length=1000)
     suppress_low_stock_alert: bool = False
     transaction_date: date | None = None
+    customer: str | None = Field(default=None, max_length=255)
 
 
 class StockAdjustCreate(BaseModel):
@@ -165,6 +167,8 @@ class StockTransactionRead(BaseModel):
     reference_id: str | None
     note: str | None
     transaction_date: date | None
+    supplier: str | None
+    customer: str | None
     created_at: datetime
     updated_at: datetime
 

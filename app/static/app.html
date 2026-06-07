@@ -255,6 +255,19 @@ tr:hover td { background: var(--accent-bg); }
     </div>
 
     <div class="nav-group">
+      <div class="nav-label">历史查询</div>
+      <button class="nav-item" data-section="supplier-history" onclick="nav(this)">
+        <span class="icon">↑</span> 供应商记录
+      </button>
+      <button class="nav-item" data-section="customer-history" onclick="nav(this)">
+        <span class="icon">↓</span> 客户记录
+      </button>
+      <button class="nav-item" data-section="product-history" onclick="nav(this)">
+        <span class="icon">○</span> 商品进出库
+      </button>
+    </div>
+
+    <div class="nav-group">
       <div class="nav-label">管理</div>
       <button class="nav-item" data-section="products" onclick="nav(this)">
         <span class="icon">□</span> 商品管理
@@ -317,6 +330,10 @@ tr:hover td { background: var(--accent-bg); }
           <input type="text" id="si-location" value="A-00-00" placeholder="A-01-02">
         </div>
         <div class="form-row">
+          <label>供应商 (可选)</label>
+          <input type="text" id="si-supplier" placeholder="供应商名称…">
+        </div>
+        <div class="form-row">
           <label>备注 (可选)</label>
           <input type="text" id="si-note" placeholder="来源备注…">
         </div>
@@ -357,6 +374,10 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row">
           <label>数量</label>
           <input type="number" id="so-qty" min="1" value="1" placeholder="1">
+        </div>
+        <div class="form-row">
+          <label>客户 (可选)</label>
+          <input type="text" id="so-customer-name" placeholder="客户名称…">
         </div>
         <div class="form-row">
           <label>备注 (可选)</label>
@@ -629,14 +650,18 @@ tr:hover td { background: var(--accent-bg); }
             </select>
           </div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <button class="btn btn-primary" id="qs-scrape-btn" onclick="triggerQinsiScrape()">爬取记录</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-primary" id="qs-scrape-btn" onclick="triggerQinsiScrape(false)">重新爬取</button>
+          <button class="btn btn-ghost" id="qs-cache-btn" onclick="triggerQinsiScrape(true)">使用缓存</button>
+          <span id="qs-cache-hint" style="font-size:12px;color:var(--muted)"></span>
           <span id="qs-scrape-status" style="font-size:12px;color:var(--muted)"></span>
         </div>
       </div>
 
       <div id="qs-result-area" style="display:none">
         <hr class="divider">
+        <!-- Warehouse filter tabs -->
+        <div id="qs-wh-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <div>
             共 <strong id="qs-total"></strong> 笔单据
@@ -687,6 +712,97 @@ tr:hover td { background: var(--accent-bg); }
         </div>
         <div id="qs-apply-result" style="margin-top:12px"></div>
       </div>
+    </div>
+
+    <!-- Supplier History -->
+    <div class="section" id="section-supplier-history">
+      <div class="section-title">供应商入库记录</div>
+      <div class="section-sub">按供应商名称和日期范围查询入库历史</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>供应商名称</label>
+            <input type="text" id="sh-supplier" placeholder="输入名称关键词…" list="sh-supplier-list">
+            <datalist id="sh-supplier-list"></datalist>
+          </div>
+          <div class="form-row">
+            <label>开始日期</label>
+            <input type="date" id="sh-from">
+          </div>
+          <div class="form-row">
+            <label>结束日期</label>
+            <input type="date" id="sh-to">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="querySupplierHistory()">查询</button>
+      </div>
+      <div id="sh-result" style="margin-top:12px"></div>
+    </div>
+
+    <!-- Customer History -->
+    <div class="section" id="section-customer-history">
+      <div class="section-title">客户出库记录</div>
+      <div class="section-sub">按客户名称和日期范围查询出库历史</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>客户名称</label>
+            <input type="text" id="ch-customer" placeholder="输入名称关键词…" list="ch-customer-list">
+            <datalist id="ch-customer-list"></datalist>
+          </div>
+          <div class="form-row">
+            <label>开始日期</label>
+            <input type="date" id="ch-from">
+          </div>
+          <div class="form-row">
+            <label>结束日期</label>
+            <input type="date" id="ch-to">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="queryCustomerHistory()">查询</button>
+      </div>
+      <div id="ch-result" style="margin-top:12px"></div>
+    </div>
+
+    <!-- Product History -->
+    <div class="section" id="section-product-history">
+      <div class="section-title">商品进出库情况</div>
+      <div class="section-sub">按商品 JAN 码查询所有入库、出库、调整记录</div>
+      <div class="card">
+        <div class="form-row">
+          <label>搜索商品 (JAN / 商品名)</label>
+          <div class="search-widget">
+            <input type="text" id="ph-search" placeholder="扫描或输入…" oninput="debounceSearch('ph')">
+            <div class="search-results" id="ph-results" style="display:none"></div>
+          </div>
+          <div class="selected-product" id="ph-selected">
+            <div class="sri-jan" id="ph-jan-display"></div>
+            <div class="sp-name" id="ph-name-display"></div>
+          </div>
+          <input type="hidden" id="ph-jan">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>开始日期</label>
+            <input type="date" id="ph-from">
+          </div>
+          <div class="form-row">
+            <label>结束日期</label>
+            <input type="date" id="ph-to">
+          </div>
+          <div class="form-row">
+            <label>类型筛选</label>
+            <select id="ph-type">
+              <option value="">全部</option>
+              <option value="IN">入库</option>
+              <option value="OUT">出库</option>
+              <option value="ADJUST">调整</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="queryProductHistory()">查询</button>
+      </div>
+      <div id="ph-result" style="margin-top:12px"></div>
     </div>
 
     <!-- Products -->
@@ -860,6 +976,7 @@ function nav(btn) {
   if (btn.dataset.section === 'dashboard') loadDashboard();
   if (btn.dataset.section === 'settings') loadSettingsLists();
   if (btn.dataset.section === 'qinsi') checkQinsiAuth();
+  if (['supplier-history','customer-history'].includes(btn.dataset.section)) loadCounterpartyLists();
 }
 
 // ── Globals (warehouses & customers) ──────────────────────────────────────
@@ -870,6 +987,7 @@ async function loadGlobals() {
       api('GET', '/customers'),
     ]);
     populateSelects();
+    loadCounterpartyLists();   // populate supplier/customer datalists (non-blocking)
   } catch (e) { toast('加载仓库/客户失败: ' + e.message, 'err'); }
 }
 
@@ -994,18 +1112,18 @@ document.addEventListener('click', e => {
 async function submitStockIn() {
   const jan = document.getElementById('si-jan').value;
   const wId = +document.getElementById('si-warehouse').value;
-  const cRaw = document.getElementById('si-customer').value;
   const qty = +document.getElementById('si-qty').value;
   const loc = document.getElementById('si-location').value.trim() || 'A-00-00';
   const note = document.getElementById('si-note').value;
+  const supplier = document.getElementById('si-supplier').value.trim() || null;
   if (!jan) { toast('请先选择商品', 'err'); return; }
   if (!qty || qty < 1) { toast('数量必须大于 0', 'err'); return; }
   try {
     const txnDate = document.getElementById('si-txn-date').value || null;
     const res = await api('POST', '/inventory/stock-in', {
-      sku: jan, warehouse_id: wId, customer_id: cRaw ? +cRaw : null,
+      sku: jan, warehouse_id: wId,
       quantity: qty, source: 'web_ui', note: note || null, location_code: loc,
-      transaction_date: txnDate,
+      transaction_date: txnDate, supplier,
     });
     document.getElementById('si-result').innerHTML = resultCard('ok', `入库成功 ✓  ${jan} +${qty}，当前库存: ${res.record.quantity}`);
     toast('入库成功', 'ok');
@@ -1017,17 +1135,17 @@ async function submitStockIn() {
 async function submitStockOut() {
   const jan = document.getElementById('so-jan').value;
   const wId = +document.getElementById('so-warehouse').value;
-  const cRaw = document.getElementById('so-customer').value;
   const qty = +document.getElementById('so-qty').value;
   const note = document.getElementById('so-note').value;
+  const customer = document.getElementById('so-customer-name').value.trim() || null;
   if (!jan) { toast('请先选择商品', 'err'); return; }
   if (!qty || qty < 1) { toast('数量必须大于 0', 'err'); return; }
   try {
     const txnDate = document.getElementById('so-txn-date').value || null;
     const res = await api('POST', '/inventory/stock-out', {
-      sku: jan, warehouse_id: wId, customer_id: cRaw ? +cRaw : null,
+      sku: jan, warehouse_id: wId,
       quantity: qty, source: 'web_ui', note: note || null,
-      transaction_date: txnDate,
+      transaction_date: txnDate, customer,
     });
     document.getElementById('so-result').innerHTML = resultCard('ok', `出库成功 ✓  ${jan} -${qty}，当前库存: ${res.record.quantity}`);
     toast('出库成功', 'ok');
@@ -1521,8 +1639,9 @@ function p(n) { return String(n).padStart(2,'0'); }
 function esc(s) { return String(s||'').replace(/'/g,"&#39;").replace(/"/g,'&quot;'); }
 
 // ── 秦丝生意通 爬虫 ─────────────────────────────────────────────────────────
-let _qsRecords = [];   // flat list from API
-let _qsOrders  = [];   // grouped by order_no
+let _qsRecords = [];        // flat list from API
+let _qsOrders  = [];        // grouped by order_no
+let _qsActiveWh = '__all__'; // current warehouse filter tab
 
 function _groupByOrder(records) {
   const map = new Map();
@@ -1579,37 +1698,96 @@ populateSelects = function() {
     _customers.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
 };
 
-async function triggerQinsiScrape() {
+async function triggerQinsiScrape(useCache = false) {
   const fromDate = document.getElementById('qs-from').value;
   const toDate = document.getElementById('qs-to').value;
   if (!fromDate || !toDate) { toast('请选择日期范围', 'err'); return; }
-  const btn = document.getElementById('qs-scrape-btn');
-  const status = document.getElementById('qs-scrape-status');
-  btn.disabled = true;
-  status.textContent = '登录并爬取中，请稍候…（约30-60秒）';
+  const scrapeBtn = document.getElementById('qs-scrape-btn');
+  const cacheBtn  = document.getElementById('qs-cache-btn');
+  const statusEl  = document.getElementById('qs-scrape-status');
+  const hintEl    = document.getElementById('qs-cache-hint');
+  scrapeBtn.disabled = true;
+  cacheBtn.disabled  = true;
+  statusEl.textContent = useCache ? '读取缓存中…' : '登录并爬取中，请稍候…（约30-60秒）';
   document.getElementById('qs-result-area').style.display = 'none';
   try {
-    const res = await api('POST', '/qinsi/scrape', { from_date: fromDate, to_date: toDate });
+    const res = await api('POST', '/qinsi/scrape', { from_date: fromDate, to_date: toDate, use_cache: useCache });
     if (!res.success) {
       toast('爬取失败: ' + res.error, 'err');
-      status.textContent = '失败: ' + res.error;
-      if (res.debug_screenshots?.length) {
-        status.textContent += `（截图已保存: ${res.debug_screenshots.join(', ')}）`;
-      }
+      statusEl.textContent = '失败: ' + res.error;
       return;
     }
     _qsRecords = res.records || [];
     _qsOrders  = _groupByOrder(_qsRecords);
+    _qsActiveWh = '__all__';
+    renderQinsiWarehouseTabs(_qsOrders);
     renderQinsiOrders(_qsOrders, fromDate, toDate);
-    renderQinsiUnknownPanel(_qsRecords);   // async, non-blocking
+    renderQinsiUnknownPanel(_qsRecords);
     document.getElementById('qs-result-area').style.display = 'block';
-    status.textContent = `爬取完成：${_qsOrders.length} 笔单据，共 ${_qsRecords.length} 条商品`;
-    toast(`爬取完成：${_qsOrders.length} 笔单据`, 'ok');
+    statusEl.textContent = `${useCache ? '（缓存）' : ''}${_qsOrders.length} 笔单据，共 ${_qsRecords.length} 条商品`;
+    toast(`${useCache ? '缓存' : '爬取'}完成：${_qsOrders.length} 笔单据`, 'ok');
+    // Update cache hint
+    try {
+      const cs = await fetch(`/api/v1/qinsi/cache-status?from_date=${fromDate}&to_date=${toDate}`);
+      const csData = await cs.json();
+      if (csData.has_cache) {
+        const t = new Date(csData.cached_at).toLocaleString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+        hintEl.textContent = `缓存时间: ${t}`;
+      } else {
+        hintEl.textContent = '';
+      }
+    } catch (_) {}
   } catch (e) {
     toast('请求失败: ' + e.message, 'err');
-    status.textContent = '失败';
-  } finally { btn.disabled = false; }
+    statusEl.textContent = '失败';
+  } finally {
+    scrapeBtn.disabled = false;
+    cacheBtn.disabled  = false;
+  }
 }
+
+function renderQinsiWarehouseTabs(orders) {
+  const whSet = new Set(orders.map(o => o.warehouse_name || '').filter(Boolean));
+  const tabs  = document.getElementById('qs-wh-tabs');
+  if (whSet.size <= 1) { tabs.innerHTML = ''; return; }
+  const all = ['__all__', ...whSet];
+  tabs.innerHTML = all.map(wh => {
+    const label = wh === '__all__' ? '全部' : wh;
+    const active = wh === _qsActiveWh ? 'btn-primary' : 'btn-ghost';
+    return `<button class="btn btn-sm ${active}" onclick="qsFilterByWarehouse('${esc(wh)}')">${esc(label)}</button>`;
+  }).join('');
+}
+
+function qsFilterByWarehouse(wh) {
+  _qsActiveWh = wh;
+  const filtered = wh === '__all__' ? _qsOrders : _qsOrders.filter(o => o.warehouse_name === wh);
+  renderQinsiWarehouseTabs(_qsOrders); // re-render tabs so active state updates
+  const fromDate = document.getElementById('qs-from').value;
+  const toDate   = document.getElementById('qs-to').value;
+  renderQinsiOrders(filtered, fromDate, toDate);
+}
+
+// Check cache status when date range changes
+async function qsCheckCacheHint() {
+  const from = document.getElementById('qs-from').value;
+  const to   = document.getElementById('qs-to').value;
+  const hintEl = document.getElementById('qs-cache-hint');
+  if (!from || !to || !hintEl) return;
+  try {
+    const cs = await fetch(`/api/v1/qinsi/cache-status?from_date=${from}&to_date=${to}`);
+    const data = await cs.json();
+    if (data.has_cache) {
+      const t = new Date(data.cached_at).toLocaleString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      hintEl.textContent = `有缓存 (${data.record_count} 条, ${t})`;
+    } else {
+      hintEl.textContent = '无缓存';
+    }
+  } catch (_) { hintEl.textContent = ''; }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('qs-from')?.addEventListener('change', qsCheckCacheHint);
+  document.getElementById('qs-to')?.addEventListener('change', qsCheckCacheHint);
+});
 
 async function renderQinsiUnknownPanel(records) {
   const panel = document.getElementById('qs-unknown-panel');
@@ -1787,6 +1965,124 @@ async function applyQinsiSelected() {
     document.getElementById('qs-apply-result').innerHTML = resultCard('err', e.message);
   }
 }
+
+// ── 历史查询 公共渲染 ────────────────────────────────────────────────────────
+function _historyTable(rows, cols) {
+  if (!rows.length) return '<p style="color:var(--muted);padding:12px 0">无记录</p>';
+  const thead = '<thead><tr>' + cols.map(c => `<th>${c.label}</th>`).join('') + '</tr></thead>';
+  const tbody = '<tbody>' + rows.map(r => '<tr>' + cols.map(c => {
+    const v = typeof c.render === 'function' ? c.render(r) : (r[c.key] ?? '—');
+    return `<td>${v}</td>`;
+  }).join('') + '</tr>').join('') + '</tbody>';
+  return `<div class="table-wrap"><table>${thead}${tbody}</table></div>`;
+}
+
+function _dirBadge(t) {
+  if (t === 'IN')     return '<span class="badge badge-ok">入库</span>';
+  if (t === 'OUT')    return '<span class="badge badge-danger">出库</span>';
+  if (t === 'ADJUST') return '<span class="badge" style="background:var(--accent-bg);color:var(--accent)">调整</span>';
+  return t;
+}
+
+// ── 供应商历史 ───────────────────────────────────────────────────────────────
+async function querySupplierHistory() {
+  const supplier = document.getElementById('sh-supplier').value.trim();
+  if (!supplier) { toast('请输入供应商名称', 'err'); return; }
+  const from = document.getElementById('sh-from').value || null;
+  const to   = document.getElementById('sh-to').value || null;
+  const el   = document.getElementById('sh-result');
+  el.innerHTML = '<p class="loading">查询中…</p>';
+  try {
+    let url = `/analytics/supplier-history?supplier=${encodeURIComponent(supplier)}`;
+    if (from) url += `&from_date=${from}`;
+    if (to)   url += `&to_date=${to}`;
+    const rows = await api('GET', url);
+    const cols = [
+      { label: '日期', render: r => r.transaction_date || r.created_at?.slice(0,10) || '—' },
+      { label: '仓库', key: 'warehouse_name' },
+      { label: 'JAN',  render: r => `<code style="font-size:11px">${r.jan_code||'—'}</code>` },
+      { label: '商品名', key: 'product_name' },
+      { label: '数量', render: r => `+${r.quantity_change}` },
+      { label: '供应商', key: 'supplier' },
+      { label: '备注', render: r => r.note || '—' },
+    ];
+    const total = rows.reduce((s, r) => s + (r.quantity_change || 0), 0);
+    el.innerHTML = `<div style="font-size:13px;margin-bottom:8px;color:var(--muted)">共 ${rows.length} 条，合计入库 <strong>${total}</strong> 件</div>` + _historyTable(rows, cols);
+  } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+
+// ── 客户历史 ─────────────────────────────────────────────────────────────────
+async function queryCustomerHistory() {
+  const customer = document.getElementById('ch-customer').value.trim();
+  if (!customer) { toast('请输入客户名称', 'err'); return; }
+  const from = document.getElementById('ch-from').value || null;
+  const to   = document.getElementById('ch-to').value || null;
+  const el   = document.getElementById('ch-result');
+  el.innerHTML = '<p class="loading">查询中…</p>';
+  try {
+    let url = `/analytics/customer-history?customer=${encodeURIComponent(customer)}`;
+    if (from) url += `&from_date=${from}`;
+    if (to)   url += `&to_date=${to}`;
+    const rows = await api('GET', url);
+    const cols = [
+      { label: '日期', render: r => r.transaction_date || r.created_at?.slice(0,10) || '—' },
+      { label: '仓库', key: 'warehouse_name' },
+      { label: 'JAN',  render: r => `<code style="font-size:11px">${r.jan_code||'—'}</code>` },
+      { label: '商品名', key: 'product_name' },
+      { label: '数量', render: r => r.quantity_change },
+      { label: '客户', key: 'customer' },
+      { label: '备注', render: r => r.note || '—' },
+    ];
+    const total = rows.reduce((s, r) => s + Math.abs(r.quantity_change || 0), 0);
+    el.innerHTML = `<div style="font-size:13px;margin-bottom:8px;color:var(--muted)">共 ${rows.length} 条，合计出库 <strong>${total}</strong> 件</div>` + _historyTable(rows, cols);
+  } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+
+// ── 商品进出库 ───────────────────────────────────────────────────────────────
+async function queryProductHistory() {
+  const jan = document.getElementById('ph-jan').value;
+  if (!jan) { toast('请先选择商品', 'err'); return; }
+  const from = document.getElementById('ph-from').value || null;
+  const to   = document.getElementById('ph-to').value || null;
+  const type = document.getElementById('ph-type').value || null;
+  const el   = document.getElementById('ph-result');
+  el.innerHTML = '<p class="loading">查询中…</p>';
+  try {
+    let url = `/analytics/product-history?jan_code=${encodeURIComponent(jan)}`;
+    if (from) url += `&from_date=${from}`;
+    if (to)   url += `&to_date=${to}`;
+    if (type) url += `&transaction_type=${type}`;
+    const rows = await api('GET', url);
+    const cols = [
+      { label: '日期', render: r => r.transaction_date || r.created_at?.slice(0,10) || '—' },
+      { label: '类型', render: r => _dirBadge(r.transaction_type) },
+      { label: '仓库', key: 'warehouse_name' },
+      { label: '数量', render: r => (r.quantity_change > 0 ? '+' : '') + r.quantity_change },
+      { label: '供应商', render: r => r.supplier || '—' },
+      { label: '客户',   render: r => r.customer || '—' },
+      { label: '来源', key: 'source' },
+      { label: '备注', render: r => r.note || '—' },
+    ];
+    const inTotal  = rows.filter(r => r.transaction_type === 'IN').reduce((s,r)=>s+r.quantity_change,0);
+    const outTotal = rows.filter(r => r.transaction_type === 'OUT').reduce((s,r)=>s+Math.abs(r.quantity_change),0);
+    el.innerHTML = `<div style="font-size:13px;margin-bottom:8px;color:var(--muted)">共 ${rows.length} 条 | 入库 <strong>+${inTotal}</strong> | 出库 <strong>-${outTotal}</strong></div>` + _historyTable(rows, cols);
+  } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+
+// ── 加载供应商/客户自动补全列表 ──────────────────────────────────────────────
+async function loadCounterpartyLists() {
+  try {
+    const data = await api('GET', '/analytics/counterparties');
+    const sl = document.getElementById('sh-supplier-list');
+    const cl = document.getElementById('ch-customer-list');
+    if (sl) sl.innerHTML = (data.suppliers || []).map(s => `<option value="${esc(s)}">`).join('');
+    if (cl) cl.innerHTML = (data.customers  || []).map(c => `<option value="${esc(c)}">`).join('');
+  } catch (_) {}
+}
+
+// ── Product history search widget binding ────────────────────────────────────
+// Re-use the existing debounceSearch / selectProduct pattern for 'ph' prefix
+// selectProduct sets ph-jan, ph-jan-display, ph-name-display when user picks a product
 </script>
 </body>
 </html>

@@ -4,6 +4,7 @@ from app.models.inventory_count_draft import InventoryCountDraft
 from app.models.inventory_record import InventoryRecord
 from app.models.inventory_import_job import InventoryImportJob
 from app.models.product import Product
+from app.models.qinsi_scrape_cache import QinsiScrapeCache
 from app.models.rakuten_shipment_draft import RakutenShipmentDraft
 from app.models.stock_transaction import StockTransaction, StockTransactionType
 from app.models.user import User
@@ -16,6 +17,7 @@ __all__ = [
     "InventoryImportJob",
     "InventoryRecord",
     "Product",
+    "QinsiScrapeCache",
     "RakutenShipmentDraft",
     "StockTransaction",
     "StockTransactionType",
