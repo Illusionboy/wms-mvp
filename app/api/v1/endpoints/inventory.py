@@ -45,6 +45,33 @@ router = APIRouter()
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
+@router.get("/negative-stock")
+async def list_negative_stock(
+    warehouse_id: int | None = Query(default=None),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[dict]:
+    """Return all inventory records with quantity < 0. No auth required."""
+    from sqlalchemy.orm import selectinload as sl
+    stmt = (
+        select(InventoryRecord)
+        .options(sl(InventoryRecord.product), sl(InventoryRecord.warehouse))
+        .where(InventoryRecord.quantity < 0)
+    )
+    if warehouse_id is not None:
+        stmt = stmt.where(InventoryRecord.warehouse_id == warehouse_id)
+    rows = await session.scalars(stmt.order_by(InventoryRecord.quantity.asc()))
+    return [
+        {
+            "jan_code": r.product_jan,
+            "name_jp": r.product.name_jp,
+            "name_zh": r.product.name_zh,
+            "warehouse_name": r.warehouse.name,
+            "quantity": r.quantity,
+        }
+        for r in rows.all()
+    ]
+
+
 @router.get("/search", response_model=list[ProductInventoryRead])
 async def search_inventory(
     keyword: str = Query(min_length=1, max_length=255),
