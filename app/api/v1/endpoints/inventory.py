@@ -18,6 +18,7 @@ from app.schemas.inventory import (
     ProductCreate,
     ProductInventoryRead,
     ProductRead,
+    ProductUpdate,
     RakutenShipmentImportResult,
     StockAdjustCreate,
     StockAdjustResult,
@@ -90,6 +91,27 @@ async def search_product_master(
     session: AsyncSession = Depends(get_db_session),
 ) -> list[Product]:
     return await search_products(session=session, keyword=keyword)
+
+
+@router.patch("/products/{jan_code}", response_model=ProductRead)
+async def update_product(
+    jan_code: str,
+    payload: ProductUpdate,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> Product:
+    product = await session.scalar(select(Product).where(Product.jan_code == jan_code))
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"JAN {jan_code} 不存在")
+    if payload.name_jp is not None:
+        product.name_jp = payload.name_jp
+    if payload.name_zh is not None:
+        product.name_zh = payload.name_zh
+    if payload.units_per_case is not None:
+        product.units_per_case = payload.units_per_case
+    await session.commit()
+    await session.refresh(product)
+    return product
 
 
 @router.post("/products", response_model=ProductRead, status_code=status.HTTP_201_CREATED)

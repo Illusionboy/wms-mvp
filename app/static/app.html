@@ -1357,13 +1357,43 @@ async function searchProducts() {
     const items = await api('GET', `/inventory/search_sku?keyword=${encodeURIComponent(kw)}`);
     const el = document.getElementById('prod-search-result');
     if (!items.length) { el.innerHTML = '<p class="loading">无结果</p>'; return; }
-    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>日文名</th><th>中文名</th><th>箱入数</th></tr></thead><tbody>' +
-      items.map(p => `<tr>
+    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>日文名</th><th>中文名</th><th>箱入数</th><th></th></tr></thead><tbody>' +
+      items.map(p => `<tr id="prow-${p.jan_code}">
         <td><code style="font-size:11px">${p.jan_code}</code></td>
-        <td>${p.name_jp}</td>
-        <td>${p.name_zh||'—'}</td>
+        <td>${esc(p.name_jp)}</td>
+        <td>${esc(p.name_zh||'')}</td>
         <td>${p.units_per_case||'—'}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="editProductRow('${p.jan_code}','${esc(p.name_jp)}','${esc(p.name_zh||'')}','${p.units_per_case||''}')">编辑</button></td>
       </tr>`).join('') + '</tbody></table></div>';
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function editProductRow(jan, nameJp, nameZh, upc) {
+  const row = document.getElementById(`prow-${jan}`);
+  if (!row) return;
+  row.innerHTML = `
+    <td><code style="font-size:11px">${jan}</code></td>
+    <td><input type="text" value="${nameJp}" id="pedit-jp-${jan}" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+    <td><input type="text" value="${nameZh}" id="pedit-zh-${jan}" placeholder="中文名（可选）" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+    <td><input type="number" value="${upc}" id="pedit-upc-${jan}" min="1" placeholder="—" style="width:70px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-primary btn-sm" onclick="saveProductRow('${jan}')">保存</button>
+      <button class="btn btn-ghost btn-sm" onclick="searchProducts()">取消</button>
+    </td>`;
+}
+
+async function saveProductRow(jan) {
+  const nameJp = document.getElementById(`pedit-jp-${jan}`)?.value.trim();
+  const nameZh = document.getElementById(`pedit-zh-${jan}`)?.value.trim();
+  const upcRaw = document.getElementById(`pedit-upc-${jan}`)?.value;
+  if (!nameJp) { toast('日文名不能为空', 'err'); return; }
+  const body = { name_jp: nameJp };
+  if (nameZh) body.name_zh = nameZh;
+  if (upcRaw) body.units_per_case = +upcRaw;
+  try {
+    await api('PATCH', `/inventory/products/${jan}`, body);
+    toast('已保存', 'ok');
+    searchProducts();
   } catch (e) { toast(e.message, 'err'); }
 }
 

@@ -90,6 +90,12 @@ class ProductCreate(BaseModel):
     units_per_case: int | None = Field(default=None, gt=0)
 
 
+class ProductUpdate(BaseModel):
+    name_jp: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)] | None = None
+    name_zh: Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)] | None = None
+    units_per_case: int | None = Field(default=None, gt=0)
+
+
 class InventoryRecordRead(BaseModel):
     id: int
     product_jan: str
