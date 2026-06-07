@@ -60,6 +60,29 @@ async def search_product_master(
     return await search_products(session=session, keyword=keyword)
 
 
+@router.post("/products", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
+async def create_product(
+    payload: "ProductCreate",
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> Product:
+    from app.schemas.inventory import ProductCreate
+    from sqlalchemy import select as sa_select
+    existing = await session.scalar(sa_select(Product).where(Product.jan_code == payload.jan_code))
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"JAN {payload.jan_code} 已存在")
+    product = Product(
+        jan_code=payload.jan_code,
+        name_jp=payload.name_jp,
+        name_zh=payload.name_zh,
+        units_per_case=payload.units_per_case,
+    )
+    session.add(product)
+    await session.commit()
+    await session.refresh(product)
+    return product
+
+
 @router.post("/chat-reports/parse", response_model=ChatReportDraftRead)
 async def parse_chat_report(
     payload: ChatReportParseRequest,

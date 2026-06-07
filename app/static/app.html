@@ -525,6 +525,29 @@ tr:hover td { background: var(--accent-bg); }
       </div>
       <div id="ci-draft-area" style="display:none">
         <hr class="divider">
+
+        <!-- Unknown SKU panel -->
+        <div id="ci-unknown-panel" style="display:none;margin-bottom:20px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <div>
+              <strong style="color:var(--warn)">⚠ 发现商品字典中没有的JAN码</strong>
+              <span style="font-size:12px;color:var(--muted);margin-left:8px">填写商品名后勾选，点"添加到字典"</span>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ci-unknown-panel').style.display='none'">收起</button>
+          </div>
+          <div class="table-wrap" style="margin-bottom:10px">
+            <table>
+              <thead><tr>
+                <th style="width:32px"><input type="checkbox" id="ci-unk-all" onchange="ciUnkToggleAll(this.checked)"></th>
+                <th>JAN</th><th>商品名(日文)*</th><th>中文名(可选)</th><th>箱入数(可选)</th>
+              </tr></thead>
+              <tbody id="ci-unknown-rows"></tbody>
+            </table>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="addUnknownProducts()">添加勾选商品到字典</button>
+          <span id="ci-unk-result" style="margin-left:12px;font-size:13px"></span>
+        </div>
+
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <div>
             <strong>草稿 #<span id="ci-draft-id"></span></strong>
@@ -1156,6 +1179,69 @@ async function uploadCountFile() {
 function renderCountDraft(draft) {
   document.getElementById('ci-draft-id').textContent = draft.id;
   renderCountLines(_countLines);
+  renderUnknownSkuPanel(_countLines);
+}
+
+function renderUnknownSkuPanel(lines) {
+  const unknown = lines.filter(l => l.known_product === false);
+  const panel = document.getElementById('ci-unknown-panel');
+  if (!unknown.length) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  document.getElementById('ci-unknown-rows').innerHTML = unknown.map((l, i) => `<tr>
+    <td><input type="checkbox" class="ci-unk-check" data-idx="${i}" checked></td>
+    <td><code style="font-size:11px">${l.jan_code}</code></td>
+    <td><input type="text" class="ci-unk-namejp" data-idx="${i}" value="${esc(l.product_name)}" style="width:100%;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+    <td><input type="text" class="ci-unk-namezh" data-idx="${i}" placeholder="中文名（可选）" style="width:100%;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+    <td><input type="number" class="ci-unk-case" data-idx="${i}" placeholder="—" min="1" style="width:80px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+  </tr>`).join('');
+  document.getElementById('ci-unk-result').textContent = '';
+  // store reference to unknown lines for submit
+  panel._unknownLines = unknown;
+}
+
+function ciUnkToggleAll(checked) {
+  document.querySelectorAll('.ci-unk-check').forEach(el => el.checked = checked);
+}
+
+async function addUnknownProducts() {
+  const panel = document.getElementById('ci-unknown-panel');
+  const unknown = panel._unknownLines || [];
+  const checks = [...document.querySelectorAll('.ci-unk-check:checked')];
+  if (!checks.length) { toast('请先勾选要添加的商品', 'err'); return; }
+  const resultEl = document.getElementById('ci-unk-result');
+  resultEl.textContent = '添加中…';
+  let ok = 0, fail = 0;
+  for (const cb of checks) {
+    const i = +cb.dataset.idx;
+    const line = unknown[i];
+    const nameJp = document.querySelector(`.ci-unk-namejp[data-idx="${i}"]`).value.trim();
+    const nameZh = document.querySelector(`.ci-unk-namezh[data-idx="${i}"]`).value.trim() || null;
+    const caseVal = document.querySelector(`.ci-unk-case[data-idx="${i}"]`).value;
+    if (!nameJp) { toast(`JAN ${line.jan_code} 日文名不能为空`, 'err'); fail++; continue; }
+    try {
+      await api('POST', '/inventory/products', {
+        jan_code: line.jan_code,
+        name_jp: nameJp,
+        name_zh: nameZh,
+        units_per_case: caseVal ? +caseVal : null,
+      });
+      ok++;
+      cb.closest('tr').style.opacity = '0.4';
+      cb.disabled = true;
+    } catch (e) {
+      toast(`${line.jan_code} 添加失败: ${e.message}`, 'err');
+      fail++;
+    }
+  }
+  resultEl.textContent = `✓ 成功添加 ${ok} 个商品${fail ? `，${fail} 个失败` : ''}`;
+  if (ok) {
+    toast(`已添加 ${ok} 个商品到字典`, 'ok');
+    // refresh count lines known_product status
+    _countLines.forEach(l => {
+      if (unknown.find(u => u.jan_code === l.jan_code)) l.known_product = true;
+    });
+    renderCountLines(_countLines);
+  }
 }
 function renderCountLines(lines) {
   const tbody = document.getElementById('ci-lines');
