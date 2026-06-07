@@ -620,6 +620,7 @@ async def apply_inventory_count_draft(
                 f"盘后变动:{line.delta_after_count:+d}"
             ),
             user_id=user_id,
+            transaction_date=document.count_date,
         )
         session.add(transaction)
 

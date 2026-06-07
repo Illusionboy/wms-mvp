@@ -320,6 +320,10 @@ tr:hover td { background: var(--accent-bg); }
           <label>备注 (可选)</label>
           <input type="text" id="si-note" placeholder="来源备注…">
         </div>
+        <div class="form-row">
+          <label>交易日期 (默认今天)</label>
+          <input type="date" id="si-txn-date">
+        </div>
         <button class="btn btn-primary" onclick="submitStockIn()">确认入库</button>
       </div>
       <div id="si-result"></div>
@@ -358,6 +362,10 @@ tr:hover td { background: var(--accent-bg); }
           <label>备注 (可选)</label>
           <input type="text" id="so-note" placeholder="出库原因…">
         </div>
+        <div class="form-row">
+          <label>交易日期 (默认今天)</label>
+          <input type="date" id="so-txn-date">
+        </div>
         <button class="btn btn-primary" onclick="submitStockOut()">确认出库</button>
       </div>
       <div id="so-result"></div>
@@ -391,6 +399,10 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row">
           <label>实际数量 (调整后应有的值)</label>
           <input type="number" id="sa-qty" min="0" value="0" placeholder="0">
+        </div>
+        <div class="form-row">
+          <label>交易日期 (默认今天)</label>
+          <input type="date" id="sa-txn-date">
         </div>
         <button class="btn btn-primary" onclick="submitAdjust()">确认调整</button>
       </div>
@@ -989,9 +1001,11 @@ async function submitStockIn() {
   if (!jan) { toast('请先选择商品', 'err'); return; }
   if (!qty || qty < 1) { toast('数量必须大于 0', 'err'); return; }
   try {
+    const txnDate = document.getElementById('si-txn-date').value || null;
     const res = await api('POST', '/inventory/stock-in', {
       sku: jan, warehouse_id: wId, customer_id: cRaw ? +cRaw : null,
       quantity: qty, source: 'web_ui', note: note || null, location_code: loc,
+      transaction_date: txnDate,
     });
     document.getElementById('si-result').innerHTML = resultCard('ok', `入库成功 ✓  ${jan} +${qty}，当前库存: ${res.record.quantity}`);
     toast('入库成功', 'ok');
@@ -1009,9 +1023,11 @@ async function submitStockOut() {
   if (!jan) { toast('请先选择商品', 'err'); return; }
   if (!qty || qty < 1) { toast('数量必须大于 0', 'err'); return; }
   try {
+    const txnDate = document.getElementById('so-txn-date').value || null;
     const res = await api('POST', '/inventory/stock-out', {
       sku: jan, warehouse_id: wId, customer_id: cRaw ? +cRaw : null,
       quantity: qty, source: 'web_ui', note: note || null,
+      transaction_date: txnDate,
     });
     document.getElementById('so-result').innerHTML = resultCard('ok', `出库成功 ✓  ${jan} -${qty}，当前库存: ${res.record.quantity}`);
     toast('出库成功', 'ok');
@@ -1027,9 +1043,11 @@ async function submitAdjust() {
   const qty = +document.getElementById('sa-qty').value;
   if (!jan) { toast('请先选择商品', 'err'); return; }
   try {
+    const txnDate = document.getElementById('sa-txn-date').value || null;
     const res = await api('POST', '/inventory/stock-adjust', {
       sku: jan, warehouse_id: wId, customer_id: cRaw ? +cRaw : null,
       actual_quantity: qty, source: 'web_ui',
+      transaction_date: txnDate,
     });
     document.getElementById('sa-result').innerHTML = resultCard('ok', `调整成功 ✓  ${jan}，之前: ${res.previous_quantity}，调整后: ${res.actual_quantity}（delta: ${res.quantity_delta >= 0 ? '+' : ''}${res.quantity_delta}）`);
     toast('调整成功', 'ok');

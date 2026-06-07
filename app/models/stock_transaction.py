@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import date
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Enum, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Date, Enum, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -50,5 +51,6 @@ class StockTransaction(TimestampMixin, Base):
     source: Mapped[str] = mapped_column(String(64), nullable=False)
     reference_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transaction_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
 
     inventory_record: Mapped[InventoryRecord] = relationship(back_populates="transactions")

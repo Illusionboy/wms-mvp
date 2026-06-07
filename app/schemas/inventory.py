@@ -126,6 +126,7 @@ class StockInCreate(BaseModel):
     source: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)] = "telegram"
     reference_id: str | None = Field(default=None, max_length=64)
     note: str | None = Field(default=None, max_length=1000)
+    transaction_date: date | None = None
 
 
 class StockOutCreate(BaseModel):
@@ -139,6 +140,7 @@ class StockOutCreate(BaseModel):
     reference_id: str | None = Field(default=None, max_length=64)
     note: str | None = Field(default=None, max_length=1000)
     suppress_low_stock_alert: bool = False
+    transaction_date: date | None = None
 
 
 class StockAdjustCreate(BaseModel):
@@ -151,6 +153,7 @@ class StockAdjustCreate(BaseModel):
     expiration_date: date | None = None
     reference_id: str | None = Field(default=None, max_length=64)
     note: str | None = Field(default=None, max_length=1000)
+    transaction_date: date | None = None
 
 
 class StockTransactionRead(BaseModel):
@@ -161,6 +164,7 @@ class StockTransactionRead(BaseModel):
     source: str
     reference_id: str | None
     note: str | None
+    transaction_date: date | None
     created_at: datetime
     updated_at: datetime
 

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -183,7 +183,12 @@ async def apply_scraped_records(
             skipped += 1
             continue
 
-        note = f"秦丝记录日期:{rec.record_date}" + (f" 备注:{rec.note}" if rec.note else "")
+        txn_date: date | None = None
+        try:
+            txn_date = date.fromisoformat(rec.record_date) if rec.record_date else None
+        except ValueError:
+            pass
+        note = f" 备注:{rec.note}" if rec.note else ""
         try:
             if rec.direction == "IN":
                 await stock_in_item(
@@ -196,7 +201,8 @@ async def apply_scraped_records(
                         location_code="A-00-00",
                         source="qinsi_scrape",
                         reference_id=ref_id,
-                        note=note,
+                        note=note or None,
+                        transaction_date=txn_date,
                     ),
                     commit=False,
                     user_id=current_user.id,
@@ -211,7 +217,8 @@ async def apply_scraped_records(
                         quantity=rec.quantity,
                         source="qinsi_scrape",
                         reference_id=ref_id,
-                        note=note,
+                        note=note or None,
+                        transaction_date=txn_date,
                     ),
                     commit=False,
                     user_id=current_user.id,
