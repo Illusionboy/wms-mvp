@@ -22,6 +22,12 @@ async def init_db() -> None:
             "ALTER TABLE warehouses ADD COLUMN IF NOT EXISTS "
             "allow_negative_stock BOOLEAN NOT NULL DEFAULT FALSE"
         ))
+        # Drop the non-negative check constraint — negative stock is a valid state
+        # for warehouses with allow_negative_stock=True (e.g. during month-end count gap)
+        await conn.execute(text(
+            "ALTER TABLE inventory_records DROP CONSTRAINT IF EXISTS "
+            "ck_inventory_records_quantity_non_negative"
+        ))
         await conn.execute(text(
             "ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS "
             "user_id INTEGER REFERENCES users(id) ON DELETE SET NULL"

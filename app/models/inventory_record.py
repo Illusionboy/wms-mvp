@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, Date, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Date, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 class InventoryRecord(TimestampMixin, Base):
     __tablename__ = "inventory_records"
     __table_args__ = (
-        CheckConstraint("quantity >= 0", name="ck_inventory_records_quantity_non_negative"),
         UniqueConstraint(
             "product_jan",
             "warehouse_id",
