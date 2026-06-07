@@ -638,6 +638,28 @@ tr:hover td { background: var(--accent-bg); }
           </div>
         </div>
         <div id="qs-error-box" style="display:none;margin-bottom:12px"></div>
+
+        <!-- 未知商品面板 -->
+        <div id="qs-unknown-panel" style="display:none;margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--warn-bg);border-radius:8px 8px 0 0;border:1px solid var(--warn)">
+            <strong style="color:var(--warn)">⚠ 以下 JAN 码不在商品字典中，可在此批量添加后再导入</strong>
+            <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="document.getElementById('qs-unknown-panel').style.display='none'">收起</button>
+          </div>
+          <div style="border:1px solid var(--warn);border-top:none;border-radius:0 0 8px 8px;overflow:hidden">
+            <table style="width:100%">
+              <thead><tr>
+                <th style="width:32px"><input type="checkbox" onchange="qsUnkToggleAll(this.checked)"></th>
+                <th>JAN</th><th>日文名（可编辑）</th><th>中文名（可选）</th><th style="width:90px">箱入数</th>
+              </tr></thead>
+              <tbody id="qs-unknown-rows"></tbody>
+            </table>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+            <button class="btn btn-primary btn-sm" onclick="addQinsiUnknownProducts()">添加勾选商品到字典</button>
+            <span id="qs-unk-result" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+        </div>
+
         <div class="table-wrap">
           <table>
             <thead>
@@ -1495,6 +1517,7 @@ async function triggerQinsiScrape() {
     _qsRecords = res.records || [];
     _qsOrders  = _groupByOrder(_qsRecords);
     renderQinsiOrders(_qsOrders, fromDate, toDate);
+    renderQinsiUnknownPanel(_qsRecords);   // async, non-blocking
     document.getElementById('qs-result-area').style.display = 'block';
     status.textContent = `爬取完成：${_qsOrders.length} 笔单据，共 ${_qsRecords.length} 条商品`;
     toast(`爬取完成：${_qsOrders.length} 笔单据`, 'ok');
@@ -1502,6 +1525,66 @@ async function triggerQinsiScrape() {
     toast('请求失败: ' + e.message, 'err');
     status.textContent = '失败';
   } finally { btn.disabled = false; }
+}
+
+async function renderQinsiUnknownPanel(records) {
+  const panel = document.getElementById('qs-unknown-panel');
+  const janCodes = [...new Set(records.map(r => r.jan_code).filter(Boolean))];
+  if (!janCodes.length) { panel.style.display = 'none'; return; }
+  let missing = [];
+  try { missing = await api('POST', '/inventory/products/missing-batch', { jan_codes: janCodes }); }
+  catch (_) { panel.style.display = 'none'; return; }
+  if (!missing.length) { panel.style.display = 'none'; return; }
+
+  // collect product names from records
+  const nameMap = {};
+  for (const r of records) { if (r.jan_code && !nameMap[r.jan_code]) nameMap[r.jan_code] = r.product_name; }
+
+  panel.style.display = 'block';
+  panel._missing = missing.map(j => ({ jan_code: j, product_name: nameMap[j] || '' }));
+  document.getElementById('qs-unknown-rows').innerHTML = missing.map((j, i) => `<tr>
+    <td><input type="checkbox" class="qs-unk-check" data-idx="${i}" checked></td>
+    <td><code style="font-size:11px">${j}</code></td>
+    <td><input type="text" class="qs-unk-namejp" data-idx="${i}" value="${esc(nameMap[j]||'')}" style="width:100%;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+    <td><input type="text" class="qs-unk-namezh" data-idx="${i}" placeholder="中文名（可选）" style="width:100%;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+    <td><input type="number" class="qs-unk-case" data-idx="${i}" placeholder="—" min="1" style="width:80px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+  </tr>`).join('');
+  document.getElementById('qs-unk-result').textContent = '';
+}
+
+function qsUnkToggleAll(checked) {
+  document.querySelectorAll('.qs-unk-check').forEach(el => el.checked = checked);
+}
+
+async function addQinsiUnknownProducts() {
+  const panel = document.getElementById('qs-unknown-panel');
+  const missing = panel._missing || [];
+  const checks = [...document.querySelectorAll('.qs-unk-check:checked')];
+  if (!checks.length) { toast('请先勾选要添加的商品', 'err'); return; }
+  const resultEl = document.getElementById('qs-unk-result');
+  resultEl.textContent = '添加中…';
+  let ok = 0, fail = 0;
+  for (const cb of checks) {
+    const i = +cb.dataset.idx;
+    const nameJp = document.querySelector(`.qs-unk-namejp[data-idx="${i}"]`).value.trim();
+    const nameZh = document.querySelector(`.qs-unk-namezh[data-idx="${i}"]`).value.trim() || null;
+    const caseVal = document.querySelector(`.qs-unk-case[data-idx="${i}"]`).value;
+    if (!nameJp) { toast(`JAN ${missing[i]?.jan_code} 日文名不能为空`, 'err'); fail++; continue; }
+    try {
+      await api('POST', '/inventory/products', {
+        jan_code: missing[i].jan_code, name_jp: nameJp, name_zh: nameZh,
+        units_per_case: caseVal ? +caseVal : null,
+      });
+      ok++;
+      cb.closest('tr').style.opacity = '0.4';
+      cb.disabled = true;
+    } catch (e) {
+      toast(`${missing[i]?.jan_code} 添加失败: ${e.message}`, 'err');
+      fail++;
+    }
+  }
+  resultEl.textContent = `✓ 成功添加 ${ok} 个${fail ? `，${fail} 个失败` : ''}`;
+  if (ok) toast(`已添加 ${ok} 个商品到字典`, 'ok');
 }
 
 function renderQinsiOrders(orders, fromDate, toDate) {

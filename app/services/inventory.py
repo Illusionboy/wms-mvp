@@ -219,15 +219,35 @@ async def stock_out_item(
     commit: bool = True,
     user_id: int | None = None,
 ) -> StockMutationResult:
-    # with_for_update() inside _find_single_inventory_record prevents concurrent deduction
-    record = await _find_single_inventory_record(
-        session=session,
-        sku=payload.sku,
-        warehouse_id=payload.warehouse_id,
-        customer_id=payload.customer_id,
-        location_code=payload.location_code,
-        expiration_date=payload.expiration_date,
-    )
+    try:
+        # with_for_update() inside _find_single_inventory_record prevents concurrent deduction
+        record = await _find_single_inventory_record(
+            session=session,
+            sku=payload.sku,
+            warehouse_id=payload.warehouse_id,
+            customer_id=payload.customer_id,
+            location_code=payload.location_code,
+            expiration_date=payload.expiration_date,
+        )
+    except InventoryRecordNotFoundError:
+        # No existing record — only allowed when warehouse has negative stock enabled
+        warehouse = await session.get(Warehouse, payload.warehouse_id)
+        if warehouse is None or not warehouse.allow_negative_stock:
+            raise
+        product = await session.scalar(select(Product).where(Product.jan_code == payload.sku))
+        if product is None:
+            raise InventoryTargetNotFoundError
+        record = InventoryRecord(
+            product_jan=payload.sku,
+            warehouse_id=payload.warehouse_id,
+            customer_id=payload.customer_id,
+            location_code=payload.location_code or "A-00-00",
+            quantity=0,
+            expiration_date=payload.expiration_date,
+        )
+        session.add(record)
+        await session.flush()
+
     previous_quantity = record.quantity
     if record.quantity < payload.quantity:
         warehouse = await session.get(Warehouse, payload.warehouse_id)
