@@ -11,6 +11,7 @@ from app.schemas.inventory import (
     ChatReportParseRequest,
     InventoryRecordRead,
     ProductCatalogImportResult,
+    ProductCreate,
     ProductInventoryRead,
     ProductRead,
     RakutenShipmentImportResult,
@@ -62,11 +63,10 @@ async def search_product_master(
 
 @router.post("/products", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
 async def create_product(
-    payload: "ProductCreate",
+    payload: ProductCreate,
     session: AsyncSession = Depends(get_db_session),
     current_user: CurrentUser = Depends(require_auth),
 ) -> Product:
-    from app.schemas.inventory import ProductCreate
     from sqlalchemy import select as sa_select
     existing = await session.scalar(sa_select(Product).where(Product.jan_code == payload.jan_code))
     if existing:
