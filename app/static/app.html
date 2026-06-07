@@ -634,6 +634,8 @@ tr:hover td { background: var(--accent-bg); }
           <div style="display:flex;gap:8px">
             <button class="btn btn-ghost btn-sm" onclick="qsToggleAll(true)">全选</button>
             <button class="btn btn-ghost btn-sm" onclick="qsToggleAll(false)">取消</button>
+            <button class="btn btn-ghost btn-sm" onclick="qsExpandAll(true)">全部展开</button>
+            <button class="btn btn-ghost btn-sm" onclick="qsExpandAll(false)">全部收起</button>
             <button class="btn btn-primary btn-sm" onclick="applyQinsiSelected()">导入勾选</button>
           </div>
         </div>
@@ -1640,6 +1642,16 @@ function qsToggleAll(checked) {
   document.querySelectorAll('.qs-check').forEach(el => el.checked = checked);
   const allBox = document.getElementById('qs-check-all');
   if (allBox) allBox.checked = checked;
+}
+
+function qsExpandAll(expand) {
+  _qsOrders.forEach((_, oi) => {
+    const expandId = `qs-expand-${oi}`;
+    const rows = document.querySelectorAll(`.${expandId}`);
+    const btn = document.querySelector(`button[onclick="qsToggleExpand('${expandId}',this)"]`);
+    rows.forEach(r => r.style.display = expand ? '' : 'none');
+    if (btn) btn.textContent = expand ? '收起' : '展开';
+  });
 }
 
 async function applyQinsiSelected() {
