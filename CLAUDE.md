@@ -159,12 +159,15 @@ ADJUST量 = 目标库存 - 当前WMS库存
 - 秦丝登录需要阿里云滑块 CAPTCHA，只能在有图形界面的真实浏览器中完成。Playwright 自动化环境下 CAPTCHA 始终失败。
 - 登录成功后，`gisALogin` cookie 有效期 **7 天**，可单独用于所有 API 调用（服务端自动续期 JSESSIONID）。
 - **NAS 部署续期流程**：在本地 Mac 运行 `tools/refresh_qinsi_session.py`，Playwright 在 Mac 上打开浏览器完成滑块验证，登录成功后将 cookies POST 到 NAS 的 `POST /api/v1/qinsi/upload-session` 接口保存。每 7 天操作一次，约 1 分钟。
+- **简化运行**：在 `.env` 中配置 `NAS_API_URL` 和 `NAS_JWT_TOKEN`，脚本自动读取作为默认值，直接运行 `./refresh_qinsi.sh` 即可（该脚本已加入 `.gitignore`，仅本地保留）。
 
 ```bash
-# Mac 上运行（不是 NAS），替换为实际 NAS 地址和 JWT
-conda run -n wms-mvp python -m tools.refresh_qinsi_session \
-  --api http://NAS-IP:8000 \
-  --token YOUR_JWT_TOKEN
+# .env 中配置（一次性）：
+# NAS_API_URL=http://192.168.x.x:8000
+# NAS_JWT_TOKEN=eyJhbGci...
+
+# 之后每次只需运行（Mac 上，不是 NAS）：
+./refresh_qinsi.sh
 ```
 
 **Session 文件**: `app/data/qinsi_session.json`（Playwright cookie 列表格式，在 Docker volume 内持久化）。
@@ -183,9 +186,11 @@ conda run -n wms-mvp python -m tools.refresh_qinsi_session \
 
 **StockTransaction.source**: `"qinsi_scrape"`
 
+**数据模型**：`ScrapedRecord` 中 `order_no` 为订单号（用于前端分组），`jan_code`/`product_name`/`quantity` 为单品级别字段。前端按 `order_no` 分组展示，勾选以订单为单位，apply 时展开为商品行发送。
+
 **WMS API**:
 
-- `GET /api/v1/qinsi/auth-status` — 检查 session 有效性（无需认证）
+- `GET /api/v1/qinsi/auth-status` — 检查 session 有效性（无需认证）；前端进入「秦丝同步」页面时自动调用并显示状态栏
 - `POST /api/v1/qinsi/upload-session` — 接收 Mac 端上传的 cookies（需认证）
 - `POST /api/v1/qinsi/scrape` — 拉取指定日期范围的出入库记录（需认证）
 - `POST /api/v1/qinsi/apply` — 将勾选记录写入 WMS（需认证）
@@ -199,7 +204,8 @@ conda run -n wms-mvp python -m tools.refresh_qinsi_session \
 - `GET /api/v1/status`：按仓库聚合查询 `stock_transactions`，返回：
   - `last_stock_in_at`、`last_stock_out_at`：各仓库最后出入库时间
   - `last_csv_apply_at`：最后一次 Rakuten CSV 导入时间
-  - `data_gap_days`：距今天的数据滞后天数
+  - `last_physical_count_at`：最后一次盘点（`source="physical_count"`）时间
+  - `data_gap_days`：距今天的数据滞后天数（取 IN/OUT/physical_count 三者最新时间计算）
   - `negative_stock_count`：当前负库存 SKU 数量
 - Telegram `/status` 命令（查询级权限）：输出相同信息，格式化为聊天消息。
 - 实现在 `get_system_status()` service 函数中，单次 JOIN 聚合查询，无额外追踪表。
