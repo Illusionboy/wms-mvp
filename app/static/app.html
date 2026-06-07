@@ -576,6 +576,23 @@ tr:hover td { background: var(--accent-bg); }
     <div class="section" id="section-qinsi">
       <div class="section-title">秦丝生意通同步</div>
       <div class="section-sub">从秦丝生意通爬取出入库记录，勾选后导入 WMS</div>
+
+      <!-- Auth status banner -->
+      <div id="qs-auth-banner" class="card" style="margin-bottom:12px;padding:12px 16px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span id="qs-auth-dot" style="width:10px;height:10px;border-radius:50%;background:var(--muted);flex-shrink:0"></span>
+          <span id="qs-auth-msg" style="font-size:13px;color:var(--muted)">检查登录状态…</span>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="checkQinsiAuth()">刷新</button>
+        </div>
+        <div id="qs-auth-guide" style="display:none;margin-top:10px;font-size:12px;color:var(--muted);background:var(--bg-alt,#f4f4f5);border-radius:6px;padding:10px 14px;line-height:1.7">
+          <strong>如何授权：</strong><br>
+          1. 在本地 Mac 上运行以下命令（需在 wms-mvp conda 环境中）：<br>
+          <code style="display:block;margin:4px 0 4px 16px;background:#e5e7eb;padding:3px 8px;border-radius:4px;font-size:11px">conda run -n wms-mvp python -m tools.refresh_qinsi_session --api http://&lt;NAS-IP&gt;:8000 --token &lt;JWT&gt;</code>
+          2. 脚本会打开浏览器，完成滑块验证后自动上传 cookies 到 NAS。<br>
+          3. session 有效期约 7 天，到期后重新运行一次即可。
+        </div>
+      </div>
+
       <div class="card">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="form-row">
@@ -804,6 +821,7 @@ function nav(btn) {
   document.getElementById(sectionId).classList.add('active');
   if (btn.dataset.section === 'dashboard') loadDashboard();
   if (btn.dataset.section === 'settings') loadSettingsLists();
+  if (btn.dataset.section === 'qinsi') checkQinsiAuth();
 }
 
 // ── Globals (warehouses & customers) ──────────────────────────────────────
@@ -887,7 +905,10 @@ async function loadDashboard() {
             <div class="stat-value ${negClass}">${r.negative_stock_count}</div>
           </div>
         </div>
-        ${r.last_csv_apply_at ? `<div style="font-size:12px;color:var(--muted)">最后 CSV 导入: ${fmtDate(r.last_csv_apply_at)}</div>` : ''}
+        <div style="font-size:12px;color:var(--muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
+          ${r.last_csv_apply_at ? `<span>最后 CSV 导入: ${fmtDate(r.last_csv_apply_at)}</span>` : ''}
+          ${r.last_physical_count_at ? `<span>最后盘点: ${fmtDate(r.last_physical_count_at)}</span>` : ''}
+        </div>
       </div>`;
     }).join('');
   } catch (e) { el.innerHTML = `<p style="color:var(--danger)">${e.message}</p>`; }
@@ -1393,6 +1414,31 @@ function esc(s) { return String(s||'').replace(/'/g,"&#39;").replace(/"/g,'&quot
 
 // ── 秦丝生意通 爬虫 ─────────────────────────────────────────────────────────
 let _qsRecords = [];
+
+async function checkQinsiAuth() {
+  const dot = document.getElementById('qs-auth-dot');
+  const msg = document.getElementById('qs-auth-msg');
+  const guide = document.getElementById('qs-auth-guide');
+  msg.textContent = '检查登录状态…';
+  dot.style.background = 'var(--muted)';
+  try {
+    const res = await fetch('/api/v1/qinsi/auth-status');
+    const data = await res.json();
+    if (data.authenticated) {
+      dot.style.background = '#22c55e';
+      msg.textContent = '✓ ' + data.message;
+      guide.style.display = 'none';
+    } else {
+      dot.style.background = '#ef4444';
+      msg.textContent = '✗ ' + data.message;
+      guide.style.display = 'block';
+    }
+  } catch (e) {
+    dot.style.background = '#f59e0b';
+    msg.textContent = '无法连接服务器';
+    guide.style.display = 'none';
+  }
+}
 
 // Populate qs-warehouse / qs-customer when globals loaded
 const _origPopulateSelects = populateSelects;

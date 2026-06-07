@@ -40,6 +40,7 @@ class WarehouseStatusRead(BaseModel):
     last_stock_in_at: datetime | None
     last_stock_out_at: datetime | None
     last_csv_apply_at: datetime | None
+    last_physical_count_at: datetime | None
     data_gap_days: int | None
     negative_stock_count: int
 

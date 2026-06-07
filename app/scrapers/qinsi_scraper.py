@@ -285,7 +285,7 @@ async def scrape_stock_records(
     if not cookies:
         return ScrapeResult(
             success=False, records=[], from_date=from_str, to_date=to_str,
-            error="未找到登录 session，请先通过前端「秦丝同步」页面完成授权登录",
+            error="未找到登录 session。请在本地 Mac 上运行: python -m tools.refresh_qinsi_session，完成滑块验证后 session 会自动上传到服务器",
             needs_relogin=True,
         )
 

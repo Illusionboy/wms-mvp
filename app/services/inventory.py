@@ -430,6 +430,9 @@ async def get_system_status(session: AsyncSession) -> list[WarehouseStatusRead]:
             func.max(
                 case((StockTransaction.source == "rakuten_csv", StockTransaction.created_at), else_=None)
             ).label("last_csv_apply_at"),
+            func.max(
+                case((StockTransaction.source == "physical_count", StockTransaction.created_at), else_=None)
+            ).label("last_physical_count_at"),
             func.count(
                 case((InventoryRecord.quantity < 0, 1), else_=None)
             ).label("negative_stock_count"),
@@ -445,7 +448,7 @@ async def get_system_status(session: AsyncSession) -> list[WarehouseStatusRead]:
     result: list[WarehouseStatusRead] = []
     for row in rows.all():
         last_activity = max(
-            (t for t in (row.last_stock_in_at, row.last_stock_out_at) if t is not None),
+            (t for t in (row.last_stock_in_at, row.last_stock_out_at, row.last_physical_count_at) if t is not None),
             default=None,
         )
         data_gap_days: int | None = None
@@ -460,6 +463,7 @@ async def get_system_status(session: AsyncSession) -> list[WarehouseStatusRead]:
                 last_stock_in_at=row.last_stock_in_at,
                 last_stock_out_at=row.last_stock_out_at,
                 last_csv_apply_at=row.last_csv_apply_at,
+                last_physical_count_at=row.last_physical_count_at,
                 data_gap_days=data_gap_days,
                 negative_stock_count=row.negative_stock_count,
             )
