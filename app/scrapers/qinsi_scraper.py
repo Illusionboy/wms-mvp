@@ -47,6 +47,7 @@ class ScrapedRecord(BaseModel):
     scraped_at: str
     record_date: str          # "YYYY-MM-DD"
     direction: str            # "IN" or "OUT"
+    order_no: str             # order SN for grouping (sales/purchase order number)
     jan_code: str             # 8 or 13-digit barcode
     raw_jan: str
     product_name: str
@@ -159,13 +160,14 @@ def _build_record(
         scraped_at=scraped_at,
         record_date=_epoch_to_date(order_date_ms),
         direction=direction,
+        order_no=order_no,
         jan_code=jan,
         raw_jan=raw_jan,
         product_name=str(goods.get("goodName", "")),
         quantity=int(qty),
         warehouse_name=warehouse_name,
         customer_name=customer_name,
-        note=order_no,
+        note=None,
         source_row={k: str(v) for k, v in goods.items()},
     )
 

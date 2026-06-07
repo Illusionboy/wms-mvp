@@ -626,7 +626,8 @@ tr:hover td { background: var(--accent-bg); }
         <hr class="divider">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <div>
-            共 <strong id="qs-total"></strong> 条记录
+            共 <strong id="qs-total"></strong> 笔单据
+            <span style="font-size:12px;color:var(--muted);margin-left:6px" id="qs-item-count"></span>
             <span style="font-size:12px;color:var(--muted);margin-left:8px" id="qs-date-range"></span>
           </div>
           <div style="display:flex;gap:8px">
@@ -641,7 +642,7 @@ tr:hover td { background: var(--accent-bg); }
             <thead>
               <tr>
                 <th style="width:32px"><input type="checkbox" id="qs-check-all" onchange="qsToggleAll(this.checked)"></th>
-                <th>日期</th><th>方向</th><th>JAN</th><th>商品名</th><th>数量</th><th>仓库</th><th>客户</th><th>备注</th>
+                <th>日期</th><th>方向</th><th>订单号</th><th>仓库</th><th>客户</th><th>商品种数</th><th style="width:60px"></th>
               </tr>
             </thead>
             <tbody id="qs-rows"></tbody>
@@ -1413,7 +1414,27 @@ function p(n) { return String(n).padStart(2,'0'); }
 function esc(s) { return String(s||'').replace(/'/g,"&#39;").replace(/"/g,'&quot;'); }
 
 // ── 秦丝生意通 爬虫 ─────────────────────────────────────────────────────────
-let _qsRecords = [];
+let _qsRecords = [];   // flat list from API
+let _qsOrders  = [];   // grouped by order_no
+
+function _groupByOrder(records) {
+  const map = new Map();
+  for (const r of records) {
+    const key = r.order_no || ('__' + r.record_date + r.direction);
+    if (!map.has(key)) {
+      map.set(key, {
+        order_no:       key,
+        record_date:    r.record_date,
+        direction:      r.direction,
+        warehouse_name: r.warehouse_name,
+        customer_name:  r.customer_name,
+        items:          [],
+      });
+    }
+    map.get(key).items.push(r);
+  }
+  return [...map.values()];
+}
 
 async function checkQinsiAuth() {
   const dot = document.getElementById('qs-auth-dot');
@@ -1471,34 +1492,64 @@ async function triggerQinsiScrape() {
       return;
     }
     _qsRecords = res.records || [];
-    renderQinsiRecords(_qsRecords, fromDate, toDate);
+    _qsOrders  = _groupByOrder(_qsRecords);
+    renderQinsiOrders(_qsOrders, fromDate, toDate);
     document.getElementById('qs-result-area').style.display = 'block';
-    status.textContent = `爬取完成 ${_qsRecords.length} 条`;
-    toast(`爬取完成：${_qsRecords.length} 条记录`, 'ok');
+    status.textContent = `爬取完成：${_qsOrders.length} 笔单据，共 ${_qsRecords.length} 条商品`;
+    toast(`爬取完成：${_qsOrders.length} 笔单据`, 'ok');
   } catch (e) {
     toast('请求失败: ' + e.message, 'err');
     status.textContent = '失败';
   } finally { btn.disabled = false; }
 }
 
-function renderQinsiRecords(records, fromDate, toDate) {
-  document.getElementById('qs-total').textContent = records.length;
+function renderQinsiOrders(orders, fromDate, toDate) {
+  document.getElementById('qs-total').textContent = orders.length;
+  document.getElementById('qs-item-count').textContent =
+    `（共 ${orders.reduce((s, o) => s + o.items.length, 0)} 条商品）`;
   document.getElementById('qs-date-range').textContent = `${fromDate} ~ ${toDate}`;
   document.getElementById('qs-error-box').style.display = 'none';
   const tbody = document.getElementById('qs-rows');
-  tbody.innerHTML = records.map((r, i) => `<tr>
-    <td><input type="checkbox" class="qs-check" data-idx="${i}" checked></td>
-    <td>${r.record_date}</td>
-    <td><span class="badge ${r.direction==='IN'?'badge-ok':'badge-danger'}">${r.direction==='IN'?'入库':'出库'}</span></td>
-    <td><code style="font-size:11px">${r.jan_code || '<span style="color:var(--danger)">'+esc(r.raw_jan)+'</span>'}</code></td>
-    <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.product_name)}">${r.product_name}</td>
-    <td>${r.quantity}</td>
-    <td>${r.warehouse_name}</td>
-    <td>${r.customer_name||'—'}</td>
-    <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.note||'')}">
-      ${r.note||'—'}
-    </td>
-  </tr>`).join('') || '<tr><td colspan="9" style="color:var(--muted)">无记录</td></tr>';
+  if (!orders.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted)">无记录</td></tr>';
+    return;
+  }
+  tbody.innerHTML = orders.map((o, oi) => {
+    const dirClass = o.direction === 'IN' ? 'badge-ok' : 'badge-danger';
+    const dirLabel = o.direction === 'IN' ? '入库' : '出库';
+    const expandId = `qs-expand-${oi}`;
+    const subRows = o.items.map(item => `
+      <tr class="${expandId}" style="display:none;background:var(--bg-alt,#f9fafb)">
+        <td></td>
+        <td></td>
+        <td></td>
+        <td><code style="font-size:11px">${item.jan_code ||
+          `<span style="color:var(--danger)">${esc(item.raw_jan)}</span>`}</code></td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+            title="${esc(item.product_name)}">${esc(item.product_name)}</td>
+        <td style="font-weight:600">${item.quantity}</td>
+        <td></td>
+        <td></td>
+      </tr>`).join('');
+    return `<tr>
+      <td><input type="checkbox" class="qs-check" data-oi="${oi}" checked></td>
+      <td>${o.record_date}</td>
+      <td><span class="badge ${dirClass}">${dirLabel}</span></td>
+      <td><code style="font-size:11px">${esc(o.order_no)}</code></td>
+      <td>${esc(o.warehouse_name)}</td>
+      <td>${esc(o.customer_name || '—')}</td>
+      <td style="color:var(--muted)">${o.items.length} 种</td>
+      <td><button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px"
+          onclick="qsToggleExpand('${expandId}',this)">展开</button></td>
+    </tr>${subRows}`;
+  }).join('');
+}
+
+function qsToggleExpand(expandId, btn) {
+  const rows = document.querySelectorAll(`.${expandId}`);
+  const hidden = rows[0]?.style.display === 'none';
+  rows.forEach(r => r.style.display = hidden ? '' : 'none');
+  btn.textContent = hidden ? '收起' : '展开';
 }
 
 function qsToggleAll(checked) {
@@ -1509,9 +1560,9 @@ function qsToggleAll(checked) {
 
 async function applyQinsiSelected() {
   const selected = [...document.querySelectorAll('.qs-check:checked')]
-    .map(el => _qsRecords[+el.dataset.idx])
+    .flatMap(el => (_qsOrders[+el.dataset.oi]?.items || []))
     .filter(Boolean);
-  if (!selected.length) { toast('请先勾选要导入的记录', 'err'); return; }
+  if (!selected.length) { toast('请先勾选要导入的单据', 'err'); return; }
   const wId = +document.getElementById('qs-warehouse').value;
   const cRaw = document.getElementById('qs-customer').value;
   if (!wId) { toast('请选择导入仓库', 'err'); return; }
