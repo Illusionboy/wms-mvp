@@ -1,4 +1,6 @@
-from pydantic import Field
+import json
+
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,6 +35,17 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://wms_user:wms_password@postgres:5432/wms",
         validation_alias="DATABASE_URL",
     )
+    # Maps 秦丝 warehouse names → WMS warehouse names.
+    # Set via QINSI_WAREHOUSE_MAP env var as a JSON string, e.g.:
+    #   QINSI_WAREHOUSE_MAP={"北津守仓库":"普通仓库","乐天仓库":"乐天仓库"}
+    qinsi_warehouse_map: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("qinsi_warehouse_map", mode="before")
+    @classmethod
+    def _parse_warehouse_map(cls, v: object) -> dict[str, str]:
+        if isinstance(v, str):
+            return json.loads(v)
+        return v or {}
 
     model_config = SettingsConfigDict(
         env_file=".env",

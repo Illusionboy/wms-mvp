@@ -8,8 +8,10 @@ from sqlalchemy import select
 import httpx
 
 from app.api.deps import require_auth
+from app.core.config import settings
 from app.db.session import get_db_session
 from app.models.stock_transaction import StockTransaction
+from app.models.warehouse import Warehouse
 from app.scrapers.qinsi_scraper import (
     ScrapedRecord,
     ScrapeResult,
@@ -92,7 +94,7 @@ class ScrapeRequest(BaseModel):
 
 class ApplyRequest(BaseModel):
     records: list[ScrapedRecord]
-    warehouse_id: int
+    warehouse_id: int | None = None   # fallback when per-record mapping fails
     customer_id: int | None = None
 
 
@@ -135,6 +137,13 @@ async def apply_scraped_records(
     duplicate = 0
     errors: list[str] = []
 
+    # Build warehouse name → id lookup (WMS names)
+    wh_rows = await session.scalars(select(Warehouse))
+    wh_by_name: dict[str, int] = {w.name: w.id for w in wh_rows.all()}
+
+    # qinsi_name → wms_name mapping from config
+    qinsi_wh_map: dict[str, str] = settings.qinsi_warehouse_map
+
     # 批量预查已导入的 reference_id，避免 N+1
     ref_ids = [
         f"qinsi:{rec.order_no}:{rec.jan_code}"
@@ -162,6 +171,18 @@ async def apply_scraped_records(
             duplicate += 1
             continue
 
+        # Resolve warehouse: map Qinsi name → WMS name → WMS id
+        qinsi_name = rec.warehouse_name or ""
+        wms_name = qinsi_wh_map.get(qinsi_name, "")
+        resolved_wh_id = wh_by_name.get(wms_name) or payload.warehouse_id
+        if not resolved_wh_id:
+            errors.append(
+                f"{rec.jan_code} ({rec.product_name}): "
+                f"无法确定仓库（秦丝仓库名 {qinsi_name!r} 未在映射表中，且未指定默认仓库）"
+            )
+            skipped += 1
+            continue
+
         note = f"秦丝记录日期:{rec.record_date}" + (f" 备注:{rec.note}" if rec.note else "")
         try:
             if rec.direction == "IN":
@@ -169,7 +190,7 @@ async def apply_scraped_records(
                     session=session,
                     payload=StockInCreate(
                         sku=rec.jan_code,
-                        warehouse_id=payload.warehouse_id,
+                        warehouse_id=resolved_wh_id,
                         customer_id=payload.customer_id,
                         quantity=rec.quantity,
                         location_code="A-00-00",
@@ -185,7 +206,7 @@ async def apply_scraped_records(
                     session=session,
                     payload=StockOutCreate(
                         sku=rec.jan_code,
-                        warehouse_id=payload.warehouse_id,
+                        warehouse_id=resolved_wh_id,
                         customer_id=payload.customer_id,
                         quantity=rec.quantity,
                         source="qinsi_scrape",

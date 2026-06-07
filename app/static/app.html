@@ -606,7 +606,7 @@ tr:hover td { background: var(--accent-bg); }
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div class="form-row">
+          <div class="form-row" style="display:none">
             <label>导入仓库</label>
             <select id="qs-warehouse"></select>
           </div>
@@ -1659,9 +1659,6 @@ async function applyQinsiSelected() {
     .flatMap(el => (_qsOrders[+el.dataset.oi]?.items || []))
     .filter(Boolean);
   if (!selected.length) { toast('请先勾选要导入的单据', 'err'); return; }
-  const wId = +document.getElementById('qs-warehouse').value;
-  const cRaw = document.getElementById('qs-customer').value;
-  if (!wId) { toast('请选择导入仓库', 'err'); return; }
 
   // ── 预检：找出不在商品字典中的 JAN ──────────────────────────────────────
   const janCodes = [...new Set(selected.map(r => r.jan_code).filter(Boolean))];
@@ -1684,8 +1681,6 @@ async function applyQinsiSelected() {
   try {
     const res = await api('POST', '/qinsi/apply', {
       records: selected,
-      warehouse_id: wId,
-      customer_id: cRaw ? +cRaw : null,
     });
     const hasErrors = res.skipped > 0 || res.errors?.length;
     const cardType = hasErrors ? 'warn' : 'ok';
