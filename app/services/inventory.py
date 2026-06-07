@@ -162,10 +162,10 @@ async def stock_in_item(
         raise InventoryTargetNotFoundError
 
     # Lock the row to prevent concurrent stock-in from creating duplicate / racing update
+    # customer_id is no longer part of bucket identity — it's a note on the transaction
     statement = select(InventoryRecord).where(
         InventoryRecord.product_jan == payload.sku,
         InventoryRecord.warehouse_id == payload.warehouse_id,
-        InventoryRecord.customer_id == payload.customer_id,
         InventoryRecord.location_code == payload.location_code,
         InventoryRecord.expiration_date == payload.expiration_date,
     ).with_for_update()
@@ -174,7 +174,6 @@ async def stock_in_item(
         record = InventoryRecord(
             product_jan=payload.sku,
             warehouse_id=payload.warehouse_id,
-            customer_id=payload.customer_id,
             location_code=payload.location_code,
             quantity=payload.quantity,
             expiration_date=payload.expiration_date,
@@ -383,12 +382,11 @@ async def _find_single_inventory_record(
     location_code: str | None,
     expiration_date: date | None,
 ) -> InventoryRecord:
+    # customer_id is no longer a bucket key — removed from filter
     statement = select(InventoryRecord).where(
         InventoryRecord.product_jan == sku,
         InventoryRecord.warehouse_id == warehouse_id,
     )
-    if customer_id is not None:
-        statement = statement.where(InventoryRecord.customer_id == customer_id)
     if location_code is not None:
         statement = statement.where(InventoryRecord.location_code == location_code)
     if expiration_date is not None:

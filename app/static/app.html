@@ -667,7 +667,7 @@ tr:hover td { background: var(--accent-bg); }
             <thead>
               <tr>
                 <th style="width:32px"><input type="checkbox" id="qs-check-all" onchange="qsToggleAll(this.checked)"></th>
-                <th>日期</th><th>方向</th><th>订单号</th><th>仓库</th><th>客户</th><th>商品种数</th><th style="width:60px"></th>
+                <th>日期</th><th>方向</th><th>订单号</th><th>仓库</th><th>供应商/客户</th><th>商品种数</th><th style="width:60px"></th>
               </tr>
             </thead>
             <tbody id="qs-rows"></tbody>
@@ -1623,7 +1623,9 @@ function renderQinsiOrders(orders, fromDate, toDate) {
       <td><span class="badge ${dirClass}">${dirLabel}</span></td>
       <td><code style="font-size:11px">${esc(o.order_no)}</code></td>
       <td>${esc(o.warehouse_name)}</td>
-      <td>${esc(o.customer_name || '—')}</td>
+      <td>${o.customer_name
+        ? `<span style="font-size:11px;color:var(--muted)">${o.direction==='IN'?'供应商':'客户'}:</span> ${esc(o.customer_name)}`
+        : '<span style="color:var(--muted)">—</span>'}</td>
       <td style="color:var(--muted)">${o.items.length} 种</td>
       <td><button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px"
           onclick="qsToggleExpand('${expandId}',this)">展开</button></td>

@@ -246,12 +246,22 @@ async def _fetch_purchases(
             sn = order.get("purchaseSn", "")
             depot_name = order.get("depotName", "秦丝仓库")
             date_ms = order.get("businessTime") or order.get("createTime")
+            supplier_name = (
+                order.get("supplierName") or order.get("supplierCompany")
+                or order.get("providerName") or order.get("purchaserName")
+            )
             try:
                 detail = await _post_json(
                     client, "/inner/orders/purchase/purchaseGet.ac", {"purchaseSn": sn}
                 )
+                # also try to find supplier in detail if not in list
+                if not supplier_name:
+                    supplier_name = (
+                        detail.get("supplierName") or detail.get("supplierCompany")
+                        or detail.get("providerName")
+                    )
                 for g in detail.get("orderGoods", []):
-                    rec = _build_record(g, "IN", date_ms, depot_name, None, sn, scraped_at)
+                    rec = _build_record(g, "IN", date_ms, depot_name, supplier_name, sn, scraped_at)
                     if rec:
                         records.append(rec)
             except Exception as exc:
