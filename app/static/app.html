@@ -1594,9 +1594,10 @@ async function applyQinsiSelected() {
     });
     const hasErrors = res.skipped > 0 || res.errors?.length;
     const cardType = hasErrors ? 'warn' : 'ok';
-    const summary = res.skipped > 0
-      ? `导入成功 ${res.applied} 条，<strong>跳过 ${res.skipped} 条</strong>（商品不在字典中）`
-      : `导入成功 ${res.applied} 条`;
+    const parts = [`导入成功 ${res.applied} 条`];
+    if (res.duplicate > 0) parts.push(`已跳过重复 ${res.duplicate} 条`);
+    if (res.skipped  > 0) parts.push(`<strong>跳过 ${res.skipped} 条</strong>（商品/库存不存在）`);
+    const summary = parts.join('，');
     const errHtml = res.errors?.length
       ? `<div style="margin-top:10px;padding:10px;background:var(--danger-bg);border-radius:6px;font-size:12px;line-height:1.8">`
         + res.errors.map(e => `⚠ ${esc(e)}`).join('<br>') + '</div>'

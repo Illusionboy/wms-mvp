@@ -4,8 +4,12 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+import httpx
+
 from app.api.deps import require_auth
 from app.db.session import get_db_session
+from app.models.stock_transaction import StockTransaction
 from app.scrapers.qinsi_scraper import (
     ScrapedRecord,
     ScrapeResult,
@@ -15,12 +19,12 @@ from app.scrapers.qinsi_scraper import (
 )
 from app.services.auth import CurrentUser
 from app.services.inventory import (
+    InventoryRecordNotFoundError,
     InventoryTargetNotFoundError,
     stock_in_item,
     stock_out_item,
 )
 from app.schemas.inventory import StockInCreate, StockOutCreate
-import httpx
 
 router = APIRouter()
 
@@ -95,6 +99,7 @@ class ApplyRequest(BaseModel):
 class ApplyResult(BaseModel):
     applied: int
     skipped: int
+    duplicate: int = 0
     errors: list[str]
 
 
@@ -123,11 +128,28 @@ async def apply_scraped_records(
     """
     将用户勾选的爬取记录写入 WMS。
     每条记录写一个 StockTransaction（source="qinsi_scrape"）。
-    JAN 匹配失败的行记录到 errors 中跳过，不中断整体导入。
+    reference_id = "qinsi:{order_no}:{jan_code}" 保证幂等——重复提交同一订单行自动跳过。
     """
     applied = 0
     skipped = 0
+    duplicate = 0
     errors: list[str] = []
+
+    # 批量预查已导入的 reference_id，避免 N+1
+    ref_ids = [
+        f"qinsi:{rec.order_no}:{rec.jan_code}"
+        for rec in payload.records
+        if rec.jan_code and rec.order_no
+    ]
+    existing_refs: set[str] = set()
+    if ref_ids:
+        rows = await session.scalars(
+            select(StockTransaction.reference_id).where(
+                StockTransaction.source == "qinsi_scrape",
+                StockTransaction.reference_id.in_(ref_ids),
+            )
+        )
+        existing_refs = set(rows.all())
 
     for rec in payload.records:
         if not rec.jan_code:
@@ -135,6 +157,12 @@ async def apply_scraped_records(
             skipped += 1
             continue
 
+        ref_id = f"qinsi:{rec.order_no}:{rec.jan_code}" if rec.order_no else None
+        if ref_id and ref_id in existing_refs:
+            duplicate += 1
+            continue
+
+        note = f"秦丝记录日期:{rec.record_date}" + (f" 备注:{rec.note}" if rec.note else "")
         try:
             if rec.direction == "IN":
                 await stock_in_item(
@@ -146,7 +174,8 @@ async def apply_scraped_records(
                         quantity=rec.quantity,
                         location_code="A-00-00",
                         source="qinsi_scrape",
-                        note=f"秦丝记录日期:{rec.record_date}" + (f" 备注:{rec.note}" if rec.note else ""),
+                        reference_id=ref_id,
+                        note=note,
                     ),
                     commit=False,
                     user_id=current_user.id,
@@ -160,20 +189,24 @@ async def apply_scraped_records(
                         customer_id=payload.customer_id,
                         quantity=rec.quantity,
                         source="qinsi_scrape",
-                        note=f"秦丝记录日期:{rec.record_date}" + (f" 备注:{rec.note}" if rec.note else ""),
+                        reference_id=ref_id,
+                        note=note,
                     ),
                     commit=False,
                     user_id=current_user.id,
                 )
             applied += 1
         except InventoryTargetNotFoundError:
-            errors.append(f"{rec.jan_code} ({rec.product_name}): 商品或仓库不存在")
+            errors.append(f"{rec.jan_code} ({rec.product_name}): 商品字典中不存在该 JAN")
+            skipped += 1
+        except InventoryRecordNotFoundError:
+            errors.append(f"{rec.jan_code} ({rec.product_name}): 出库失败——该仓库无此商品库存记录")
             skipped += 1
         except Exception as exc:
-            errors.append(f"{rec.jan_code} ({rec.product_name}): {exc}")
+            errors.append(f"{rec.jan_code} ({rec.product_name}): {exc or type(exc).__name__}")
             skipped += 1
 
     if applied > 0:
         await session.commit()
 
-    return ApplyResult(applied=applied, skipped=skipped, errors=errors)
+    return ApplyResult(applied=applied, skipped=skipped, duplicate=duplicate, errors=errors)
