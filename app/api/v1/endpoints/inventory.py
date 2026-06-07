@@ -2,8 +2,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from app.api.deps import require_auth
 from app.db.session import get_db_session
+from app.models.inventory_record import InventoryRecord
 from app.models.product import Product
 from app.schemas.inventory import (
     ChatReportApplyResult,
@@ -95,8 +98,7 @@ async def create_product(
     session: AsyncSession = Depends(get_db_session),
     current_user: CurrentUser = Depends(require_auth),
 ) -> Product:
-    from sqlalchemy import select as sa_select
-    existing = await session.scalar(sa_select(Product).where(Product.jan_code == payload.jan_code))
+    existing = await session.scalar(select(Product).where(Product.jan_code == payload.jan_code))
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"JAN {payload.jan_code} 已存在")
     product = Product(
@@ -121,12 +123,11 @@ async def check_missing_products(
     session: AsyncSession = Depends(get_db_session),
 ) -> list[str]:
     """Return JAN codes that are NOT in the products catalog. No auth required."""
-    from sqlalchemy import select as sa_select
     if not payload.jan_codes:
         return []
     unique = list(dict.fromkeys(payload.jan_codes))  # deduplicate, preserve order
     existing = set(await session.scalars(
-        sa_select(Product.jan_code).where(Product.jan_code.in_(unique))
+        select(Product.jan_code).where(Product.jan_code.in_(unique))
     ))
     return [j for j in unique if j not in existing]
 
