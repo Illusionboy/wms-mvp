@@ -1402,12 +1402,25 @@ async function addCustomer() {
 async function loadSettingsLists() {
   const wEl = document.getElementById('warehouse-list');
   const cEl = document.getElementById('customer-list');
-  wEl.innerHTML = '<div class="table-wrap"><table><thead><tr><th>仓库</th><th>负库存</th></tr></thead><tbody>' +
-    _warehouses.map(w => `<tr><td>${w.name}</td><td>${w.allow_negative_stock ? '<span class="badge badge-warn">开启</span>' : '<span class="badge badge-neutral">关闭</span>'}</td></tr>`).join('') +
+  wEl.innerHTML = '<div class="table-wrap"><table><thead><tr><th>仓库</th><th>负库存</th><th></th></tr></thead><tbody>' +
+    _warehouses.map(w => `<tr>
+      <td>${w.name}</td>
+      <td>${w.allow_negative_stock ? '<span class="badge badge-warn">开启</span>' : '<span class="badge badge-neutral">关闭</span>'}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="toggleNegativeStock(${w.id},${!w.allow_negative_stock})">${w.allow_negative_stock ? '关闭' : '开启'}</button></td>
+    </tr>`).join('') +
     '</tbody></table></div>';
   cEl.innerHTML = '<div class="table-wrap"><table><thead><tr><th>客户</th></tr></thead><tbody>' +
     _customers.map(c => `<tr><td>${c.name}</td></tr>`).join('') +
     '</tbody></table></div>';
+}
+
+async function toggleNegativeStock(warehouseId, enable) {
+  try {
+    await api('PATCH', `/warehouses/${warehouseId}/allow-negative?enabled=${enable}`);
+    await loadGlobals();
+    loadSettingsLists();
+    toast(`负库存已${enable ? '开启' : '关闭'}`, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 // ── Utils ──────────────────────────────────────────────────────────────────
