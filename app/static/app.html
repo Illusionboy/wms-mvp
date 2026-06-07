@@ -584,7 +584,7 @@ tr:hover td { background: var(--accent-bg); }
           <span id="qs-auth-msg" style="font-size:13px;color:var(--muted)">检查登录状态…</span>
           <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="checkQinsiAuth()">刷新</button>
         </div>
-        <div id="qs-auth-guide" style="display:none;margin-top:10px;font-size:12px;color:var(--muted);background:var(--bg-alt,#f4f4f5);border-radius:6px;padding:10px 14px;line-height:1.7">
+        <div id="qs-auth-guide" style="display:none;margin-top:10px;font-size:12px;color:var(--muted);background:var(--surface);border-radius:6px;padding:10px 14px;line-height:1.7">
           <strong>如何授权：</strong><br>
           1. 在本地 Mac 上运行以下命令（需在 wms-mvp conda 环境中）：<br>
           <code style="display:block;margin:4px 0 4px 16px;background:#e5e7eb;padding:3px 8px;border-radius:4px;font-size:11px">conda run -n wms-mvp python -m tools.refresh_qinsi_session --api http://&lt;NAS-IP&gt;:8000 --token &lt;JWT&gt;</code>
@@ -1519,8 +1519,8 @@ function renderQinsiOrders(orders, fromDate, toDate) {
     const dirLabel = o.direction === 'IN' ? '入库' : '出库';
     const expandId = `qs-expand-${oi}`;
     const subRows = o.items.map(item => `
-      <tr class="${expandId}" style="display:none;background:var(--bg-alt,#f9fafb)">
-        <td></td>
+      <tr class="${expandId}" style="display:none">
+        <td style="border-left:3px solid var(--accent)"></td>
         <td></td>
         <td></td>
         <td><code style="font-size:11px">${item.jan_code ||
