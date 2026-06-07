@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_auth
@@ -81,6 +82,26 @@ async def create_product(
     await session.commit()
     await session.refresh(product)
     return product
+
+
+class _JanBatchRequest(BaseModel):
+    jan_codes: list[str]
+
+
+@router.post("/products/missing-batch", response_model=list[str])
+async def check_missing_products(
+    payload: _JanBatchRequest,
+    session: AsyncSession = Depends(get_db_session),
+) -> list[str]:
+    """Return JAN codes that are NOT in the products catalog. No auth required."""
+    from sqlalchemy import select as sa_select
+    if not payload.jan_codes:
+        return []
+    unique = list(dict.fromkeys(payload.jan_codes))  # deduplicate, preserve order
+    existing = set(await session.scalars(
+        sa_select(Product.jan_code).where(Product.jan_code.in_(unique))
+    ))
+    return [j for j in unique if j not in existing]
 
 
 @router.post("/chat-reports/parse", response_model=ChatReportDraftRead)
