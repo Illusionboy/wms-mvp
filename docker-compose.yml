@@ -44,6 +44,7 @@ services:
       QINSI_USERNAME: ${QINSI_USERNAME:-}
       QINSI_PASSWORD: ${QINSI_PASSWORD:-}
       QINSI_BASE_URL: ${QINSI_BASE_URL:-https://web.syt.qinsilk.com/gis/admin/}
+      QINSI_WAREHOUSE_MAP: ${QINSI_WAREHOUSE_MAP:-{}}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:

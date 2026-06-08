@@ -153,7 +153,12 @@ async def trigger_scrape(
         )
         if cached is not None:
             records = [ScrapedRecord(**r) for r in json.loads(cached.records_json)]
-            return ScrapeResult(success=True, records=records)
+            return ScrapeResult(
+                success=True,
+                records=records,
+                from_date=str(payload.from_date),
+                to_date=str(payload.to_date),
+            )
 
     result = await scrape_stock_records(
         from_date=payload.from_date,
