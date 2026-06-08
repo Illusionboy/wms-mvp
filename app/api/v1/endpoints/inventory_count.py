@@ -122,10 +122,11 @@ async def export_draft_excel(
 @router.post("/{draft_id}/apply", response_model=InventoryCountApplyResult)
 async def apply_draft(
     draft_id: int,
+    force: bool = False,
     session: AsyncSession = Depends(get_db_session),
     current_user: CurrentUser = Depends(require_auth),
 ) -> InventoryCountApplyResult:
     draft = await get_inventory_count_draft(session, draft_id, with_for_update=True)
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found")
-    return await apply_inventory_count_draft(session, draft, user_id=current_user.id)
+    return await apply_inventory_count_draft(session, draft, user_id=current_user.id, force=force)

@@ -41,6 +41,9 @@ async def init_db() -> None:
         await conn.execute(text(
             "ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS customer VARCHAR(255)"
         ))
+        await conn.execute(text(
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS outer_jan VARCHAR(13)"
+        ))
 
         # Harden FK ON DELETE actions: CASCADE/SET NULL → RESTRICT to protect the audit trail.
         # The DO block uses pg_constraint.confdeltype ('c'=CASCADE, 'n'=SET NULL) so it only

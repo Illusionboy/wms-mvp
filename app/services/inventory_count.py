@@ -610,8 +610,9 @@ async def apply_inventory_count_draft(
     session: AsyncSession,
     draft: InventoryCountDraft,
     user_id: int | None = None,
+    force: bool = False,
 ) -> InventoryCountApplyResult:
-    if draft.status == "applied":
+    if draft.status == "applied" and not force:
         return InventoryCountApplyResult(
             applied=False,
             adjusted_count=0,

@@ -98,6 +98,23 @@ async def search_products(session: AsyncSession, keyword: str, limit: int = 20) 
     return list(result.all())
 
 
+def is_outer_jan_match(keyword: str, product: Product) -> bool:
+    """Return True when keyword matched via outer_jan but NOT the product's own jan_code."""
+    if not product.outer_jan:
+        return False
+    kw = keyword.strip()
+    if not kw.isdigit() or len(kw) != 5:
+        return False
+    like_5 = kw + "_"
+    outer = product.outer_jan
+    jan = product.jan_code
+    # Check if outer_jan matches the 5-digit pattern
+    outer_hit = outer[:-1].endswith(kw) or outer.endswith(kw)
+    # Check if jan_code itself would also match (then it's not an outer-jan-only hit)
+    jan_hit = jan[:-1].endswith(kw) or jan.endswith(kw)
+    return outer_hit and not jan_hit
+
+
 def _product_search_statement(keyword: str, limit: int):
     normalized_keyword = keyword.strip()
     name_pattern = f"%{normalized_keyword}%"
@@ -126,6 +143,16 @@ def _product_search_statement(keyword: str, limit: int):
             )
             conditions.append(suffix_condition)
             rank_conditions.append((suffix_condition, 1))
+            # 同款逻辑应用于 outer_jan（外箱JAN末6位前5位 或 末5位）
+            outer_condition = and_(
+                Product.outer_jan.isnot(None),
+                or_(
+                    Product.outer_jan.like(like_pattern),
+                    Product.outer_jan.endswith(normalized_keyword),
+                ),
+            )
+            conditions.append(outer_condition)
+            rank_conditions.append((outer_condition, 2))  # rank 低于直接 JAN 命中
     else:
         conditions.extend(
             [
@@ -212,6 +239,7 @@ async def stock_out_item(
     *,
     commit: bool = True,
     user_id: int | None = None,
+    force_negative: bool = False,
 ) -> StockMutationResult:
     try:
         # with_for_update() inside _find_single_inventory_record prevents concurrent deduction
@@ -221,9 +249,9 @@ async def stock_out_item(
             warehouse_id=payload.warehouse_id,
         )
     except InventoryRecordNotFoundError:
-        # No existing record — only allowed when warehouse has negative stock enabled
+        # No existing record — allowed when warehouse has negative stock enabled OR caller forces it
         warehouse = await session.get(Warehouse, payload.warehouse_id)
-        if warehouse is None or not warehouse.allow_negative_stock:
+        if not force_negative and (warehouse is None or not warehouse.allow_negative_stock):
             raise
         product = await session.scalar(select(Product).where(Product.jan_code == payload.sku))
         if product is None:
@@ -242,7 +270,7 @@ async def stock_out_item(
     previous_quantity = record.quantity
     if record.quantity < payload.quantity:
         warehouse = await session.get(Warehouse, payload.warehouse_id)
-        if warehouse is None or not warehouse.allow_negative_stock:
+        if not force_negative and (warehouse is None or not warehouse.allow_negative_stock):
             raise InsufficientStockError
 
     record.quantity -= payload.quantity

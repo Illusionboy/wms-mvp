@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import select
@@ -19,6 +18,7 @@ from app.schemas.inventory import (
     ProductInventoryRead,
     ProductRead,
     ProductUpdate,
+    RakutenApplyRequest,
     RakutenDraftPreview,
     RakutenShipmentImportResult,
     StockAdjustCreate,
@@ -38,13 +38,13 @@ from app.services.inventory import (
     InventoryRecordNotFoundError,
     InventoryTargetNotFoundError,
     adjust_stock_item,
+    is_outer_jan_match,
     search_inventory_items,
     search_products,
     stock_in_item,
     stock_out_item,
 )
 from app.services.rakuten_shipments import (
-    IGNORABLE_RAKUTEN_ISSUE_TYPES,
     apply_rakuten_shipment_draft,
     create_rakuten_shipment_draft,
     get_rakuten_shipment_draft,
@@ -88,8 +88,15 @@ async def list_negative_stock(
 async def search_inventory(
     keyword: str = Query(min_length=1, max_length=255),
     session: AsyncSession = Depends(get_db_session),
-) -> list[Product]:
-    return await search_inventory_items(session=session, keyword=keyword)
+) -> list[ProductInventoryRead]:
+    products = await search_inventory_items(session=session, keyword=keyword)
+    results = []
+    for p in products:
+        r = ProductInventoryRead.model_validate(p)
+        if is_outer_jan_match(keyword, p):
+            r.outer_jan_warning = f"⚠ 此条码为外箱JAN（{p.outer_jan}），实际商品JAN为 {p.jan_code}"
+        results.append(r)
+    return results
 
 
 @router.get("/products/search", response_model=list[ProductRead])
@@ -117,6 +124,8 @@ async def update_product(
         product.name_zh = payload.name_zh
     if payload.units_per_case is not None:
         product.units_per_case = payload.units_per_case
+    if "outer_jan" in payload.model_fields_set:
+        product.outer_jan = payload.outer_jan  # allows setting to None to clear
     await session.commit()
     await session.refresh(product)
     return product
@@ -252,20 +261,13 @@ async def create_rakuten_draft(
         warehouse_name=warehouse_name,
         customer_name=customer_name,
     )
-    preview = await preview_rakuten_shipment_draft(session=session, draft=draft)
-    ignorable_count = sum(1 for i in preview.issues if i.issue_type in IGNORABLE_RAKUTEN_ISSUE_TYPES)
-    return RakutenDraftPreview(
-        draft_id=draft.id,
-        total_lines=preview.total_lines,
-        ignorable_count=ignorable_count,
-        issues=preview.issues,
-    )
+    return await preview_rakuten_shipment_draft(session=session, draft=draft)
 
 
 @router.post("/imports/rakuten-shipment/draft/{draft_id}/apply", response_model=RakutenShipmentImportResult)
 async def apply_rakuten_draft(
     draft_id: int,
-    ignore_missing: bool = False,
+    body: RakutenApplyRequest = Body(default_factory=RakutenApplyRequest),
     session: AsyncSession = Depends(get_db_session),
     current_user: CurrentUser = Depends(require_auth),
 ) -> RakutenShipmentImportResult:
@@ -277,7 +279,7 @@ async def apply_rakuten_draft(
     return await apply_rakuten_shipment_draft(
         session=session,
         draft=draft,
-        ignore_missing=ignore_missing,
+        force_negative_jans=set(body.force_negative_jans),
         user_id=current_user.id,
     )
 

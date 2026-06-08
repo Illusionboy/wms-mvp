@@ -76,6 +76,7 @@ class ProductRead(BaseModel):
     name_jp: str
     name_zh: str | None
     units_per_case: int | None
+    outer_jan: str | None = None
     low_stock_alert_sent: bool
     created_at: datetime
     updated_at: datetime
@@ -94,6 +95,7 @@ class ProductUpdate(BaseModel):
     name_jp: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)] | None = None
     name_zh: Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)] | None = None
     units_per_case: int | None = Field(default=None, gt=0)
+    outer_jan: Annotated[str, StringConstraints(strip_whitespace=True, max_length=13)] | None = Field(default=None)
 
 
 class InventoryRecordRead(BaseModel):
@@ -114,6 +116,7 @@ class InventoryRecordRead(BaseModel):
 
 class ProductInventoryRead(ProductRead):
     inventory_records: list[InventoryRecordRead] = Field(default_factory=list)
+    outer_jan_warning: str | None = None  # set when search matched via outer_jan
 
 
 class StockInCreate(BaseModel):
@@ -286,6 +289,8 @@ class RakutenShipmentIssue(BaseModel):
     issue_type: str
     message: str
     candidates: list[ProductRead] = Field(default_factory=list)
+    current_stock: int | None = None   # for insufficient_stock: existing qty
+    quantity_needed: int | None = None  # for needs_decision display
 
 
 class RakutenShipmentMutation(BaseModel):
@@ -301,13 +306,22 @@ class RakutenShipmentImportResult(BaseModel):
     mutations: list[RakutenShipmentMutation] = Field(default_factory=list)
     issues: list[RakutenShipmentIssue] = Field(default_factory=list)
     names_synced: int = 0
+    skipped_duplicates: int = 0   # lines skipped because reference_id already exists
+    auto_skipped_count: int = 0   # product_not_found lines silently dropped
+    force_negated_count: int = 0  # lines applied as negative stock by user choice
 
 
 class RakutenDraftPreview(BaseModel):
     draft_id: int
     total_lines: int
-    ignorable_count: int        # lines skippable with ignore_missing=True
-    issues: list[RakutenShipmentIssue]
+    ok_count: int                                   # lines that will apply normally
+    auto_skipped_count: int                         # product_not_found → always silent skip
+    needs_decision: list[RakutenShipmentIssue]      # no record / insufficient → user decides
+    blocking_issues: list[RakutenShipmentIssue]     # ambiguous etc → must fix
+
+
+class RakutenApplyRequest(BaseModel):
+    force_negative_jans: list[str] = Field(default_factory=list)
 
 
 class RakutenShipmentDraftDocument(BaseModel):

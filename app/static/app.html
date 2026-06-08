@@ -243,6 +243,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="chat-report" onclick="nav(this)">
         <span class="icon">✦</span> 微信报库
       </button>
+      <button class="nav-item" data-section="oa" onclick="nav(this)">
+        <span class="icon">📦</span> 出荷分析
+      </button>
       <button class="nav-item" data-section="rakuten" onclick="nav(this)">
         <span class="icon">▤</span> 乐天 CSV
       </button>
@@ -487,6 +490,50 @@ tr:hover td { background: var(--accent-bg); }
       </div>
     </div>
 
+    <!-- Rakuten 出荷分析 -->
+    <div class="section" id="section-oa">
+      <div class="section-title">乐天出荷分析</div>
+      <div class="section-sub">上传一号店/二号店订单明细（CSV 或 XLSX），汇总出货需求并对比乐天仓库库存</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div class="form-row">
+            <label>一号店订单文件</label>
+            <input type="file" id="oa-file1" accept=".csv,.xlsx,.xls" style="padding:6px 0;border:none;background:none">
+          </div>
+          <div class="form-row">
+            <label>二号店订单文件（可选）</label>
+            <input type="file" id="oa-file2" accept=".csv,.xlsx,.xls" style="padding:6px 0;border:none;background:none">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="runOrderAnalysis()">分析出货需求</button>
+      </div>
+
+      <div id="oa-result" style="display:none;margin-top:16px">
+        <div id="oa-summary" style="margin-bottom:12px"></div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-ghost" onclick="filterOA('all')">全部</button>
+          <button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:1px solid #dc2626" onclick="filterOA('problem')">⚠ 有问题</button>
+          <button class="btn btn-sm" style="background:#fffbeb;color:#d97706;border:1px solid #d97706" onclick="filterOA('insufficient')">库存不足</button>
+          <button class="btn btn-sm" style="background:#f5f3ff;color:#7c3aed;border:1px solid #7c3aed" onclick="filterOA('no_record')">无库存记录</button>
+          <button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:1px solid #dc2626" onclick="filterOA('unknown')">商品未知</button>
+          <button class="btn btn-sm" style="background:#f0fdf4;color:#16a34a;border:1px solid #16a34a" onclick="filterOA('ok')">库存充足</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="table" id="oa-table">
+            <thead><tr>
+              <th>状态</th>
+              <th>JAN</th>
+              <th>商品名</th>
+              <th>出货需求</th>
+              <th>乐天库存</th>
+              <th>缺少量</th>
+            </tr></thead>
+            <tbody id="oa-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- Rakuten CSV -->
     <div class="section" id="section-rakuten">
       <div class="section-title">乐天 CSV 导入</div>
@@ -517,10 +564,13 @@ tr:hover td { background: var(--accent-bg); }
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('rak-preview-area').style.display='none';_rakDraftId=null">取消</button>
         </div>
         <div id="rak-issues" style="margin-bottom:12px"></div>
-        <div id="rak-ignore-row" style="display:none;align-items:center;gap:8px;margin-bottom:12px;padding:10px 12px;background:var(--warn-bg);border-radius:8px">
-          <input type="checkbox" id="rak-ignore-missing" style="width:16px;height:16px;cursor:pointer">
-          <label for="rak-ignore-missing" style="cursor:pointer;font-size:14px">忽略无匹配 JAN 的记录（跳过这些行，其余照常出库）</label>
+        <div id="rak-needs-decision-wrap" style="display:none;margin-bottom:14px;border:1px solid var(--warn);border-radius:8px;padding:12px">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--warn)">
+            ⚠ <span id="rak-needs-decision-count"></span> 条商品库存不足或无记录，请逐条决策：
+          </div>
+          <div id="rak-needs-decision-list"></div>
         </div>
+        <div id="rak-ignore-row" style="display:none"></div>
         <button class="btn btn-primary" id="rak-confirm-btn" onclick="applyRakutenDraft()">确认导入</button>
       </div>
 
@@ -1206,19 +1256,23 @@ async function doSearch() {
   try {
     const items = await api('GET', `/inventory/search?keyword=${encodeURIComponent(kw)}`);
     if (!items.length) { el.innerHTML = '<p class="loading">无结果</p>'; return; }
-    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品名</th><th>仓库</th><th>客户</th><th>库位</th><th>数量</th></tr></thead><tbody>' + items.map(p => {
+    el.innerHTML = items.map(p => {
       const records = p.inventory_records || [];
-      return records.length
+      const warning = p.outer_jan_warning
+        ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#92400e">${esc(p.outer_jan_warning)}</div>`
+        : '';
+      const rows = records.length
         ? records.map(r => `<tr>
             <td><code style="font-size:11px">${p.jan_code}</code></td>
-            <td>${p.name_jp}<br><small style="color:var(--muted)">${p.name_zh||''}</small></td>
+            <td>${esc(p.name_jp)}<br><small style="color:var(--muted)">${esc(p.name_zh||'')}</small></td>
             <td>${r.warehouse?.name||'—'}</td>
             <td>${r.customer?.name||'—'}</td>
             <td>${r.location_code}</td>
             <td><strong style="color:${r.quantity < 0 ? 'var(--danger)' : 'inherit'}">${r.quantity}</strong></td>
           </tr>`).join('')
-        : `<tr><td colspan="6" style="color:var(--muted)"><code style="font-size:11px">${p.jan_code}</code> ${p.name_jp} — 无库存记录</td></tr>`;
-    }).join('') + '</tbody></table></div>';
+        : `<tr><td colspan="6" style="color:var(--muted)"><code style="font-size:11px">${p.jan_code}</code> ${esc(p.name_jp)} — 无库存记录</td></tr>`;
+      return warning + '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品名</th><th>仓库</th><th>客户</th><th>库位</th><th>数量</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    }).join('<hr style="margin:12px 0;border-color:var(--border)">');
   } catch (e) { el.innerHTML = resultCard('err', e.message); }
 }
 
@@ -1286,6 +1340,69 @@ function resetChatReport() {
 }
 
 // ── Rakuten CSV ────────────────────────────────────────────────────────────
+// ── 乐天出荷分析 ──────────────────────────────────────────────────────────────
+
+let _oaItems = [];
+
+async function runOrderAnalysis() {
+  const f1 = document.getElementById('oa-file1').files[0];
+  if (!f1) { toast('请选择一号店订单文件', 'err'); return; }
+  const fd = new FormData();
+  fd.append('file1', f1);
+  const f2 = document.getElementById('oa-file2').files[0];
+  if (f2) fd.append('file2', f2);
+  toast('解析中…', 'info');
+  try {
+    const res = await api('POST', '/rakuten/order-analysis', fd, true);
+    _oaItems = res.items || [];
+    document.getElementById('oa-result').style.display = 'block';
+    const problems = _oaItems.filter(i => i.status !== 'ok').length;
+    const parts = [
+      `一号店 ${res.store1_lines} 行`,
+      res.store2_lines ? `二号店 ${res.store2_lines} 行` : null,
+      `静默跳过 ${res.silently_skipped} 条（无JAN商品）`,
+      res.unknown_jan_count ? `<span style="color:var(--danger)">${res.unknown_jan_count} 条未知JAN</span>` : null,
+      problems ? `<span style="color:var(--warn)">${problems} 条需关注</span>` : `<span style="color:var(--success)">库存全部充足</span>`,
+    ].filter(Boolean);
+    document.getElementById('oa-summary').innerHTML = `<div class="card" style="padding:10px 14px;font-size:14px">${parts.join('　|　')}</div>`;
+    renderOATable(_oaItems);
+    toast('分析完成', 'ok');
+  } catch (e) { toast('分析失败: ' + e.message, 'err'); }
+}
+
+function filterOA(mode) {
+  if (mode === 'all') return renderOATable(_oaItems);
+  if (mode === 'problem') return renderOATable(_oaItems.filter(i => i.status !== 'ok'));
+  return renderOATable(_oaItems.filter(i => i.status === mode));
+}
+
+function renderOATable(items) {
+  const STATUS = {
+    ok:          { label: '充足',       color: '#16a34a', bg: '#f0fdf4' },
+    insufficient: { label: '库存不足',   color: '#d97706', bg: '#fffbeb' },
+    no_record:   { label: '无库存记录', color: '#7c3aed', bg: '#f5f3ff' },
+    unknown:     { label: '未知JAN',    color: '#dc2626', bg: '#fef2f2' },
+  };
+  document.getElementById('oa-tbody').innerHTML = items.map(item => {
+    const s = STATUS[item.status] || STATUS.unknown;
+    const stockDisplay = item.current_stock === null
+      ? (item.status === 'unknown' ? '—' : '<span style="color:#7c3aed">无记录</span>')
+      : item.current_stock;
+    const shortageDisplay = item.shortage > 0
+      ? `<span style="color:${s.color};font-weight:700">-${item.shortage}</span>` : '—';
+    return `<tr style="background:${item.status !== 'ok' ? s.bg : ''}">
+      <td><span style="font-size:12px;padding:2px 6px;border-radius:4px;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span></td>
+      <td><code style="font-size:12px">${esc(item.jan_code)}</code></td>
+      <td style="font-size:13px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.product_name||'')}">${esc(item.product_name || '—')}</td>
+      <td style="text-align:center">${item.ordered_qty}</td>
+      <td style="text-align:center">${stockDisplay}</td>
+      <td style="text-align:center">${shortageDisplay}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--muted)">暂无数据</td></tr>';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 let _rakDraftId = null;
 
 async function uploadRakutenCSV() {
@@ -1313,35 +1430,68 @@ async function uploadRakutenCSV() {
 }
 
 function renderRakutenPreview(data) {
-  const issues = data.issues || [];
-  const ignorable = data.ignorable_count || 0;
-  document.getElementById('rak-preview-title').innerHTML =
-    `预览 — 共 ${data.total_lines} 条` +
-    (issues.length ? `，<span style="color:var(--danger)">${issues.length} 个问题</span>` : '');
-  document.getElementById('rak-issues').innerHTML = issues.map(i =>
+  const blocking = data.blocking_issues || [];
+  const needs = data.needs_decision || [];
+  const skipped = data.auto_skipped_count || 0;
+  let titleParts = [`共 ${data.total_lines} 条，正常出库 ${data.ok_count} 条`];
+  if (skipped) titleParts.push(`${skipped} 条无商品记录自动忽略`);
+  document.getElementById('rak-preview-title').innerHTML = `预览 — ` + titleParts.join('，') +
+    (blocking.length ? `，<span style="color:var(--danger)">${blocking.length} 个阻断问题</span>` : '');
+
+  // Blocking issues
+  document.getElementById('rak-issues').innerHTML = blocking.map(i =>
     `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">
-      ⚠ <code style="font-size:11px">${esc(i.jan_code)}</code> ${esc(i.message)}
+      ✗ <code style="font-size:11px">${esc(i.jan_code)}</code> ${esc(i.message)}
     </div>`
   ).join('');
-  const ignoreRow = document.getElementById('rak-ignore-row');
-  if (ignorable > 0) {
-    ignoreRow.style.display = 'flex';
-    ignoreRow.querySelector('label').textContent = `忽略无匹配 JAN 的记录（跳过这 ${ignorable} 行，其余照常出库）`;
+
+  // Needs-decision section
+  const ndWrap = document.getElementById('rak-needs-decision-wrap');
+  if (needs.length) {
+    ndWrap.style.display = 'block';
+    document.getElementById('rak-needs-decision-count').textContent = needs.length;
+    document.getElementById('rak-needs-decision-list').innerHTML = needs.map(i => {
+      const stockInfo = i.issue_type === 'insufficient_stock'
+        ? `（现有 ${i.current_stock}，出库需 ${i.quantity_needed}）`
+        : `（商品已知但乐天仓库无入库记录，出库需 ${i.quantity_needed}）`;
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px">
+        <input type="checkbox" class="rak-force-neg-chk" data-jan="${esc(i.jan_code)}"
+               style="margin-top:3px;flex-shrink:0" title="勾选则录入负库存">
+        <div>
+          <code style="font-size:11px">${esc(i.jan_code)}</code>
+          <span style="color:var(--warn);font-size:12px"> ⚠ ${esc(i.message)}</span>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${stockInfo}
+            — <b>勾选</b>：录入负库存（忘记录入库）　<b>不勾选</b>：静默忽略（合作方直发）
+          </div>
+        </div>
+      </div>`;
+    }).join('');
   } else {
-    ignoreRow.style.display = 'none';
-    document.getElementById('rak-ignore-missing').checked = false;
+    ndWrap.style.display = 'none';
   }
+
+  // Hide ignore-missing row (replaced by per-item decision above)
+  const ignoreRow = document.getElementById('rak-ignore-row');
+  if (ignoreRow) ignoreRow.style.display = 'none';
+
+  // Disable confirm if there are blocking issues
+  document.getElementById('rak-confirm-btn').disabled = blocking.length > 0;
 }
 
 async function applyRakutenDraft() {
   if (!_rakDraftId) return;
-  const ignoreMissing = document.getElementById('rak-ignore-missing').checked;
+  const forceNegJans = [...document.querySelectorAll('.rak-force-neg-chk:checked')]
+    .map(el => el.dataset.jan).filter(Boolean);
   const btn = document.getElementById('rak-confirm-btn');
   btn.disabled = true;
   btn.textContent = '导入中…';
   try {
-    const url = `/api/v1/inventory/imports/rakuten-shipment/draft/${_rakDraftId}/apply?ignore_missing=${ignoreMissing}`;
-    const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${_token}` } });
+    const url = `/api/v1/inventory/imports/rakuten-shipment/draft/${_rakDraftId}/apply`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force_negative_jans: forceNegJans }),
+    });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
@@ -1351,7 +1501,7 @@ async function applyRakutenDraft() {
     _rakDraftId = null;
     renderRakutenResult(data);
     document.getElementById('rak-result-area').style.display = 'block';
-    if (data.applied) toast(`出库成功：${data.mutations?.length || 0} 条`, 'ok');
+    if (data.applied) toast(`出库成功：${data.mutations?.length || 0} 条${data.force_negated_count ? `（其中 ${data.force_negated_count} 条负库存）` : ''}`, 'ok');
     else toast(`导入失败，共 ${data.issues?.length || 0} 个错误`, 'err');
   } catch (e) { toast('导入失败: ' + e.message, 'err'); }
   finally { btn.disabled = false; btn.textContent = '确认导入'; }
@@ -1362,7 +1512,11 @@ function renderRakutenResult(data) {
   const issues = data.issues || [];
   const titleEl = document.getElementById('rak-result-title');
   if (data.applied) {
-    titleEl.innerHTML = `<span style="color:var(--success)">✓ 出库成功 ${mutations.length} 条${issues.length ? `，跳过 ${issues.length} 条` : ''}</span>`;
+    const parts = [`✓ 出库成功 ${mutations.length} 条`];
+    if (data.force_negated_count) parts.push(`其中 ${data.force_negated_count} 条录为负库存`);
+    if (data.auto_skipped_count) parts.push(`自动忽略无商品记录 ${data.auto_skipped_count} 条`);
+    if (data.skipped_duplicates) parts.push(`跳过重复 ${data.skipped_duplicates} 条`);
+    titleEl.innerHTML = `<span style="color:var(--success)">${parts.join('，')}</span>`;
   } else {
     titleEl.innerHTML = `<span style="color:var(--danger)">✗ 导入失败 — ${issues.length} 个问题</span>`;
   }
@@ -1545,18 +1699,27 @@ async function exportCountDraft() {
     URL.revokeObjectURL(url);
   } catch (e) { toast('导出失败: ' + e.message, 'err'); }
 }
-async function applyCountDraft() {
+async function applyCountDraft(force = false) {
   if (!_currentDraft.id) return;
   const btn = document.getElementById('ci-apply-btn');
   btn.disabled = true;
   try {
-    const res = await api('POST', `/inventory-count/${_currentDraft.id}/apply`);
+    const url = `/inventory-count/${_currentDraft.id}/apply` + (force ? '?force=true' : '');
+    const res = await api('POST', url);
     if (res.applied) {
       toast(`盘点应用成功：调整 ${res.adjusted_count}，新增 ${res.created_count}，无变化 ${res.no_change_count}`, 'ok');
       btn.textContent = '已应用';
     } else {
-      toast('应用失败: ' + (res.issues || []).join('; '), 'err');
-      btn.disabled = false;
+      const alreadyApplied = (res.issues || []).some(s => s.includes('已经被应用过'));
+      if (alreadyApplied && !force) {
+        toast('该草稿之前已应用，如需强制重新导入请点击「强制重新应用」', 'err');
+        btn.textContent = '强制重新应用';
+        btn.disabled = false;
+        btn.onclick = () => { btn.onclick = null; btn.textContent = '确认应用'; applyCountDraft(true); };
+      } else {
+        toast('应用失败: ' + (res.issues || []).join('; '), 'err');
+        btn.disabled = false;
+      }
     }
   } catch (e) { toast('应用失败: ' + e.message, 'err'); btn.disabled = false; }
 }
@@ -1582,18 +1745,19 @@ async function searchProducts() {
     const items = await api('GET', `/inventory/search_sku?keyword=${encodeURIComponent(kw)}`);
     const el = document.getElementById('prod-search-result');
     if (!items.length) { el.innerHTML = '<p class="loading">无结果</p>'; return; }
-    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>日文名</th><th>中文名</th><th>箱入数</th><th></th></tr></thead><tbody>' +
+    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>日文名</th><th>中文名</th><th>箱入数</th><th>外箱JAN</th><th></th></tr></thead><tbody>' +
       items.map(p => `<tr id="prow-${p.jan_code}">
         <td><code style="font-size:11px">${p.jan_code}</code></td>
         <td>${esc(p.name_jp)}</td>
         <td>${esc(p.name_zh||'')}</td>
         <td>${p.units_per_case||'—'}</td>
-        <td><button class="btn btn-ghost btn-sm" onclick="editProductRow('${p.jan_code}','${esc(p.name_jp)}','${esc(p.name_zh||'')}','${p.units_per_case||''}')">编辑</button></td>
+        <td>${p.outer_jan ? `<code style="font-size:11px;color:var(--warn)">${p.outer_jan}</code>` : '—'}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="editProductRow('${p.jan_code}','${esc(p.name_jp)}','${esc(p.name_zh||'')}','${p.units_per_case||''}','${p.outer_jan||''}')">编辑</button></td>
       </tr>`).join('') + '</tbody></table></div>';
   } catch (e) { toast(e.message, 'err'); }
 }
 
-function editProductRow(jan, nameJp, nameZh, upc) {
+function editProductRow(jan, nameJp, nameZh, upc, outerJan) {
   const row = document.getElementById(`prow-${jan}`);
   if (!row) return;
   row.innerHTML = `
@@ -1601,6 +1765,7 @@ function editProductRow(jan, nameJp, nameZh, upc) {
     <td><input type="text" value="${nameJp}" id="pedit-jp-${jan}" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td><input type="text" value="${nameZh}" id="pedit-zh-${jan}" placeholder="中文名（可选）" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td><input type="number" value="${upc}" id="pedit-upc-${jan}" min="1" placeholder="—" style="width:70px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+    <td><input type="text" value="${outerJan}" id="pedit-outer-${jan}" placeholder="外箱JAN（可选）" maxlength="13" style="width:110px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td style="white-space:nowrap">
       <button class="btn btn-primary btn-sm" onclick="saveProductRow('${jan}')">保存</button>
       <button class="btn btn-ghost btn-sm" onclick="searchProducts()">取消</button>
@@ -1611,10 +1776,12 @@ async function saveProductRow(jan) {
   const nameJp = document.getElementById(`pedit-jp-${jan}`)?.value.trim();
   const nameZh = document.getElementById(`pedit-zh-${jan}`)?.value.trim();
   const upcRaw = document.getElementById(`pedit-upc-${jan}`)?.value;
+  const outerJan = document.getElementById(`pedit-outer-${jan}`)?.value.trim();
   if (!nameJp) { toast('日文名不能为空', 'err'); return; }
   const body = { name_jp: nameJp };
   if (nameZh) body.name_zh = nameZh;
   if (upcRaw) body.units_per_case = +upcRaw;
+  body.outer_jan = outerJan || null;
   try {
     await api('PATCH', `/inventory/products/${jan}`, body);
     toast('已保存', 'ok');
