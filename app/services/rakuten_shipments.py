@@ -352,12 +352,6 @@ async def _validate_rakuten_shipment_lines(
             line_index=-1, jan_code="", issue_type="warehouse_not_found",
             message=f"Warehouse not found: {warehouse_name}",
         ))
-    if customer is None:
-        blocking_issues.append(RakutenShipmentIssue(
-            line_index=-1, jan_code="", issue_type="customer_not_found",
-            message=f"Customer not found: {customer_name}",
-        ))
-
     for index, line in enumerate(lines):
         products = await search_inventory_items(session=session, keyword=line.jan_code, limit=6)
         if not products:
@@ -373,7 +367,7 @@ async def _validate_rakuten_shipment_lines(
                 candidates=[ProductRead.model_validate(p) for p in products],
             ))
             continue
-        if warehouse is None or customer is None:
+        if warehouse is None:
             continue
 
         jan_code = products[0].jan_code
@@ -381,7 +375,6 @@ async def _validate_rakuten_shipment_lines(
             session=session,
             jan_code=jan_code,
             warehouse_id=warehouse.id,
-            customer_id=customer.id,
         )
         if record is None:
             # Product exists in DB but no stock record in this warehouse
@@ -470,14 +463,12 @@ async def _resolve_first_inventory_record(
     session: AsyncSession,
     jan_code: str,
     warehouse_id: int,
-    customer_id: int | None,
 ) -> InventoryRecord | None:
     return await session.scalar(
         select(InventoryRecord)
         .where(
             InventoryRecord.product_jan == jan_code,
             InventoryRecord.warehouse_id == warehouse_id,
-            InventoryRecord.customer_id == customer_id,
         )
         .order_by(InventoryRecord.id.asc())
         .limit(1)
