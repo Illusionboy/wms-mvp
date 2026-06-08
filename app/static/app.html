@@ -938,6 +938,20 @@ tr:hover td { background: var(--accent-bg); }
         </div>
         <div id="customer-list"></div>
       </div>
+      <hr class="divider">
+      <div class="card">
+        <div class="card-title">Telegram 查询授权用户</div>
+        <p style="font-size:13px;color:var(--muted);margin:0 0 12px">
+          添加用户后立即生效，无需重启 Bot。用户可在 Bot 中发 <code>/whoami</code> 查看自己的 ID。
+        </p>
+        <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          <input type="number" id="tg-user-id" placeholder="Telegram 用户 ID" style="width:180px">
+          <input type="text" id="tg-username" placeholder="@handle（可选）" style="width:150px">
+          <input type="text" id="tg-note" placeholder="备注（可选）" style="width:150px">
+          <button class="btn btn-primary btn-sm" onclick="addTelegramUser()">添加</button>
+        </div>
+        <div id="tg-user-list" style="margin-top:10px"></div>
+      </div>
     </div>
 
   </div><!-- /main -->
@@ -1837,6 +1851,53 @@ async function loadSettingsLists() {
   cEl.innerHTML = '<div class="table-wrap"><table><thead><tr><th>客户</th></tr></thead><tbody>' +
     _customers.map(c => `<tr><td>${c.name}</td></tr>`).join('') +
     '</tbody></table></div>';
+  await loadTelegramUsers();
+}
+
+async function loadTelegramUsers() {
+  const el = document.getElementById('tg-user-list');
+  if (!el) return;
+  try {
+    const users = await api('GET', '/telegram-users');
+    if (!users.length) {
+      el.innerHTML = '<p style="color:var(--muted);font-size:13px">暂无授权用户</p>';
+      return;
+    }
+    el.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>Telegram ID</th><th>@handle</th><th>备注</th><th></th></tr></thead>
+      <tbody>${users.map(u => `<tr>
+        <td><code style="font-size:12px">${u.telegram_user_id}</code></td>
+        <td>${esc(u.username ? '@' + u.username : '—')}</td>
+        <td style="font-size:13px;color:var(--muted)">${esc(u.note || '—')}</td>
+        <td><button class="btn btn-ghost btn-sm" style="color:var(--danger)"
+            onclick="removeTelegramUser(${u.telegram_user_id})">移除</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  } catch (e) { el.innerHTML = `<span style="color:var(--danger);font-size:13px">${esc(e.message)}</span>`; }
+}
+
+async function addTelegramUser() {
+  const tgId = parseInt(document.getElementById('tg-user-id').value, 10);
+  if (!tgId) { toast('请输入有效的 Telegram 用户 ID', 'err'); return; }
+  const username = document.getElementById('tg-username').value.replace(/^@/, '').trim() || null;
+  const note = document.getElementById('tg-note').value.trim() || null;
+  try {
+    await api('POST', '/telegram-users', { telegram_user_id: tgId, username, note });
+    document.getElementById('tg-user-id').value = '';
+    document.getElementById('tg-username').value = '';
+    document.getElementById('tg-note').value = '';
+    toast(`用户 ${tgId} 已添加，立即生效`, 'ok');
+    await loadTelegramUsers();
+  } catch (e) { toast('添加失败: ' + e.message, 'err'); }
+}
+
+async function removeTelegramUser(tgId) {
+  if (!confirm(`确认移除 Telegram 用户 ${tgId}？`)) return;
+  try {
+    await api('DELETE', `/telegram-users/${tgId}`);
+    toast(`用户 ${tgId} 已移除`, 'ok');
+    await loadTelegramUsers();
+  } catch (e) { toast('移除失败: ' + e.message, 'err'); }
 }
 
 async function toggleNegList(cell, warehouseId) {

@@ -44,6 +44,8 @@ async def init_db() -> None:
         await conn.execute(text(
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS outer_jan VARCHAR(13)"
         ))
+        # telegram_allowed_users is created by create_all via the model import;
+        # the unique index is also declared there.
 
         # Harden FK ON DELETE actions: CASCADE/SET NULL → RESTRICT to protect the audit trail.
         # The DO block uses pg_constraint.confdeltype ('c'=CASCADE, 'n'=SET NULL) so it only
@@ -112,6 +114,42 @@ async def init_db() -> None:
         """))
 
     await _ensure_admin_user()
+    await _seed_telegram_users_from_env()
+
+
+async def _seed_telegram_users_from_env() -> None:
+    """One-time migration: import TELEGRAM_QUERY_USER_IDS env var into DB.
+
+    Safe to run on every startup — uses INSERT ... ON CONFLICT DO NOTHING.
+    Once IDs are in DB they are managed via the API; the env var becomes optional.
+    """
+    from app.models.telegram_allowed_user import TelegramAllowedUser
+
+    raw = settings.telegram_query_user_ids.strip()
+    if not raw:
+        return
+
+    ids: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.append(int(part))
+    if not ids:
+        return
+
+    async with AsyncSessionLocal() as session:
+        for tg_id in ids:
+            exists = await session.scalar(
+                select(TelegramAllowedUser).where(
+                    TelegramAllowedUser.telegram_user_id == tg_id
+                )
+            )
+            if exists is None:
+                session.add(TelegramAllowedUser(
+                    telegram_user_id=tg_id,
+                    note="seeded from TELEGRAM_QUERY_USER_IDS env var",
+                ))
+        await session.commit()
 
 
 async def _ensure_admin_user() -> None:

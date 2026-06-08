@@ -127,23 +127,24 @@ def _command_args(text: str | None) -> str:
 
 
 async def _require_query_permission(message: Message) -> bool:
-    from app.core.config import settings
+    from app.models.telegram_allowed_user import TelegramAllowedUser
+
     user = message.from_user
     if user is None:
         await message.answer("Cannot identify user.")
         return False
-    allowed_ids: set[int] = set()
-    for id_list in [
-        settings.telegram_query_user_ids,
-        settings.telegram_operator_user_ids,
-        settings.telegram_admin_user_ids,
-    ]:
-        for id_str in id_list.split(","):
-            id_str = id_str.strip()
-            if id_str.isdigit():
-                allowed_ids.add(int(id_str))
-    if user.id not in allowed_ids:
-        await message.answer("Access denied. Contact admin to get query access.")
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy import select
+        allowed = await session.scalar(
+            select(TelegramAllowedUser).where(
+                TelegramAllowedUser.telegram_user_id == user.id
+            )
+        )
+    if allowed is None:
+        await message.answer(
+            "⛔ 无访问权限。\n"
+            f"请联系管理员将你的 ID（{user.id}）添加到授权列表。"
+        )
         return False
     return True
 

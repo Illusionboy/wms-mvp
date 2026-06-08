@@ -1,4 +1,5 @@
 from app.models.chat_report_draft import ChatReportDraft
+from app.models.telegram_allowed_user import TelegramAllowedUser
 from app.models.customer import Customer
 from app.models.inventory_count_draft import InventoryCountDraft
 from app.models.inventory_record import InventoryRecord
@@ -21,6 +22,7 @@ __all__ = [
     "RakutenShipmentDraft",
     "StockTransaction",
     "StockTransactionType",
+    "TelegramAllowedUser",
     "User",
     "Warehouse",
 ]
