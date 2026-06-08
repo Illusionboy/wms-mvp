@@ -510,8 +510,14 @@ async def get_system_status(session: AsyncSession) -> list[WarehouseStatusRead]:
             func.max(
                 case((StockTransaction.source == "physical_count", StockTransaction.created_at), else_=None)
             ).label("last_physical_count_at"),
-            func.count(
-                case((InventoryRecord.quantity < 0, 1), else_=None)
+            (
+                select(func.count())
+                .where(
+                    InventoryRecord.warehouse_id == Warehouse.id,
+                    InventoryRecord.quantity < 0,
+                )
+                .correlate(Warehouse)
+                .scalar_subquery()
             ).label("negative_stock_count"),
         )
         .select_from(Warehouse)
