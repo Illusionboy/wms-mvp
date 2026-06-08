@@ -490,7 +490,7 @@ tr:hover td { background: var(--accent-bg); }
     <!-- Rakuten CSV -->
     <div class="section" id="section-rakuten">
       <div class="section-title">乐天 CSV 导入</div>
-      <div class="section-sub">上传乐天 RMS 出货 CSV，直接写入出库记录</div>
+      <div class="section-sub">上传乐天 RMS 出货 CSV，预览后确认写入出库记录</div>
       <div class="card">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="form-row">
@@ -506,8 +506,25 @@ tr:hover td { background: var(--accent-bg); }
           <label>CSV 文件</label>
           <input type="file" id="rak-file" accept=".csv" style="padding:6px 0;border:none;background:none">
         </div>
-        <button class="btn btn-primary" onclick="uploadRakutenCSV()">上传导入</button>
+        <button class="btn btn-primary" onclick="uploadRakutenCSV()">上传预览</button>
       </div>
+
+      <!-- Preview / Confirm area -->
+      <div id="rak-preview-area" style="display:none">
+        <hr class="divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <strong id="rak-preview-title"></strong>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('rak-preview-area').style.display='none';_rakDraftId=null">取消</button>
+        </div>
+        <div id="rak-issues" style="margin-bottom:12px"></div>
+        <div id="rak-ignore-row" style="display:none;align-items:center;gap:8px;margin-bottom:12px;padding:10px 12px;background:var(--warn-bg);border-radius:8px">
+          <input type="checkbox" id="rak-ignore-missing" style="width:16px;height:16px;cursor:pointer">
+          <label for="rak-ignore-missing" style="cursor:pointer;font-size:14px">忽略无匹配 JAN 的记录（跳过这些行，其余照常出库）</label>
+        </div>
+        <button class="btn btn-primary" id="rak-confirm-btn" onclick="applyRakutenDraft()">确认导入</button>
+      </div>
+
+      <!-- Result area (after apply) -->
       <div id="rak-result-area" style="display:none">
         <hr class="divider">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -522,7 +539,7 @@ tr:hover td { background: var(--accent-bg); }
             </table>
           </div>
         </div>
-        <div id="rak-issues" style="margin-top:8px"></div>
+        <div id="rak-result-issues" style="margin-top:8px"></div>
       </div>
     </div>
 
@@ -1263,6 +1280,8 @@ function resetChatReport() {
 }
 
 // ── Rakuten CSV ────────────────────────────────────────────────────────────
+let _rakDraftId = null;
+
 async function uploadRakutenCSV() {
   const file = document.getElementById('rak-file').files[0];
   if (!file) { toast('请选择 CSV 文件', 'err'); return; }
@@ -1271,25 +1290,73 @@ async function uploadRakutenCSV() {
   fd.append('file', file);
   toast('上传中…', 'info');
   try {
-    const url = `/api/v1/inventory/imports/rakuten-shipment?warehouse_name=${encodeURIComponent(wOpt.text)}&customer_name=%E4%B9%90%E5%A4%A9`;
+    const url = `/api/v1/inventory/imports/rakuten-shipment/draft?warehouse_name=${encodeURIComponent(wOpt.text)}&customer_name=%E4%B9%90%E5%A4%A9`;
     const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${_token}` }, body: fd });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
     }
     const data = await res.json();
-    renderRakutenResult(data);
-    document.getElementById('rak-result-area').style.display = 'block';
-    if (data.applied) toast(`导入成功：${data.mutations?.length || 0} 条出库`, 'ok');
-    else toast(`导入遇到问题，共 ${data.issues?.length || 0} 个错误`, 'err');
+    _rakDraftId = data.draft_id;
+    renderRakutenPreview(data);
+    document.getElementById('rak-preview-area').style.display = 'block';
+    document.getElementById('rak-result-area').style.display = 'none';
+    if (data.issues.length === 0) toast(`解析完成：${data.total_lines} 条，无问题`, 'ok');
+    else toast(`解析完成，发现 ${data.issues.length} 个问题`, 'warn');
   } catch (e) { toast('上传失败: ' + e.message, 'err'); }
 }
+
+function renderRakutenPreview(data) {
+  const issues = data.issues || [];
+  const ignorable = data.ignorable_count || 0;
+  document.getElementById('rak-preview-title').innerHTML =
+    `预览 — 共 ${data.total_lines} 条` +
+    (issues.length ? `，<span style="color:var(--danger)">${issues.length} 个问题</span>` : '');
+  document.getElementById('rak-issues').innerHTML = issues.map(i =>
+    `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">
+      ⚠ <code style="font-size:11px">${esc(i.jan_code)}</code> ${esc(i.message)}
+    </div>`
+  ).join('');
+  const ignoreRow = document.getElementById('rak-ignore-row');
+  if (ignorable > 0) {
+    ignoreRow.style.display = 'flex';
+    ignoreRow.querySelector('label').textContent = `忽略无匹配 JAN 的记录（跳过这 ${ignorable} 行，其余照常出库）`;
+  } else {
+    ignoreRow.style.display = 'none';
+    document.getElementById('rak-ignore-missing').checked = false;
+  }
+}
+
+async function applyRakutenDraft() {
+  if (!_rakDraftId) return;
+  const ignoreMissing = document.getElementById('rak-ignore-missing').checked;
+  const btn = document.getElementById('rak-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = '导入中…';
+  try {
+    const url = `/api/v1/inventory/imports/rakuten-shipment/draft/${_rakDraftId}/apply?ignore_missing=${ignoreMissing}`;
+    const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${_token}` } });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    document.getElementById('rak-preview-area').style.display = 'none';
+    _rakDraftId = null;
+    renderRakutenResult(data);
+    document.getElementById('rak-result-area').style.display = 'block';
+    if (data.applied) toast(`出库成功：${data.mutations?.length || 0} 条`, 'ok');
+    else toast(`导入失败，共 ${data.issues?.length || 0} 个错误`, 'err');
+  } catch (e) { toast('导入失败: ' + e.message, 'err'); }
+  finally { btn.disabled = false; btn.textContent = '确认导入'; }
+}
+
 function renderRakutenResult(data) {
   const mutations = data.mutations || [];
   const issues = data.issues || [];
   const titleEl = document.getElementById('rak-result-title');
   if (data.applied) {
-    titleEl.innerHTML = `<span style="color:var(--success)">✓ 出库成功 ${mutations.length} 条</span>`;
+    titleEl.innerHTML = `<span style="color:var(--success)">✓ 出库成功 ${mutations.length} 条${issues.length ? `，跳过 ${issues.length} 条` : ''}</span>`;
   } else {
     titleEl.innerHTML = `<span style="color:var(--danger)">✗ 导入失败 — ${issues.length} 个问题</span>`;
   }
@@ -1302,8 +1369,8 @@ function renderRakutenResult(data) {
       <td>${m.quantity}</td>
     </tr>`).join('');
   } else { mutWrap.style.display = 'none'; }
-  document.getElementById('rak-issues').innerHTML = issues.map(i =>
-    `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">⚠ <code style="font-size:11px">${i.jan_code}</code> ${i.message}</div>`
+  document.getElementById('rak-result-issues').innerHTML = issues.map(i =>
+    `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">⚠ <code style="font-size:11px">${esc(i.jan_code)}</code> ${esc(i.message)}</div>`
   ).join('');
 }
 

@@ -303,6 +303,13 @@ class RakutenShipmentImportResult(BaseModel):
     names_synced: int = 0
 
 
+class RakutenDraftPreview(BaseModel):
+    draft_id: int
+    total_lines: int
+    ignorable_count: int        # lines skippable with ignore_missing=True
+    issues: list[RakutenShipmentIssue]
+
+
 class RakutenShipmentDraftDocument(BaseModel):
     warehouse_name: str
     customer_name: str

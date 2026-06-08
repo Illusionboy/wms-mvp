@@ -19,6 +19,7 @@ from app.schemas.inventory import (
     ProductInventoryRead,
     ProductRead,
     ProductUpdate,
+    RakutenDraftPreview,
     RakutenShipmentImportResult,
     StockAdjustCreate,
     StockAdjustResult,
@@ -42,7 +43,14 @@ from app.services.inventory import (
     stock_in_item,
     stock_out_item,
 )
-from app.services.rakuten_shipments import import_rakuten_shipment_csv
+from app.services.rakuten_shipments import (
+    IGNORABLE_RAKUTEN_ISSUE_TYPES,
+    apply_rakuten_shipment_draft,
+    create_rakuten_shipment_draft,
+    get_rakuten_shipment_draft,
+    import_rakuten_shipment_csv,
+    preview_rakuten_shipment_draft,
+)
 
 router = APIRouter()
 
@@ -223,6 +231,54 @@ async def upload_rakuten_shipment_csv(
         content=content,
         warehouse_name=warehouse_name,
         customer_name=customer_name,
+    )
+
+
+@router.post("/imports/rakuten-shipment/draft", response_model=RakutenDraftPreview, status_code=status.HTTP_202_ACCEPTED)
+async def create_rakuten_draft(
+    file: UploadFile = File(...),
+    warehouse_name: str = "乐天仓库",
+    customer_name: str = "乐天",
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> RakutenDraftPreview:
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File exceeds 10 MB limit.")
+    draft = await create_rakuten_shipment_draft(
+        session=session,
+        content=content,
+        original_filename=file.filename or "rakuten.csv",
+        warehouse_name=warehouse_name,
+        customer_name=customer_name,
+    )
+    preview = await preview_rakuten_shipment_draft(session=session, draft=draft)
+    ignorable_count = sum(1 for i in preview.issues if i.issue_type in IGNORABLE_RAKUTEN_ISSUE_TYPES)
+    return RakutenDraftPreview(
+        draft_id=draft.id,
+        total_lines=preview.total_lines,
+        ignorable_count=ignorable_count,
+        issues=preview.issues,
+    )
+
+
+@router.post("/imports/rakuten-shipment/draft/{draft_id}/apply", response_model=RakutenShipmentImportResult)
+async def apply_rakuten_draft(
+    draft_id: int,
+    ignore_missing: bool = False,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> RakutenShipmentImportResult:
+    draft = await get_rakuten_shipment_draft(session, draft_id, with_for_update=True)
+    if draft is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found.")
+    if draft.status in ("applied", "applied_with_skips"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Draft already applied.")
+    return await apply_rakuten_shipment_draft(
+        session=session,
+        draft=draft,
+        ignore_missing=ignore_missing,
+        user_id=current_user.id,
     )
 
 
