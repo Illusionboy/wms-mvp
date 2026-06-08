@@ -572,7 +572,13 @@ tr:hover td { background: var(--accent-bg); }
           <label>盘点批次（文件包含多条记录）</label>
           <select id="ci-session-index"></select>
         </div>
-        <button class="btn btn-primary" onclick="uploadCountFile()">解析预览</button>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+          <input type="checkbox" id="ci-cover-uncovered" checked style="width:16px;height:16px;cursor:pointer">
+          <label for="ci-cover-uncovered" style="cursor:pointer;font-size:13px;color:var(--text-secondary)">
+            将仓库中未出现在盘点单的商品视为盘点数量=0（全仓覆盖）
+          </label>
+        </div>
+        <button class="btn btn-primary" onclick="uploadCountFile()" style="margin-top:12px">解析预览</button>
       </div>
       <div id="ci-draft-area" style="display:none">
         <hr class="divider">
@@ -1412,11 +1418,13 @@ async function uploadCountFile() {
   if (!dateVal) { toast('请选择盘点日期', 'err'); return; }
   if (!wOpt) { toast('请选择仓库', 'err'); return; }
   const sessionIdx = document.getElementById('ci-session-index').value || '0';
+  const coverUncovered = document.getElementById('ci-cover-uncovered').checked;
   const fd = new FormData();
   fd.append('file', file);
   fd.append('count_date', dateVal);
   fd.append('warehouse_name', wOpt.text);
   fd.append('session_index', sessionIdx);
+  fd.append('cover_uncovered', coverUncovered ? 'true' : 'false');
   if (cOpt) fd.append('customer_name', cOpt.text);
   toast('解析中…', 'info');
   try {

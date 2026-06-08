@@ -414,6 +414,7 @@ async def create_inventory_count_draft(
     warehouse_name: str,
     customer_name: str | None,
     session_index: int = 0,
+    cover_uncovered: bool = True,
 ) -> InventoryCountDraft:
     parsed = await parse_count_file(content, filename, session_index=session_index)
 
@@ -432,6 +433,7 @@ async def create_inventory_count_draft(
         count_date=count_date,
         warehouse_id=warehouse.id,
         customer_id=customer.id if customer else None,
+        cover_uncovered=cover_uncovered,
     )
 
     document = InventoryCountDocument(
@@ -460,6 +462,7 @@ async def _compute_draft_lines(
     count_date: date,
     warehouse_id: int,
     customer_id: int | None,
+    cover_uncovered: bool = True,
 ) -> list[CountDraftLine]:
     # Transactions strictly after the end of count_date
     cutoff = datetime.combine(count_date, time(23, 59, 59)).replace(tzinfo=timezone.utc)
@@ -521,7 +524,10 @@ async def _compute_draft_lines(
             )
         )
 
-    # ── 补充盘点表未覆盖的仓库SKU，以盘点数量=0计入 ────────────────────────
+    # ── 补充盘点表未覆盖的仓库SKU（cover_uncovered=True 时视为0，否则跳过）──
+    if not cover_uncovered:
+        return lines
+
     not_in_filter = (
         InventoryRecord.product_jan.not_in(list(covered_jans))
         if covered_jans

@@ -55,6 +55,7 @@ async def upload_count_file(
     warehouse_name: str = Form(...),
     customer_name: str | None = Form(None),
     session_index: int = Form(0),
+    cover_uncovered: bool = Form(True),
     session: AsyncSession = Depends(get_db_session),
     current_user: CurrentUser = Depends(require_auth),
 ) -> InventoryCountDraftRead:
@@ -70,6 +71,7 @@ async def upload_count_file(
             warehouse_name=warehouse_name,
             customer_name=customer_name,
             session_index=session_index,
+            cover_uncovered=cover_uncovered,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
