@@ -233,6 +233,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="stock-adjust" onclick="nav(this)">
         <span class="icon">⇌</span> 调整
       </button>
+      <button class="nav-item" data-section="stock-transfer" onclick="nav(this)">
+        <span class="icon">⇄</span> 调库
+      </button>
       <button class="nav-item" data-section="search" onclick="nav(this)">
         <span class="icon">○</span> 查询
       </button>
@@ -240,7 +243,7 @@ tr:hover td { background: var(--accent-bg); }
 
     <div class="nav-group">
       <div class="nav-label">批量导入</div>
-      <button class="nav-item" data-section="chat-report" onclick="nav(this)">
+      <button class="nav-item" data-section="chat-report" onclick="nav(this)" style="display:none">
         <span class="icon">✦</span> 微信报库
       </button>
       <button class="nav-item" data-section="oa" onclick="nav(this)">
@@ -433,6 +436,50 @@ tr:hover td { background: var(--accent-bg); }
       <div id="sa-result"></div>
     </div>
 
+    <!-- Stock Transfer -->
+    <div class="section" id="section-stock-transfer">
+      <div class="section-title">调库</div>
+      <div class="section-sub">将商品从一个仓库移至另一个仓库（自动写入出库+入库两笔记录）</div>
+      <div class="card">
+        <div class="form-row">
+          <label>搜索商品 (JAN / 商品名)</label>
+          <div class="search-widget">
+            <input type="text" id="st-search" placeholder="扫描或输入…" oninput="debounceSearch('st')">
+            <div class="search-results" id="st-results" style="display:none"></div>
+          </div>
+          <div class="selected-product" id="st-selected">
+            <div class="sri-jan" id="st-jan-display"></div>
+            <div class="sp-name" id="st-name-display"></div>
+          </div>
+          <input type="hidden" id="st-jan">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>调出仓库</label>
+            <select id="st-from-warehouse"></select>
+          </div>
+          <div class="form-row">
+            <label>调入仓库</label>
+            <select id="st-to-warehouse"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>数量</label>
+          <input type="number" id="st-qty" min="1" value="1" placeholder="1">
+        </div>
+        <div class="form-row">
+          <label>交易日期 (默认今天)</label>
+          <input type="date" id="st-txn-date">
+        </div>
+        <div class="form-row">
+          <label>备注 (选填)</label>
+          <input type="text" id="st-note" placeholder="调库原因…">
+        </div>
+        <button class="btn btn-primary" onclick="submitTransfer()">确认调库</button>
+      </div>
+      <div id="st-result"></div>
+    </div>
+
     <!-- Search -->
     <div class="section" id="section-search">
       <div class="section-title">库存查询</div>
@@ -447,8 +494,8 @@ tr:hover td { background: var(--accent-bg); }
       <div id="search-result" style="margin-top:16px"></div>
     </div>
 
-    <!-- Chat Report -->
-    <div class="section" id="section-chat-report">
+    <!-- Chat Report (hidden) -->
+    <div class="section" id="section-chat-report" style="display:none">
       <div class="section-title">微信报库解析</div>
       <div class="section-sub">用 AI 解析微信聊天报库记录，生成草稿后确认导入</div>
       <div class="card" id="chat-form-card">
@@ -1080,7 +1127,7 @@ async function loadGlobals() {
 }
 
 function populateSelects() {
-  const wSelects = ['si-warehouse','so-warehouse','sa-warehouse','cr-warehouse','rak-warehouse','ci-warehouse'];
+  const wSelects = ['si-warehouse','so-warehouse','sa-warehouse','cr-warehouse','rak-warehouse','ci-warehouse','st-from-warehouse','st-to-warehouse'];
   const cSelects = ['si-customer','so-customer','sa-customer','cr-customer','rak-customer'];
 
   wSelects.forEach(id => {
@@ -1259,6 +1306,29 @@ async function submitAdjust() {
     toast('调整成功', 'ok');
     resetForm('sa');
   } catch (e) { document.getElementById('sa-result').innerHTML = resultCard('err', e.message); }
+}
+
+// ── Stock Transfer ─────────────────────────────────────────────────────────
+async function submitTransfer() {
+  const jan = document.getElementById('st-jan').value;
+  const fromId = +document.getElementById('st-from-warehouse').value;
+  const toId = +document.getElementById('st-to-warehouse').value;
+  const qty = +document.getElementById('st-qty').value;
+  const note = document.getElementById('st-note').value.trim() || null;
+  const txnDate = document.getElementById('st-txn-date').value || null;
+  if (!jan) { toast('请先选择商品', 'err'); return; }
+  if (!qty || qty < 1) { toast('请输入有效数量', 'err'); return; }
+  if (fromId === toId) { toast('调出和调入仓库不能相同', 'err'); return; }
+  try {
+    const res = await api('POST', '/inventory/stock-transfer', {
+      sku: jan, from_warehouse_id: fromId, to_warehouse_id: toId,
+      quantity: qty, note, transaction_date: txnDate,
+    });
+    document.getElementById('st-result').innerHTML = resultCard('ok',
+      `${res.message}  调出后库存: ${res.from_quantity_after}，调入后库存: ${res.to_quantity_after}`);
+    toast('调库成功', 'ok');
+    resetForm('st');
+  } catch (e) { document.getElementById('st-result').innerHTML = resultCard('err', e.message); }
 }
 
 // ── Search ─────────────────────────────────────────────────────────────────

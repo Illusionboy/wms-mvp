@@ -29,6 +29,7 @@ from app.schemas.inventory import (
     StockOutCreate,
     StockOutResult,
     StockTransactionRead,
+    StockTransferCreate,
 )
 from app.services.auth import CurrentUser
 from app.services.chat_reports import apply_chat_report, create_chat_report_draft, get_chat_report_draft, mark_chat_report_draft_applied
@@ -44,6 +45,7 @@ from app.services.inventory import (
     search_products,
     stock_in_item,
     stock_out_item,
+    transfer_stock_item,
 )
 from app.services.rakuten_shipments import (
     apply_rakuten_shipment_draft,
@@ -378,6 +380,39 @@ async def stock_adjust(
         quantity_delta=result.quantity_delta,
         message="Stock adjustment recorded successfully.",
     )
+
+
+@router.post("/stock-transfer")
+async def stock_transfer(
+    payload: StockTransferCreate,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> dict:
+    products = await search_inventory_items(session=session, keyword=payload.sku, limit=6)
+    if not products:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"message": "Product not found."})
+    if len(products) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": "Multiple products matched. Use the full JAN code.", "candidates": [
+                {"jan_code": p.jan_code, "name_jp": p.name_jp, "name_zh": p.name_zh} for p in products
+            ]},
+        )
+    payload = payload.model_copy(update={"sku": products[0].jan_code})
+    from app.services.inventory import InventoryServiceError
+    try:
+        out_result, in_result = await transfer_stock_item(session=session, payload=payload, user_id=current_user.id)
+    except InventoryServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except InventoryRecordNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="调出仓库中无此商品库存记录。") from exc
+    except InsufficientStockError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="调出仓库库存不足。") from exc
+    return {
+        "message": f"调库成功：{payload.quantity} 件从仓库 {payload.from_warehouse_id} 移至仓库 {payload.to_warehouse_id}。",
+        "from_quantity_after": out_result.record.quantity,
+        "to_quantity_after": in_result.record.quantity,
+    }
 
 
 @router.post("/imports/product-catalog", response_model=ProductCatalogImportResult)

@@ -11,7 +11,7 @@ from app.models.inventory_import_job import InventoryImportJob
 from app.models.product import Product
 from app.models.stock_transaction import StockTransaction, StockTransactionType
 from app.models.warehouse import Warehouse
-from app.schemas.inventory import InventoryImportCreate, StockAdjustCreate, StockInCreate, StockOutCreate, WarehouseStatusRead
+from app.schemas.inventory import InventoryImportCreate, StockAdjustCreate, StockInCreate, StockOutCreate, StockTransferCreate, WarehouseStatusRead
 
 
 async def resolve_warehouse(session: AsyncSession, name: str) -> Warehouse | None:
@@ -348,6 +348,47 @@ async def adjust_stock_item(
         quantity_delta=quantity_delta,
         low_stock_alert=low_stock_alert,
     )
+
+
+async def transfer_stock_item(
+    session: AsyncSession,
+    payload: StockTransferCreate,
+    *,
+    user_id: int | None = None,
+) -> tuple[StockMutationResult, StockMutationResult]:
+    from uuid import uuid4
+
+    if payload.from_warehouse_id == payload.to_warehouse_id:
+        raise InventoryServiceError("调出仓库和调入仓库不能相同")
+
+    ref = f"transfer:{uuid4().hex}"
+    note = payload.note or ""
+
+    out_payload = StockOutCreate(
+        sku=payload.sku,
+        warehouse_id=payload.from_warehouse_id,
+        quantity=payload.quantity,
+        source="web_ui",
+        reference_id=ref,
+        note=note,
+        transaction_date=payload.transaction_date,
+    )
+    out_result = await stock_out_item(session, out_payload, commit=False, user_id=user_id)
+
+    in_payload = StockInCreate(
+        sku=payload.sku,
+        warehouse_id=payload.to_warehouse_id,
+        quantity=payload.quantity,
+        location_code="A-00-00",
+        source="web_ui",
+        reference_id=ref,
+        note=note,
+        transaction_date=payload.transaction_date,
+    )
+    in_result = await stock_in_item(session, in_payload, commit=False, user_id=user_id)
+
+    await session.commit()
+    return out_result, in_result
 
 
 async def _refresh_low_stock_state(session: AsyncSession, jan_code: str) -> None:

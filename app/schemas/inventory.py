@@ -161,6 +161,15 @@ class StockAdjustCreate(BaseModel):
     transaction_date: date | None = None
 
 
+class StockTransferCreate(BaseModel):
+    sku: JanQuery
+    from_warehouse_id: int = Field(gt=0)
+    to_warehouse_id: int = Field(gt=0)
+    quantity: int = Field(gt=0)
+    note: str | None = Field(default=None, max_length=1000)
+    transaction_date: date | None = None
+
+
 class StockTransactionRead(BaseModel):
     id: int
     inventory_record_id: int
