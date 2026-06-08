@@ -31,6 +31,6 @@ process_excel.py
 rakuten_delivery_dtl.py
 merge_tool.py
 商品箱规数据5.12.xlsx
-秦丝生意通-库存盘点单.html
-秦丝生意通-库存盘点单_files/
+秦丝生意通-库存盘点单*.html
+秦丝生意通-库存盘点单*_files/
 docs/
