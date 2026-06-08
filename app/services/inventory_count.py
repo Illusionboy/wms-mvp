@@ -36,6 +36,8 @@ _CACHE_PATH = Path(__file__).parent.parent / "data" / "qinsi_schema_cache.json"
 
 # Hardcoded fallback indices (秦丝生意通 list5 as of 2024)
 _HARDCODED_MAP = QinsiColumnMap(jan_col=7, name_col=3, count_col=12, source="hardcoded")
+# list4 (明细表) column map — used when list5 is empty (JS not rendered on save)
+_LIST4_MAP = QinsiColumnMap(jan_col=8, name_col=3, count_col=22, source="hardcoded")
 
 # Keyword hints for each column type
 _COL_HINTS: dict[str, list[str]] = {
@@ -326,6 +328,13 @@ async def _parse_qinsi_html(
     headers, data_rows = _extract_table_rows(table)
 
     if not data_rows:
+        # list5 is empty (JS-rendered grid not captured on save); try list4 (明细表)
+        list4 = soup.find("table", id="list4")
+        if list4 and isinstance(list4, Tag):
+            _, data_rows = _extract_table_rows(list4)
+            if data_rows:
+                logger.info("list5 为空，自动 fallback 到 list4 解析（使用固定列映射）")
+                return _apply_column_map(data_rows, _LIST4_MAP)
         raise ValueError(f"第 {session_index} 个盘点记录中没有数据行")
 
     # If no header found, fall back to hardcoded map directly
