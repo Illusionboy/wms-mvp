@@ -244,18 +244,19 @@ document.getElementById('btn-parse').addEventListener('click', async () => {
 
 function renderPreview(data) {
   const lines = data.document.lines || [];
-  const diffLines = lines.filter(l => l.adjust_delta !== 0);
-  const newLines = lines.filter(l => !l.has_wms_record);
+  const diffLines    = lines.filter(l => l.adjust_delta !== 0);
+  const newLines     = lines.filter(l => !l.has_wms_record);
+  const implicitLines = lines.filter(l => l.implicit_zero);
 
   const statsRow = document.getElementById('stats-row');
   statsRow.innerHTML = `
-    <div class="stat"><div class="stat-val">${lines.length}</div><div class="stat-lbl">盘点SKU数</div></div>
+    <div class="stat"><div class="stat-val">${lines.length}</div><div class="stat-lbl">覆盖SKU数</div></div>
     <div class="stat ${diffLines.length > 0 ? 'warn' : 'ok'}">
       <div class="stat-val">${diffLines.length}</div><div class="stat-lbl">需ADJUST</div>
     </div>
     <div class="stat ok"><div class="stat-val">${lines.length - diffLines.length}</div><div class="stat-lbl">无差异</div></div>
-    <div class="stat ${newLines.length > 0 ? 'warn' : ''}">
-      <div class="stat-val">${newLines.length}</div><div class="stat-lbl">WMS无记录(新建)</div>
+    <div class="stat ${implicitLines.length > 0 ? 'warn' : ''}">
+      <div class="stat-val">${implicitLines.length}</div><div class="stat-lbl">未盘(按0计)</div>
     </div>
   `;
 
@@ -268,15 +269,20 @@ function renderTable(lines) {
   lines.forEach((l, i) => {
     const tr = document.createElement('tr');
     if (!l.has_wms_record) tr.classList.add('no-record');
+    if (l.implicit_zero) tr.style.background = 'var(--warn-bg, #fffbeb)';
     tr.dataset.filter = getLineFilter(l);
     const deltaClass = l.delta_after_count > 0 ? 'pos' : l.delta_after_count < 0 ? 'neg' : 'zero';
     const adjClass = l.adjust_delta > 0 ? 'pos' : l.adjust_delta < 0 ? 'neg' : 'zero';
     const newTag = !l.has_wms_record ? ' <span class="tag tag-new">新建</span>' : '';
+    const zeroTag = l.implicit_zero ? ' <span class="tag" style="background:#f59e0b;color:#fff">未盘</span>' : '';
+    const countCell = l.implicit_zero
+      ? `<span style="color:#f59e0b;font-style:italic">0（未盘）</span>`
+      : l.count_quantity;
     tr.innerHTML = `
       <td>${i + 1}</td>
       <td>${l.jan_code}</td>
-      <td>${escHtml(l.product_name)}${newTag}</td>
-      <td>${l.count_quantity}</td>
+      <td>${escHtml(l.product_name)}${newTag}${zeroTag}</td>
+      <td>${countCell}</td>
       <td class="${deltaClass}">${l.delta_after_count > 0 ? '+' : ''}${l.delta_after_count}</td>
       <td>${l.target_quantity}</td>
       <td>${l.current_quantity}</td>

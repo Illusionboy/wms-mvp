@@ -456,8 +456,11 @@ async def _compute_draft_lines(
     cutoff = datetime.combine(count_date, time(23, 59, 59)).replace(tzinfo=timezone.utc)
 
     lines: list[CountDraftLine] = []
+    covered_jans: set[str] = set()
+
     for jan_code, product_name, count_qty in parsed:
-        # Current WMS total for this bucket group
+        covered_jans.add(jan_code)
+
         current_qty_result = await session.scalar(
             select(func.coalesce(func.sum(InventoryRecord.quantity), 0))
             .where(
@@ -482,7 +485,6 @@ async def _compute_draft_lines(
             select(Product.jan_code).where(Product.jan_code == jan_code).limit(1)
         ))
 
-        # Net stock change recorded in WMS after the count date
         delta_result = await session.scalar(
             select(func.coalesce(func.sum(StockTransaction.quantity_change), 0))
             .join(InventoryRecord, StockTransaction.inventory_record_id == InventoryRecord.id)
@@ -506,8 +508,60 @@ async def _compute_draft_lines(
                 adjust_delta=target_qty - current_qty,
                 has_wms_record=has_record,
                 known_product=known_product,
+                implicit_zero=False,
             )
         )
+
+    # ── 补充盘点表未覆盖的仓库SKU，以盘点数量=0计入 ────────────────────────
+    not_in_filter = (
+        InventoryRecord.product_jan.not_in(list(covered_jans))
+        if covered_jans
+        else True  # count sheet was empty — treat all WMS records as uncovered
+    )
+    uncovered_stmt = (
+        select(InventoryRecord, Product)
+        .join(Product, Product.jan_code == InventoryRecord.product_jan, isouter=True)
+        .where(
+            InventoryRecord.warehouse_id == warehouse_id,
+            _customer_filter(customer_id),
+            not_in_filter,
+            InventoryRecord.quantity != 0,   # skip already-zero buckets
+        )
+        .order_by(InventoryRecord.product_jan.asc())
+    )
+    uncovered_rows = await session.execute(uncovered_stmt)
+
+    for record, product in uncovered_rows.all():
+        jan_code = record.product_jan
+        current_qty = record.quantity
+
+        delta_result = await session.scalar(
+            select(func.coalesce(func.sum(StockTransaction.quantity_change), 0))
+            .join(InventoryRecord, StockTransaction.inventory_record_id == InventoryRecord.id)
+            .where(
+                InventoryRecord.product_jan == jan_code,
+                InventoryRecord.warehouse_id == warehouse_id,
+                StockTransaction.created_at > cutoff,
+            )
+        )
+        delta = int(delta_result or 0)
+        target_qty = 0 + delta  # physical count = 0 for uncovered SKUs
+
+        lines.append(
+            CountDraftLine(
+                jan_code=jan_code,
+                product_name=product.name_jp if product else jan_code,
+                count_quantity=0,
+                delta_after_count=delta,
+                target_quantity=target_qty,
+                current_quantity=current_qty,
+                adjust_delta=target_qty - current_qty,
+                has_wms_record=True,
+                known_product=product is not None,
+                implicit_zero=True,
+            )
+        )
+
     return lines
 
 

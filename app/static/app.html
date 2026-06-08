@@ -596,6 +596,7 @@ tr:hover td { background: var(--accent-bg); }
           <button class="btn btn-ghost btn-sm" onclick="filterCount('all')">全部</button>
           <button class="btn btn-ghost btn-sm" onclick="filterCount('diff')">有差异</button>
           <button class="btn btn-ghost btn-sm" onclick="filterCount('new')">新增SKU</button>
+          <button class="btn btn-ghost btn-sm" onclick="filterCount('implicit')" style="color:#f59e0b">未盘(按0计)</button>
         </div>
         <div class="table-wrap">
           <table>
@@ -1429,22 +1430,35 @@ async function addUnknownProducts() {
 }
 function renderCountLines(lines) {
   const tbody = document.getElementById('ci-lines');
-  tbody.innerHTML = lines.map(l => `<tr${l.known_product === false ? ' style="background:var(--warn-bg)"' : ''}>
+  tbody.innerHTML = lines.map(l => {
+    const rowStyle = l.implicit_zero
+      ? ' style="background:var(--warn-bg)"'
+      : (l.known_product === false ? ' style="background:var(--warn-bg)"' : '');
+    const newBadge = l.known_product === false
+      ? '<span class="badge badge-warn" style="margin-right:4px;font-size:10px">新品</span>' : '';
+    const zeroBadge = l.implicit_zero
+      ? '<span class="badge" style="margin-right:4px;font-size:10px;background:#f59e0b;color:#fff">未盘</span>' : '';
+    const countCell = l.implicit_zero
+      ? '<span style="color:#f59e0b;font-style:italic">0（未盘）</span>'
+      : l.count_quantity;
+    return `<tr${rowStyle}>
     <td><code style="font-size:11px">${l.jan_code}</code></td>
     <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.product_name)}">
-      ${l.known_product === false ? '<span class="badge badge-warn" style="margin-right:4px;font-size:10px">新品</span>' : ''}${l.product_name}
+      ${newBadge}${zeroBadge}${esc(l.product_name)}
     </td>
-    <td>${l.count_quantity}</td>
+    <td>${countCell}</td>
     <td style="color:${l.delta_after_count>0?'var(--success)':l.delta_after_count<0?'var(--danger)':'var(--muted)'}">${l.delta_after_count >= 0 ? '+' : ''}${l.delta_after_count}</td>
     <td>${l.target_quantity}</td>
     <td>${l.current_quantity}</td>
     <td style="font-weight:700;color:${l.adjust_delta>0?'var(--success)':l.adjust_delta<0?'var(--danger)':'var(--muted)'}">${l.adjust_delta >= 0 ? '+' : ''}${l.adjust_delta}</td>
-  </tr>`).join('') || '<tr><td colspan="7" style="color:var(--muted)">无数据</td></tr>';
+  </tr>`;
+  }).join('') || '<tr><td colspan="7" style="color:var(--muted)">无数据</td></tr>';
 }
 function filterCount(mode) {
   let filtered = _countLines;
-  if (mode === 'diff') filtered = _countLines.filter(l => l.adjust_delta !== 0);
-  if (mode === 'new') filtered = _countLines.filter(l => l.known_product === false);
+  if (mode === 'diff')  filtered = _countLines.filter(l => l.adjust_delta !== 0);
+  if (mode === 'new')   filtered = _countLines.filter(l => l.known_product === false);
+  if (mode === 'implicit') filtered = _countLines.filter(l => l.implicit_zero);
   renderCountLines(filtered);
 }
 async function exportCountDraft() {
