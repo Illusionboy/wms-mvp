@@ -292,6 +292,12 @@ class RakutenShipmentLine(BaseModel):
     raw_product_number: str
 
 
+class NonJanLine(BaseModel):
+    order_number: str | None = None
+    product_number: str       # raw 商品番号 value
+    quantity: int
+
+
 class RakutenShipmentIssue(BaseModel):
     line_index: int
     jan_code: str
@@ -327,6 +333,7 @@ class RakutenDraftPreview(BaseModel):
     auto_skipped_count: int                         # product_not_found → always silent skip
     needs_decision: list[RakutenShipmentIssue]      # no record / insufficient → user decides
     blocking_issues: list[RakutenShipmentIssue]     # ambiguous etc → must fix
+    non_jan_lines: list[NonJanLine] = Field(default_factory=list)  # unparseable 商品番号 → manual handling
 
 
 class RakutenApplyRequest(BaseModel):
@@ -337,6 +344,7 @@ class RakutenShipmentDraftDocument(BaseModel):
     warehouse_name: str
     customer_name: str
     lines: list[RakutenShipmentLine] = Field(default_factory=list)
+    non_jan_lines: list[NonJanLine] = Field(default_factory=list)
 
 
 class RakutenShipmentDraftRead(BaseModel):

@@ -13,6 +13,7 @@ from app.models.rakuten_shipment_draft import RakutenShipmentDraft
 from app.models.stock_transaction import StockTransaction
 from app.models.warehouse import Warehouse
 from app.schemas.inventory import (
+    NonJanLine,
     ProductRead,
     RakutenDraftPreview,
     RakutenShipmentDraftDocument,
@@ -46,10 +47,11 @@ class _ValidationResult(NamedTuple):
     auto_skipped_count: int  # product_not_found lines silently dropped
 
 
-def parse_rakuten_shipment_csv(content: bytes) -> list[RakutenShipmentLine]:
+def parse_rakuten_shipment_csv(content: bytes) -> tuple[list[RakutenShipmentLine], list[NonJanLine]]:
     text, _ = decode_csv_bytes(content)
     reader = csv.DictReader(StringIO(text))
     lines: list[RakutenShipmentLine] = []
+    non_jan: list[NonJanLine] = []
     for row in reader:
         raw_product_number = _clean_text(row.get("商品番号"))
         if not raw_product_number:
@@ -59,6 +61,15 @@ def parse_rakuten_shipment_csv(content: bytes) -> list[RakutenShipmentLine]:
             order_count_value=row.get("個数"),
         )
         if parsed is None:
+            try:
+                qty = int(float(row.get("個数") or 1))
+            except (ValueError, TypeError):
+                qty = 1
+            non_jan.append(NonJanLine(
+                order_number=_clean_text(row.get("注文番号")) or None,
+                product_number=raw_product_number,
+                quantity=max(1, qty),
+            ))
             continue
         jan_code, quantity = parsed
         lines.append(
@@ -70,25 +81,27 @@ def parse_rakuten_shipment_csv(content: bytes) -> list[RakutenShipmentLine]:
                 raw_product_number=raw_product_number,
             )
         )
-    return lines
+    return lines, non_jan
 
 
 def parse_rakuten_product_number(raw_product_number: str, order_count_value: object) -> tuple[str, int] | None:
     product_number = _clean_text(raw_product_number)
     if not product_number:
         return None
-    if "decorte-sf-new" in product_number.lower():
-        return None
 
     order_count = _parse_positive_int(order_count_value, default=1)
     if "-" in product_number:
-        jan_code, raw_set_count = product_number.rsplit("-", 1)
+        barcode_part, raw_set_count = product_number.rsplit("-", 1)
+        # Multi-dash: barcode_part itself still contains "-" (e.g. "4580444239304-9298-2")
+        # or starts with letters (e.g. "Sanio-935942959") → non-standard, report to operator
+        if "-" in barcode_part or not barcode_part.replace(" ", "").replace("　", ""):
+            return None
         set_count = _parse_positive_int(raw_set_count, default=1)
     else:
-        jan_code = product_number
+        barcode_part = product_number
         set_count = 1
 
-    jan_code = "".join(ch for ch in jan_code if ch.isdigit())
+    jan_code = "".join(ch for ch in barcode_part if ch.isdigit())
     if not jan_code:
         return None
     return jan_code, set_count * order_count
@@ -100,7 +113,7 @@ async def import_rakuten_shipment_csv(
     warehouse_name: str = DEFAULT_RAKUTEN_WAREHOUSE,
     customer_name: str = DEFAULT_RAKUTEN_CUSTOMER,
 ) -> RakutenShipmentImportResult:
-    lines = parse_rakuten_shipment_csv(content)
+    lines, _non_jan = parse_rakuten_shipment_csv(content)
     merged_lines = _merge_shipment_lines(lines)
     result = await apply_rakuten_shipment_lines(
         session=session,
@@ -121,11 +134,13 @@ async def create_rakuten_shipment_draft(
     customer_name: str = DEFAULT_RAKUTEN_CUSTOMER,
     telegram_user_id: int | None = None,
 ) -> RakutenShipmentDraft:
-    lines = _merge_shipment_lines(parse_rakuten_shipment_csv(content))
+    raw_lines, non_jan_lines = parse_rakuten_shipment_csv(content)
+    lines = _merge_shipment_lines(raw_lines)
     document = RakutenShipmentDraftDocument(
         warehouse_name=warehouse_name,
         customer_name=customer_name,
         lines=lines,
+        non_jan_lines=non_jan_lines,
     )
     draft = RakutenShipmentDraft(
         telegram_user_id=telegram_user_id,
@@ -171,6 +186,7 @@ async def preview_rakuten_shipment_draft(
         auto_skipped_count=vr.auto_skipped_count,
         needs_decision=vr.needs_decision,
         blocking_issues=vr.blocking_issues,
+        non_jan_lines=document.non_jan_lines,
     )
 
 
