@@ -56,55 +56,111 @@ def parse_rakuten_shipment_csv(content: bytes) -> tuple[list[RakutenShipmentLine
         raw_product_number = _clean_text(row.get("商品番号"))
         if not raw_product_number:
             continue
-        parsed = parse_rakuten_product_number(
-            raw_product_number=raw_product_number,
+        sku_number = _clean_text(row.get("システム連携用SKU番号"))
+        order_number = _clean_text(row.get("注文番号")) or None
+        product_name = _clean_text(row.get("商品名")) or None
+        new_lines, err = _parse_rakuten_row(
+            product_number=raw_product_number,
+            sku_number=sku_number,
             order_count_value=row.get("個数"),
+            order_number=order_number,
+            product_name=product_name,
         )
-        if parsed is None:
-            try:
-                qty = int(float(row.get("個数") or 1))
-            except (ValueError, TypeError):
-                qty = 1
-            non_jan.append(NonJanLine(
-                order_number=_clean_text(row.get("注文番号")) or None,
-                product_number=raw_product_number,
-                quantity=max(1, qty),
-            ))
-            continue
-        jan_code, quantity = parsed
-        lines.append(
-            RakutenShipmentLine(
-                jan_code=jan_code,
-                quantity=quantity,
-                order_number=_clean_text(row.get("注文番号")) or None,
-                product_name=_clean_text(row.get("商品名")) or None,
-                raw_product_number=raw_product_number,
-            )
-        )
+        lines.extend(new_lines)
+        if err is not None:
+            non_jan.append(err)
     return lines, non_jan
 
 
-def parse_rakuten_product_number(raw_product_number: str, order_count_value: object) -> tuple[str, int] | None:
-    product_number = _clean_text(raw_product_number)
-    if not product_number:
-        return None
+def _parse_rakuten_row(
+    product_number: str,
+    sku_number: str,
+    order_count_value: object,
+    order_number: str | None,
+    product_name: str | None,
+) -> tuple[list[RakutenShipmentLine], NonJanLine | None]:
+    """Implements JAN_QUANTITY_SPEC.md resolution logic.
 
+    Returns (shipment_lines, non_jan_err). Exactly one side is non-empty.
+    Bundle products (套装) expand into multiple lines, one per JAN.
+    """
     order_count = _parse_positive_int(order_count_value, default=1)
-    if "-" in product_number:
-        barcode_part, raw_set_count = product_number.rsplit("-", 1)
-        # Multi-dash: barcode_part itself still contains "-" (e.g. "4580444239304-9298-2")
-        # or starts with letters (e.g. "Sanio-935942959") → non-standard, report to operator
-        if "-" in barcode_part or not barcode_part.replace(" ", "").replace("　", ""):
-            return None
-        set_count = _parse_positive_int(raw_set_count, default=1)
-    else:
-        barcode_part = product_number
-        set_count = 1
 
-    jan_code = "".join(ch for ch in barcode_part if ch.isdigit())
-    if not jan_code:
-        return None
-    return jan_code, set_count * order_count
+    # --- Step 1: parse 商品番号 for barcode + set_count ---
+    barcode = product_number
+    set_count = 1
+    if "-" in product_number:
+        parts = product_number.rsplit("-", 1)
+        suffix = parts[1].strip()
+        if suffix.isdigit() and 1 <= len(suffix) <= 3:
+            barcode = parts[0].strip()
+            set_count = int(suffix) if int(suffix) > 0 else 1
+
+    # 13-digit JAN in 商品番号 → use directly, skip システム連携用SKU番号
+    if barcode.isdigit() and len(barcode) == 13:
+        return [RakutenShipmentLine(
+            jan_code=barcode,
+            quantity=set_count * order_count,
+            order_number=order_number,
+            product_name=product_name,
+            raw_product_number=product_number,
+        )], None
+
+    # --- Step 2: use システム連携用SKU番号 ---
+    if sku_number:
+        sys_parts = sku_number.split("-")
+
+        # Bundle detection: 13-digit + one-or-more 4-digit parts + trailing digit count
+        # e.g. "4971710376227-7002-2" → JANs [4971710376227, 4971710377002], qty = order_count each
+        if (
+            len(sys_parts) >= 3
+            and sys_parts[0].isdigit() and len(sys_parts[0]) == 13
+            and all(p.isdigit() and len(p) == 4 for p in sys_parts[1:-1])
+            and sys_parts[-1].isdigit()
+        ):
+            first_jan = sys_parts[0]
+            prefix9 = first_jan[:9]
+            all_jans = [first_jan] + [prefix9 + p for p in sys_parts[1:-1]]
+            return [
+                RakutenShipmentLine(
+                    jan_code=jan,
+                    quantity=order_count,
+                    order_number=order_number,
+                    product_name=product_name,
+                    raw_product_number=product_number,
+                )
+                for jan in all_jans
+            ], None
+
+        # Regular single product: JAN13[-set_count]
+        sku_jan = sku_number
+        sku_qty = 1
+        if "-" in sku_number:
+            parts = sku_number.rsplit("-", 1)
+            suffix = parts[1].strip()
+            if suffix.isdigit() and 1 <= len(suffix) <= 3:
+                sku_jan = parts[0].strip()
+                sku_qty = int(suffix) if int(suffix) > 0 else 1
+
+        if sku_jan.isdigit() and len(sku_jan) == 13:
+            return [RakutenShipmentLine(
+                jan_code=sku_jan,
+                quantity=sku_qty * order_count,
+                order_number=order_number,
+                product_name=product_name,
+                raw_product_number=product_number,
+            )], None
+
+    # --- All failed: report to operator for manual handling ---
+    try:
+        qty = int(float(order_count_value or 1))
+    except (ValueError, TypeError):
+        qty = 1
+    return [], NonJanLine(
+        order_number=order_number,
+        product_number=product_number,
+        quantity=max(1, qty),
+    )
 
 
 async def import_rakuten_shipment_csv(
