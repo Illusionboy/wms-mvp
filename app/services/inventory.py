@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
