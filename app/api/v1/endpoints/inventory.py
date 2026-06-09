@@ -1,4 +1,10 @@
+import csv
+import io
+from datetime import datetime
+
+import openpyxl
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +46,7 @@ from app.services.inventory import (
     InventoryRecordNotFoundError,
     InventoryTargetNotFoundError,
     adjust_stock_item,
+    export_warehouse_inventory,
     is_outer_jan_match,
     search_inventory_items,
     search_products,
@@ -58,6 +65,58 @@ from app.services.rakuten_shipments import (
 router = APIRouter()
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+@router.get("/export")
+async def export_inventory(
+    warehouse_id: int = Query(..., description="仓库ID"),
+    fmt: str = Query(default="xlsx", alias="format", description="xlsx 或 csv"),
+    session: AsyncSession = Depends(get_db_session),
+) -> StreamingResponse:
+    """导出指定仓库全部库存为 Excel 或 CSV。无需认证。"""
+    if fmt not in ("xlsx", "csv"):
+        raise HTTPException(status_code=400, detail="format 仅支持 xlsx 或 csv")
+    try:
+        warehouse_name, rows = await export_warehouse_inventory(session, warehouse_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    filename = f"库存_{warehouse_name}_{timestamp}.{fmt}"
+
+    if fmt == "csv":
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()) if rows else [])
+        writer.writeheader()
+        writer.writerows(rows)
+        content = buf.getvalue().encode("utf-8-sig")  # BOM for Excel compatibility
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # xlsx
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = warehouse_name[:31]  # sheet name max 31 chars
+    headers = ["JAN码", "商品名(日语)", "商品名(中文)", "库存数量", "箱规(个/箱)", "库位", "最后更新"]
+    ws.append(headers)
+    for row in rows:
+        ws.append([row[h] for h in headers])
+    # Auto-fit column widths (heuristic)
+    for col in ws.columns:
+        max_len = max((len(str(cell.value or "")) for cell in col), default=10)
+        ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 40)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/negative-stock")

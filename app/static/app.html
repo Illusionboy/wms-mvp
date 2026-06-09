@@ -1199,13 +1199,27 @@ async function loadDashboard() {
           </div>
         </div>
         <div class="neg-list" style="display:none;margin-top:10px"></div>
-        <div style="font-size:12px;color:var(--muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
+        <div style="font-size:12px;color:var(--muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
           ${r.last_csv_apply_at ? `<span>最后 CSV 导入: ${fmtDate(r.last_csv_apply_at)}</span>` : ''}
           ${r.last_physical_count_at ? `<span>最后盘点: ${fmtDate(r.last_physical_count_at)}</span>` : ''}
+          <span style="margin-left:auto;display:flex;gap:4px">
+            <button class="btn btn-ghost btn-sm" onclick="exportInventory(${r.warehouse_id},'xlsx')">导出库存 Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportInventory(${r.warehouse_id},'csv')">CSV</button>
+          </span>
         </div>
       </div>`;
     }).join('');
   } catch (e) { el.innerHTML = `<p style="color:var(--danger)">${e.message}</p>`; }
+}
+
+function exportInventory(warehouseId, fmt) {
+  const url = `/api/v1/inventory/export?warehouse_id=${warehouseId}&format=${fmt}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 // ── Product search widget ──────────────────────────────────────────────────
@@ -1942,7 +1956,10 @@ async function loadSettingsLists() {
     _warehouses.map(w => `<tr>
       <td>${w.name}</td>
       <td>${w.allow_negative_stock ? '<span class="badge badge-warn">开启</span>' : '<span class="badge badge-neutral">关闭</span>'}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="toggleNegativeStock(${w.id},${!w.allow_negative_stock})">${w.allow_negative_stock ? '关闭' : '开启'}</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="toggleNegativeStock(${w.id},${!w.allow_negative_stock})">${w.allow_negative_stock ? '关闭' : '开启'}</button>
+        <button class="btn btn-ghost btn-sm" style="margin-left:4px" onclick="exportInventory(${w.id},'xlsx')">导出库存</button>
+      </td>
     </tr>`).join('') +
     '</tbody></table></div>';
   cEl.innerHTML = '<div class="table-wrap"><table><thead><tr><th>客户</th></tr></thead><tbody>' +
@@ -2275,6 +2292,7 @@ function renderQinsiOrders(orders, fromDate, toDate) {
     return;
   }
   tbody.innerHTML = orders.map((o, oi) => {
+    const realOi = _qsOrders.indexOf(o);  // index in full unfiltered array
     const dirClass = o.direction === 'IN' ? 'badge-ok' : 'badge-danger';
     const dirLabel = o.direction === 'IN' ? '入库' : '出库';
     const expandId = `qs-expand-${oi}`;
@@ -2292,7 +2310,7 @@ function renderQinsiOrders(orders, fromDate, toDate) {
         <td></td>
       </tr>`).join('');
     return `<tr>
-      <td><input type="checkbox" class="qs-check" data-oi="${oi}" checked></td>
+      <td><input type="checkbox" class="qs-check" data-oi="${realOi}" checked></td>
       <td>${o.record_date}</td>
       <td><span class="badge ${dirClass}">${dirLabel}</span></td>
       <td><code style="font-size:11px">${esc(o.order_no)}</code></td>

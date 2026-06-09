@@ -554,6 +554,42 @@ async def get_system_status(session: AsyncSession) -> list[WarehouseStatusRead]:
     return result
 
 
+async def export_warehouse_inventory(
+    session: AsyncSession,
+    warehouse_id: int,
+) -> tuple[str, list[dict]]:
+    """Return (warehouse_name, rows) for all inventory records in the warehouse.
+
+    Each row is a flat dict ready for serialisation to Excel or CSV.
+    Only products with inventory records are included; zero-quantity rows are included.
+    """
+    wh = await session.get(Warehouse, warehouse_id)
+    if wh is None:
+        raise ValueError(f"Warehouse {warehouse_id} not found")
+
+    stmt = (
+        select(InventoryRecord, Product)
+        .join(Product, InventoryRecord.product_jan == Product.jan_code)
+        .where(InventoryRecord.warehouse_id == warehouse_id)
+        .order_by(Product.jan_code.asc())
+    )
+    rows_db = (await session.execute(stmt)).all()
+
+    rows = [
+        {
+            "JAN码": rec.product_jan,
+            "商品名(日语)": prod.name_jp,
+            "商品名(中文)": prod.name_zh or "",
+            "库存数量": rec.quantity,
+            "箱规(个/箱)": prod.units_per_case or "",
+            "库位": rec.location_code or "",
+            "最后更新": rec.updated_at.strftime("%Y-%m-%d %H:%M") if rec.updated_at else "",
+        }
+        for rec, prod in rows_db
+    ]
+    return wh.name, rows
+
+
 async def create_inventory_import_job(
     session: AsyncSession,
     payload: InventoryImportCreate,
