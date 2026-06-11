@@ -190,6 +190,54 @@ tr:hover td { background: var(--accent-bg); }
 /* ── Inline button spinner ── */
 .btn-spinner { display: inline-block; width: 14px; height: 14px; margin-left: 8px; vertical-align: middle; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: btn-spin 0.7s linear infinite; }
 @keyframes btn-spin { to { transform: rotate(360deg); } }
+
+/* ── Mobile topbar (hidden on desktop) ── */
+#mobile-topbar { display: none; }
+
+/* ── Mobile layout ── */
+@media (max-width: 768px) {
+  #mobile-topbar {
+    display: flex; align-items: center; gap: 12px;
+    position: fixed; top: 0; left: 0; right: 0; height: 52px; z-index: 30;
+    background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 12px;
+  }
+  #mobile-topbar .brand { padding: 0; }
+  .menu-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-size: 18px; cursor: pointer;
+  }
+
+  #app-shell { display: block !important; height: auto; min-height: 100vh; overflow: visible; }
+  body { overflow: visible; height: auto; min-height: 100vh; }
+
+  #sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 50; width: 240px;
+    transform: translateX(-100%); transition: transform .2s ease;
+    box-shadow: 2px 0 16px rgba(0,0,0,.2);
+  }
+  #sidebar.open { transform: translateX(0); }
+
+  #sidebar-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 40;
+  }
+  #sidebar-backdrop.show { display: block; }
+
+  #main { width: 100%; height: auto; overflow: visible; padding-top: 52px; }
+  .section { padding: 16px; max-width: 100%; }
+  .stat-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+
+  /* Prevent iOS auto-zoom on focus by ensuring 16px inputs */
+  input[type=text], input[type=password], input[type=number], select, textarea, .btn {
+    font-size: 16px;
+  }
+
+  #toast-container { left: 12px; right: 12px; bottom: 12px; }
+  .toast { max-width: none; }
+
+  /* Stack form rows that use inline flex layouts */
+  .form-row > div[style*="display:flex"] { flex-wrap: wrap; }
+}
 </style>
 </head>
 <body>
@@ -214,6 +262,13 @@ tr:hover td { background: var(--accent-bg); }
 
 <!-- App Shell -->
 <div id="app-shell" style="display:none;width:100%;height:100%;overflow:hidden;display:flex">
+
+  <!-- Mobile top bar -->
+  <div id="mobile-topbar">
+    <button class="menu-btn" onclick="toggleSidebar()" aria-label="菜单">☰</button>
+    <div class="brand">WMS</div>
+  </div>
+  <div id="sidebar-backdrop" onclick="closeSidebar()"></div>
 
   <!-- Sidebar -->
   <nav id="sidebar">
@@ -1209,6 +1264,19 @@ function nav(btn) {
   if (btn.dataset.section === 'settings') loadSettingsLists();
   if (btn.dataset.section === 'qinsi') checkQinsiAuth();
   if (['supplier-history','customer-history'].includes(btn.dataset.section)) loadCounterpartyLists();
+  closeSidebar();
+  document.getElementById('main').scrollTo({ top: 0 });
+  window.scrollTo({ top: 0 });
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-backdrop').classList.toggle('show');
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('show');
 }
 
 // ── Globals (warehouses & customers) ──────────────────────────────────────
