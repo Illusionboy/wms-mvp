@@ -252,6 +252,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="rakuten" onclick="nav(this)">
         <span class="icon">▤</span> 乐天出库
       </button>
+      <button class="nav-item" data-section="trade-shipment" onclick="nav(this)">
+        <span class="icon">⇄</span> 贸易出库
+      </button>
       <button class="nav-item" data-section="count-import" onclick="nav(this)">
         <span class="icon">≡</span> 盘点导入
       </button>
@@ -637,6 +640,72 @@ tr:hover td { background: var(--accent-bg); }
           </div>
         </div>
         <div id="rak-result-issues" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <!-- Trade Shipment (贸易出库) -->
+    <div class="section" id="section-trade-shipment">
+      <div class="section-title">贸易出库</div>
+      <div class="section-sub">拍照识别或上传 Excel 货单，预览核对后确认批量出库</div>
+      <div class="card">
+        <div class="form-row">
+          <label>仓库</label>
+          <select id="trade-warehouse"></select>
+        </div>
+        <div class="form-row">
+          <label>拍照识别（可多选）</label>
+          <input type="file" id="trade-image-files" accept="image/*" multiple style="padding:6px 0;border:none;background:none">
+          <button class="btn btn-primary" style="margin-top:8px" onclick="uploadTradeImages()">识别图片</button>
+        </div>
+        <div class="form-row">
+          <label>上传 Excel（每个客户一个 sheet，列：jan/品名/箱数/箱入）</label>
+          <input type="file" id="trade-excel-file" accept=".xlsx" style="padding:6px 0;border:none;background:none">
+          <button class="btn btn-primary" style="margin-top:8px" onclick="uploadTradeExcel()">上传预览</button>
+        </div>
+      </div>
+
+      <!-- Preview / Confirm area -->
+      <div id="trade-preview-area" style="display:none">
+        <hr class="divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <strong id="trade-preview-title"></strong>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('trade-preview-area').style.display='none';_tradeDraftId=null">取消</button>
+        </div>
+        <div id="trade-issues" style="margin-bottom:12px"></div>
+        <div id="trade-needs-decision-wrap" style="display:none;margin-bottom:14px;border:1px solid var(--warn);border-radius:8px;padding:12px">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--warn)">
+            ⚠ <span id="trade-needs-decision-count"></span> 条需要处理：
+          </div>
+          <div id="trade-needs-decision-list"></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>客户</th><th>JAN</th><th>品名</th><th>箱数</th><th>箱入</th><th>数量</th></tr></thead>
+            <tbody id="trade-lines-body"></tbody>
+          </table>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-ghost" id="trade-revalidate-btn" onclick="revalidateTradeDraft()">保存修改并重新校验</button>
+          <button class="btn btn-primary" id="trade-confirm-btn" onclick="applyTradeDraft()">确认出库</button>
+        </div>
+      </div>
+
+      <!-- Result area (after apply) -->
+      <div id="trade-result-area" style="display:none">
+        <hr class="divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <strong id="trade-result-title"></strong>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('trade-result-area').style.display='none'">收起</button>
+        </div>
+        <div id="trade-mutations-wrap" style="display:none">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>客户</th><th>JAN</th><th>数量</th></tr></thead>
+              <tbody id="trade-mutations"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="trade-result-issues" style="margin-top:8px"></div>
       </div>
     </div>
 
@@ -1151,7 +1220,7 @@ async function loadGlobals() {
 }
 
 function populateSelects() {
-  const wSelects = ['si-warehouse','so-warehouse','sa-warehouse','cr-warehouse','rak-warehouse','ci-warehouse','st-from-warehouse','st-to-warehouse'];
+  const wSelects = ['si-warehouse','so-warehouse','sa-warehouse','cr-warehouse','rak-warehouse','trade-warehouse','ci-warehouse','st-from-warehouse','st-to-warehouse'];
   const cSelects = ['si-customer','so-customer','sa-customer','cr-customer','rak-customer'];
 
   wSelects.forEach(id => {
@@ -1177,6 +1246,7 @@ function populateSelects() {
   setSelect('rak-customer', '乐天');
   setSelect('cr-warehouse', '普通仓库');
   setSelect('cr-customer', '店铺');
+  setSelect('trade-warehouse', '普通仓库');
 }
 function setSelect(id, name) {
   const el = document.getElementById(id);
@@ -1691,6 +1761,218 @@ function renderRakutenResult(data) {
     </tr>`).join('');
   } else { mutWrap.style.display = 'none'; }
   document.getElementById('rak-result-issues').innerHTML = issues.map(i =>
+    `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">⚠ <code style="font-size:11px">${esc(i.jan_code)}</code> ${esc(i.message)}</div>`
+  ).join('');
+}
+
+// ── Trade Shipment (贸易出库) ──────────────────────────────────────────────
+
+let _tradeDraftId = null;
+
+async function uploadTradeImages() {
+  const files = document.getElementById('trade-image-files').files;
+  if (!files.length) { toast('请选择图片', 'err'); return; }
+  const wOpt = document.getElementById('trade-warehouse').selectedOptions[0];
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  toast('识别中，请稍候…', 'info');
+  try {
+    const url = `/api/v1/inventory/imports/trade-shipment/draft/image?warehouse_name=${encodeURIComponent(wOpt.text)}`;
+    const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${_token}` }, body: fd });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    _tradeDraftId = data.draft_id;
+    renderTradePreview(data);
+    document.getElementById('trade-preview-area').style.display = 'block';
+    document.getElementById('trade-result-area').style.display = 'none';
+    toast(`识别完成：${data.total_lines} 条`, 'ok');
+  } catch (e) { toast('识别失败: ' + e.message, 'err'); }
+}
+
+async function uploadTradeExcel() {
+  const file = document.getElementById('trade-excel-file').files[0];
+  if (!file) { toast('请选择 Excel 文件', 'err'); return; }
+  const wOpt = document.getElementById('trade-warehouse').selectedOptions[0];
+  const fd = new FormData();
+  fd.append('file', file);
+  toast('上传中…', 'info');
+  try {
+    const url = `/api/v1/inventory/imports/trade-shipment/draft/excel?warehouse_name=${encodeURIComponent(wOpt.text)}`;
+    const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${_token}` }, body: fd });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    _tradeDraftId = data.draft_id;
+    renderTradePreview(data);
+    document.getElementById('trade-preview-area').style.display = 'block';
+    document.getElementById('trade-result-area').style.display = 'none';
+    toast(`解析完成：${data.total_lines} 条`, 'ok');
+  } catch (e) { toast('上传失败: ' + e.message, 'err'); }
+}
+
+function renderTradePreview(data) {
+  const blocking = data.blocking_issues || [];
+  const needs = data.needs_decision || [];
+  const lines = (data.document && data.document.lines) || [];
+
+  document.getElementById('trade-preview-title').innerHTML = `预览 — 共 ${data.total_lines} 条，正常出库 ${data.ok_count} 条` +
+    (blocking.length ? `，<span style="color:var(--danger)">${blocking.length} 个阻断问题</span>` : '');
+
+  document.getElementById('trade-issues').innerHTML = blocking.map(i =>
+    `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">
+      ✗ <code style="font-size:11px">${esc(i.jan_code)}</code> ${esc(i.message)}
+    </div>`
+  ).join('');
+
+  const ndWrap = document.getElementById('trade-needs-decision-wrap');
+  const negNeeds = needs.filter(i => i.issue_type === 'insufficient_stock' || i.issue_type === 'inventory_record_not_found');
+  const fixNeeds = needs.filter(i => i.issue_type === 'product_not_found');
+  if (needs.length) {
+    ndWrap.style.display = 'block';
+    document.getElementById('trade-needs-decision-count').textContent = needs.length;
+    let html = '';
+    html += fixNeeds.map(i => `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+        <code style="font-size:11px">${esc(i.jan_code)}</code>
+        <span style="color:var(--danger);font-size:12px"> ✗ ${esc(i.message)}</span>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">请在下方表格中修正该行 JAN 码后点击"保存修改并重新校验"</div>
+      </div>`).join('');
+    html += negNeeds.map(i => {
+      const stockInfo = i.issue_type === 'insufficient_stock'
+        ? `（现有 ${i.current_stock}，出库需 ${i.quantity_needed}）`
+        : `（商品已知但该仓库无库存记录，出库需 ${i.quantity_needed}）`;
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px">
+        <input type="checkbox" class="trade-force-neg-chk" data-jan="${esc(i.jan_code)}"
+               style="margin-top:3px;flex-shrink:0" title="勾选则录入负库存">
+        <div>
+          <code style="font-size:11px">${esc(i.jan_code)}</code>
+          <span style="color:var(--warn);font-size:12px"> ⚠ ${esc(i.message)}</span>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${stockInfo}
+            — <b>勾选</b>：录入负库存　<b>不勾选</b>：跳过该行
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    document.getElementById('trade-needs-decision-list').innerHTML = html;
+  } else {
+    ndWrap.style.display = 'none';
+  }
+
+  document.getElementById('trade-lines-body').innerHTML = lines.map((line, idx) => `<tr data-line="${idx}">
+    <td><input type="text" data-field="customer_name" value="${esc(line.customer_name)}" style="width:70px"></td>
+    <td><input type="text" data-field="jan_code" value="${esc(line.jan_code)}" style="width:120px;font-family:monospace"></td>
+    <td><input type="text" data-field="product_name" value="${esc(line.product_name || '')}" style="width:160px"></td>
+    <td><input type="number" data-field="box_count" min="1" value="${line.box_count}" style="width:60px"></td>
+    <td><input type="number" data-field="units_per_box" min="1" value="${line.units_per_box}" style="width:60px"></td>
+    <td><span data-field="quantity-display">${line.quantity}</span></td>
+  </tr>`).join('');
+
+  document.getElementById('trade-confirm-btn').disabled = blocking.length > 0;
+}
+
+// Recompute quantity display when 箱数/箱入 are edited
+document.addEventListener('input', (e) => {
+  const field = e.target.dataset && e.target.dataset.field;
+  if (field !== 'box_count' && field !== 'units_per_box') return;
+  const row = e.target.closest('tr[data-line]');
+  if (!row || !row.closest('#trade-lines-body')) return;
+  const boxCount = +row.querySelector('[data-field="box_count"]').value || 0;
+  const unitsPerBox = +row.querySelector('[data-field="units_per_box"]').value || 0;
+  row.querySelector('[data-field="quantity-display"]').textContent = boxCount * unitsPerBox;
+});
+
+function collectTradeLines() {
+  return [...document.querySelectorAll('#trade-lines-body tr[data-line]')].map(row => {
+    const boxCount = +row.querySelector('[data-field="box_count"]').value || 0;
+    const unitsPerBox = +row.querySelector('[data-field="units_per_box"]').value || 0;
+    return {
+      customer_name: row.querySelector('[data-field="customer_name"]').value.trim(),
+      jan_code: row.querySelector('[data-field="jan_code"]').value.trim(),
+      product_name: row.querySelector('[data-field="product_name"]').value.trim() || null,
+      box_count: boxCount,
+      units_per_box: unitsPerBox,
+      quantity: boxCount * unitsPerBox,
+    };
+  });
+}
+
+async function revalidateTradeDraft() {
+  if (!_tradeDraftId) return;
+  const wOpt = document.getElementById('trade-warehouse').selectedOptions[0];
+  const lines = collectTradeLines();
+  try {
+    const url = `/api/v1/inventory/imports/trade-shipment/draft/${_tradeDraftId}`;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warehouse_name: wOpt.text, lines }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    renderTradePreview(data);
+    toast('已重新校验', 'ok');
+  } catch (e) { toast('校验失败: ' + e.message, 'err'); }
+}
+
+async function applyTradeDraft() {
+  if (!_tradeDraftId) return;
+  const forceNegJans = [...document.querySelectorAll('.trade-force-neg-chk:checked')]
+    .map(el => el.dataset.jan).filter(Boolean);
+  const btn = document.getElementById('trade-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = '出库中…';
+  try {
+    const url = `/api/v1/inventory/imports/trade-shipment/draft/${_tradeDraftId}/apply`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force_negative_jans: forceNegJans }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    document.getElementById('trade-preview-area').style.display = 'none';
+    _tradeDraftId = null;
+    renderTradeResult(data);
+    document.getElementById('trade-result-area').style.display = 'block';
+    if (data.applied) toast(`出库成功：${data.mutations?.length || 0} 条${data.force_negated_count ? `（其中 ${data.force_negated_count} 条负库存）` : ''}`, 'ok');
+    else toast(`出库失败，共 ${data.issues?.length || 0} 个问题`, 'err');
+  } catch (e) { toast('出库失败: ' + e.message, 'err'); }
+  finally { btn.disabled = false; btn.textContent = '确认出库'; }
+}
+
+function renderTradeResult(data) {
+  const mutations = data.mutations || [];
+  const issues = data.issues || [];
+  const titleEl = document.getElementById('trade-result-title');
+  if (data.applied) {
+    const parts = [`✓ 出库成功 ${mutations.length} 条`];
+    if (data.force_negated_count) parts.push(`其中 ${data.force_negated_count} 条录为负库存`);
+    if (data.skipped_duplicates) parts.push(`跳过重复 ${data.skipped_duplicates} 条`);
+    if (issues.length) parts.push(`${issues.length} 条未处理`);
+    titleEl.innerHTML = `<span style="color:var(--success)">${parts.join('，')}</span>`;
+  } else {
+    titleEl.innerHTML = `<span style="color:var(--danger)">✗ 出库失败 — ${issues.length} 个问题</span>`;
+  }
+  const mutWrap = document.getElementById('trade-mutations-wrap');
+  if (mutations.length) {
+    mutWrap.style.display = 'block';
+    document.getElementById('trade-mutations').innerHTML = mutations.map(m => `<tr>
+      <td>${esc(m.customer_name)}</td>
+      <td><code style="font-size:11px">${esc(m.jan_code)}</code></td>
+      <td>${m.quantity}</td>
+    </tr>`).join('');
+  } else { mutWrap.style.display = 'none'; }
+  document.getElementById('trade-result-issues').innerHTML = issues.map(i =>
     `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">⚠ <code style="font-size:11px">${esc(i.jan_code)}</code> ${esc(i.message)}</div>`
   ).join('');
 }

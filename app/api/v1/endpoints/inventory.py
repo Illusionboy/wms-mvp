@@ -36,6 +36,10 @@ from app.schemas.inventory import (
     StockOutResult,
     StockTransactionRead,
     StockTransferCreate,
+    TradeShipmentApplyRequest,
+    TradeShipmentDraftDocument,
+    TradeShipmentDraftPreview,
+    TradeShipmentImportResult,
 )
 from app.services.auth import CurrentUser
 from app.services.chat_reports import apply_chat_report, create_chat_report_draft, get_chat_report_draft, mark_chat_report_draft_applied
@@ -60,6 +64,16 @@ from app.services.rakuten_shipments import (
     get_rakuten_shipment_draft,
     import_rakuten_shipment_csv,
     preview_rakuten_shipment_draft,
+)
+from app.services.trade_shipments import (
+    DEFAULT_TRADE_WAREHOUSE,
+    apply_trade_shipment_draft,
+    create_trade_shipment_draft,
+    get_trade_shipment_draft,
+    parse_trade_shipment_excel,
+    parse_trade_shipment_images_with_gemini,
+    preview_trade_shipment_draft,
+    update_trade_shipment_draft_lines,
 )
 
 router = APIRouter()
@@ -339,6 +353,99 @@ async def apply_rakuten_draft(
     if draft.status in ("applied", "applied_with_skips"):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Draft already applied.")
     return await apply_rakuten_shipment_draft(
+        session=session,
+        draft=draft,
+        force_negative_jans=set(body.force_negative_jans),
+        user_id=current_user.id,
+    )
+
+
+@router.post("/imports/trade-shipment/draft/excel", response_model=TradeShipmentDraftPreview, status_code=status.HTTP_202_ACCEPTED)
+async def create_trade_shipment_draft_excel(
+    file: UploadFile = File(...),
+    warehouse_name: str = DEFAULT_TRADE_WAREHOUSE,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> TradeShipmentDraftPreview:
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File exceeds 10 MB limit.")
+    lines = parse_trade_shipment_excel(content)
+    draft = await create_trade_shipment_draft(
+        session=session,
+        lines=lines,
+        original_filename=file.filename or "trade_shipment.xlsx",
+        warehouse_name=warehouse_name,
+    )
+    return await preview_trade_shipment_draft(session=session, draft=draft)
+
+
+@router.post("/imports/trade-shipment/draft/image", response_model=TradeShipmentDraftPreview, status_code=status.HTTP_202_ACCEPTED)
+async def create_trade_shipment_draft_image(
+    files: list[UploadFile] = File(...),
+    warehouse_name: str = DEFAULT_TRADE_WAREHOUSE,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> TradeShipmentDraftPreview:
+    images: list[tuple[bytes, str]] = []
+    for file in files:
+        content = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File exceeds 10 MB limit.")
+        images.append((content, file.content_type or "image/jpeg"))
+    if not images:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No images uploaded.")
+    lines = await parse_trade_shipment_images_with_gemini(images)
+    draft = await create_trade_shipment_draft(
+        session=session,
+        lines=lines,
+        original_filename=files[0].filename or "trade_shipment.jpg",
+        warehouse_name=warehouse_name,
+    )
+    return await preview_trade_shipment_draft(session=session, draft=draft)
+
+
+@router.get("/imports/trade-shipment/draft/{draft_id}", response_model=TradeShipmentDraftPreview)
+async def get_trade_shipment_draft_preview(
+    draft_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> TradeShipmentDraftPreview:
+    draft = await get_trade_shipment_draft(session, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found.")
+    return await preview_trade_shipment_draft(session=session, draft=draft)
+
+
+@router.put("/imports/trade-shipment/draft/{draft_id}", response_model=TradeShipmentDraftPreview)
+async def update_trade_shipment_draft(
+    draft_id: int,
+    body: TradeShipmentDraftDocument,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> TradeShipmentDraftPreview:
+    draft = await get_trade_shipment_draft(session, draft_id, with_for_update=True)
+    if draft is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found.")
+    if draft.status in ("applied", "applied_with_skips"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Draft already applied.")
+    draft = await update_trade_shipment_draft_lines(session, draft, body.lines)
+    return await preview_trade_shipment_draft(session=session, draft=draft)
+
+
+@router.post("/imports/trade-shipment/draft/{draft_id}/apply", response_model=TradeShipmentImportResult)
+async def apply_trade_shipment_draft_endpoint(
+    draft_id: int,
+    body: TradeShipmentApplyRequest = Body(default_factory=TradeShipmentApplyRequest),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> TradeShipmentImportResult:
+    draft = await get_trade_shipment_draft(session, draft_id, with_for_update=True)
+    if draft is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found.")
+    if draft.status in ("applied", "applied_with_skips"):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Draft already applied.")
+    return await apply_trade_shipment_draft(
         session=session,
         draft=draft,
         force_negative_jans=set(body.force_negative_jans),

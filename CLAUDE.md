@@ -122,7 +122,7 @@ docker compose exec api python -m tools.consolidate_inventory_buckets
 
 This merges duplicate records, re-routes transactions, and normalises `location_code="A-00-00"`, `customer_id=NULL`.
 
-All quantities are in individual units (not cases). Every change writes an immutable `StockTransaction`; the `source` field values are: `telegram` / `rakuten_csv` / `chat_report` / `physical_count` / `web_ui` / `qinsi_scrape`.
+All quantities are in individual units (not cases). Every change writes an immutable `StockTransaction`; the `source` field values are: `telegram` / `rakuten_csv` / `chat_report` / `physical_count` / `web_ui` / `qinsi_scrape` / `trade_shipment`.
 
 Low-stock alert: `total_quantity < 2 * units_per_case` (only when `units_per_case` is set). `low_stock_alert_sent` flag prevents duplicates; resets automatically when stock recovers.
 

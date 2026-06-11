@@ -360,6 +360,72 @@ class RakutenShipmentDraftRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TradeShipmentLine(BaseModel):
+    customer_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+    jan_code: str
+    product_name: str | None = None
+    box_count: int = Field(gt=0)
+    units_per_box: int = Field(gt=0)
+    quantity: int = Field(gt=0)
+
+
+class TradeShipmentIssue(BaseModel):
+    line_index: int
+    jan_code: str
+    issue_type: str
+    message: str
+    candidates: list[ProductRead] = Field(default_factory=list)
+    current_stock: int | None = None
+    quantity_needed: int | None = None
+
+
+class TradeShipmentMutation(BaseModel):
+    jan_code: str
+    customer_name: str
+    quantity: int
+    transaction: StockTransactionRead
+    low_stock_alert: LowStockAlertRead | None = None
+
+
+class TradeShipmentImportResult(BaseModel):
+    applied: bool
+    total_lines: int
+    mutations: list[TradeShipmentMutation] = Field(default_factory=list)
+    issues: list[TradeShipmentIssue] = Field(default_factory=list)
+    skipped_duplicates: int = 0
+    force_negated_count: int = 0
+
+
+class TradeShipmentDraftDocument(BaseModel):
+    warehouse_name: str
+    lines: list[TradeShipmentLine] = Field(default_factory=list)
+
+
+class TradeShipmentDraftPreview(BaseModel):
+    draft_id: int
+    total_lines: int
+    ok_count: int
+    needs_decision: list[TradeShipmentIssue] = Field(default_factory=list)
+    blocking_issues: list[TradeShipmentIssue] = Field(default_factory=list)
+    document: TradeShipmentDraftDocument
+
+
+class TradeShipmentDraftRead(BaseModel):
+    id: int
+    status: str
+    original_filename: str
+    warehouse_name: str
+    document: TradeShipmentDraftDocument
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TradeShipmentApplyRequest(BaseModel):
+    force_negative_jans: list[str] = Field(default_factory=list)
+
+
 class InventoryImportStatus(StrEnum):
     pending = "pending"
     parsed = "parsed"
