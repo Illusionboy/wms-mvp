@@ -97,7 +97,7 @@ def _parse_rakuten_row(
         suffix = parts[1].strip()
         if suffix.isdigit() and 1 <= len(suffix) <= 3:
             barcode = parts[0].strip()
-            if suffix == "0":
+            if int(suffix) == 0:
                 is_variable_set = True
             else:
                 set_count = int(suffix)
