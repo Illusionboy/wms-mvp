@@ -941,6 +941,30 @@ tr:hover td { background: var(--accent-bg); }
       </div>
       <hr class="divider">
       <div class="card">
+        <div class="card-title">新增商品</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>JAN 码</label>
+            <input type="text" id="np-jan" placeholder="13位条码" maxlength="13">
+          </div>
+          <div class="form-row">
+            <label>箱入数（选填）</label>
+            <input type="number" id="np-upc" min="1" placeholder="—">
+          </div>
+          <div class="form-row">
+            <label>商品名（日文）</label>
+            <input type="text" id="np-name-jp" placeholder="商品名">
+          </div>
+          <div class="form-row">
+            <label>商品名（中文，选填）</label>
+            <input type="text" id="np-name-zh" placeholder="中文名">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="createProduct()">新增商品</button>
+        <div id="np-result" style="margin-top:12px"></div>
+      </div>
+      <hr class="divider">
+      <div class="card">
         <div class="card-title">商品搜索</div>
         <div style="display:flex;gap:8px">
           <input type="text" id="prod-search-kw" placeholder="JAN 或商品名…" style="flex:1" onkeydown="if(event.key==='Enter')searchProducts()">
@@ -1235,8 +1259,12 @@ async function runProductSearch(prefix) {
   try {
     const items = await api('GET', `/inventory/search?keyword=${encodeURIComponent(kw)}`);
     if (!items.length) { resultsEl.innerHTML = '<div class="search-result-item" style="color:var(--muted)">无结果</div>'; resultsEl.style.display = 'block'; return; }
+    resultsEl.dataset.prefix = prefix;
     resultsEl.innerHTML = items.map(p => `
-      <div class="search-result-item" onclick="selectProduct('${prefix}','${p.jan_code}','${esc(p.name_jp)}','${esc(p.name_zh||'')}')">
+      <div class="search-result-item"
+           data-jan="${esc(p.jan_code)}"
+           data-namejp="${esc(p.name_jp)}"
+           data-namezh="${esc(p.name_zh||'')}">
         <div class="sri-jan">${p.jan_code}</div>
         <div class="sri-name">${p.name_jp}${p.name_zh ? ' / ' + p.name_zh : ''}</div>
       </div>`).join('');
@@ -1252,6 +1280,14 @@ function selectProduct(prefix, jan, nameJp, nameZh) {
   document.getElementById(`${prefix}-search`).value = nameJp;
 }
 document.addEventListener('click', e => {
+  const item = e.target.closest('.search-result-item');
+  if (item) {
+    const container = item.closest('.search-results');
+    if (container && container.dataset.prefix) {
+      selectProduct(container.dataset.prefix, item.dataset.jan, item.dataset.namejp, item.dataset.namezh);
+      return;
+    }
+  }
   if (!e.target.closest('.search-widget')) {
     document.querySelectorAll('.search-results').forEach(r => r.style.display = 'none');
   }
@@ -1863,6 +1899,30 @@ async function uploadProductCatalog() {
     toast('商品字典导入成功', 'ok');
   } catch (e) { document.getElementById('prod-result').innerHTML = resultCard('err', e.message); }
 }
+async function createProduct() {
+  const jan = document.getElementById('np-jan').value.trim();
+  const nameJp = document.getElementById('np-name-jp').value.trim();
+  const nameZh = document.getElementById('np-name-zh').value.trim();
+  const upcRaw = document.getElementById('np-upc').value;
+  const resultEl = document.getElementById('np-result');
+  if (!jan || !/^\d{5,13}$/.test(jan)) { toast('请输入有效的 JAN 码', 'err'); return; }
+  if (!nameJp) { toast('请输入商品名（日文）', 'err'); return; }
+  const body = { jan_code: jan, name_jp: nameJp };
+  if (nameZh) body.name_zh = nameZh;
+  if (upcRaw) body.units_per_case = +upcRaw;
+  try {
+    await api('POST', '/inventory/products', body);
+    toast('商品已新增', 'ok');
+    resultEl.innerHTML = '';
+    document.getElementById('np-jan').value = '';
+    document.getElementById('np-name-jp').value = '';
+    document.getElementById('np-name-zh').value = '';
+    document.getElementById('np-upc').value = '';
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
 async function searchProducts() {
   const kw = document.getElementById('prod-search-kw').value.trim();
   if (!kw) return;
