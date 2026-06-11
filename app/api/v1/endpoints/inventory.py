@@ -79,6 +79,7 @@ from app.services.trade_shipments import (
 router = APIRouter()
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB (phone camera photos can be large)
 
 
 @router.get("/export")
@@ -389,9 +390,9 @@ async def create_trade_shipment_draft_image(
 ) -> TradeShipmentDraftPreview:
     images: list[tuple[bytes, str]] = []
     for file in files:
-        content = await file.read(MAX_UPLOAD_BYTES + 1)
-        if len(content) > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File exceeds 10 MB limit.")
+        content = await file.read(MAX_IMAGE_UPLOAD_BYTES + 1)
+        if len(content) > MAX_IMAGE_UPLOAD_BYTES:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File exceeds 20 MB limit.")
         images.append((content, file.content_type or "image/jpeg"))
     if not images:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No images uploaded.")

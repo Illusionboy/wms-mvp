@@ -87,17 +87,23 @@ def _parse_rakuten_row(
     order_count = _parse_positive_int(order_count_value, default=1)
 
     # --- Step 1: parse 商品番号 for barcode + set_count ---
+    # Suffix "-0" means 可变套装 (variable bundle/option) — actual JAN/quantity
+    # must come from システム連携用SKU番号, do not short-circuit on 商品番号.
     barcode = product_number
     set_count = 1
+    is_variable_set = False
     if "-" in product_number:
         parts = product_number.rsplit("-", 1)
         suffix = parts[1].strip()
         if suffix.isdigit() and 1 <= len(suffix) <= 3:
             barcode = parts[0].strip()
-            set_count = int(suffix) if int(suffix) > 0 else 1
+            if suffix == "0":
+                is_variable_set = True
+            else:
+                set_count = int(suffix)
 
-    # 13-digit JAN in 商品番号 → use directly, skip システム連携用SKU番号
-    if barcode.isdigit() and len(barcode) == 13:
+    # 13-digit JAN in 商品番号 (non-variable-set) → use directly, skip システム連携用SKU番号
+    if barcode.isdigit() and len(barcode) == 13 and not is_variable_set:
         return [RakutenShipmentLine(
             jan_code=barcode,
             quantity=set_count * order_count,

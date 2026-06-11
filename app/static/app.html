@@ -186,6 +186,10 @@ tr:hover td { background: var(--accent-bg); }
 .table-wrap { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; overflow-x: auto; }
 .result-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-top: 16px; white-space: pre-wrap; font-size: 13px; line-height: 1.7; }
 .loading { color: var(--muted); font-style: italic; }
+
+/* ── Inline button spinner ── */
+.btn-spinner { display: inline-block; width: 14px; height: 14px; margin-left: 8px; vertical-align: middle; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: btn-spin 0.7s linear infinite; }
+@keyframes btn-spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -655,12 +659,12 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row">
           <label>拍照识别（可多选）</label>
           <input type="file" id="trade-image-files" accept="image/*" multiple style="padding:6px 0;border:none;background:none">
-          <button class="btn btn-primary" style="margin-top:8px" onclick="uploadTradeImages()">识别图片</button>
+          <button class="btn btn-primary" id="trade-image-btn" style="margin-top:8px" onclick="uploadTradeImages()">识别图片<span id="trade-image-spinner" class="btn-spinner" style="display:none"></span></button>
         </div>
         <div class="form-row">
           <label>上传 Excel（每个客户一个 sheet，列：jan/品名/箱数/箱入）</label>
           <input type="file" id="trade-excel-file" accept=".xlsx" style="padding:6px 0;border:none;background:none">
-          <button class="btn btn-primary" style="margin-top:8px" onclick="uploadTradeExcel()">上传预览</button>
+          <button class="btn btn-primary" id="trade-excel-btn" style="margin-top:8px" onclick="uploadTradeExcel()">上传预览<span id="trade-excel-spinner" class="btn-spinner" style="display:none"></span></button>
         </div>
       </div>
 
@@ -1769,12 +1773,46 @@ function renderRakutenResult(data) {
 
 let _tradeDraftId = null;
 
+// 压缩图片：限制最长边并转为 JPEG，减小上传体积 / Gemini token 消耗
+function _compressImageFile(file, maxDim = 1600, quality = 0.85) {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('image/')) { resolve(file); return; }
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (e) => { img.src = e.target.result; };
+    reader.onerror = () => resolve(file);
+    img.onload = () => {
+      const { width, height } = img;
+      const scale = Math.min(1, maxDim / Math.max(width, height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        if (!blob) { resolve(file); return; }
+        const newName = file.name.replace(/\.\w+$/, '') + '.jpg';
+        resolve(new File([blob], newName, { type: 'image/jpeg' }));
+      }, 'image/jpeg', quality);
+    };
+    img.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
+
 async function uploadTradeImages() {
   const files = document.getElementById('trade-image-files').files;
   if (!files.length) { toast('请选择图片', 'err'); return; }
   const wOpt = document.getElementById('trade-warehouse').selectedOptions[0];
   const fd = new FormData();
-  for (const f of files) fd.append('files', f);
+  for (const f of files) {
+    const compressed = await _compressImageFile(f);
+    fd.append('files', compressed, compressed.name);
+  }
+  const btn = document.getElementById('trade-image-btn');
+  const spinner = document.getElementById('trade-image-spinner');
+  btn.disabled = true;
+  spinner.style.display = 'inline-block';
   toast('识别中，请稍候…', 'info');
   try {
     const url = `/api/v1/inventory/imports/trade-shipment/draft/image?warehouse_name=${encodeURIComponent(wOpt.text)}`;
@@ -1790,6 +1828,7 @@ async function uploadTradeImages() {
     document.getElementById('trade-result-area').style.display = 'none';
     toast(`识别完成：${data.total_lines} 条`, 'ok');
   } catch (e) { toast('识别失败: ' + e.message, 'err'); }
+  finally { btn.disabled = false; spinner.style.display = 'none'; }
 }
 
 async function uploadTradeExcel() {
@@ -1798,6 +1837,10 @@ async function uploadTradeExcel() {
   const wOpt = document.getElementById('trade-warehouse').selectedOptions[0];
   const fd = new FormData();
   fd.append('file', file);
+  const btn = document.getElementById('trade-excel-btn');
+  const spinner = document.getElementById('trade-excel-spinner');
+  btn.disabled = true;
+  spinner.style.display = 'inline-block';
   toast('上传中…', 'info');
   try {
     const url = `/api/v1/inventory/imports/trade-shipment/draft/excel?warehouse_name=${encodeURIComponent(wOpt.text)}`;
@@ -1813,6 +1856,7 @@ async function uploadTradeExcel() {
     document.getElementById('trade-result-area').style.display = 'none';
     toast(`解析完成：${data.total_lines} 条`, 'ok');
   } catch (e) { toast('上传失败: ' + e.message, 'err'); }
+  finally { btn.disabled = false; spinner.style.display = 'none'; }
 }
 
 function renderTradePreview(data) {
