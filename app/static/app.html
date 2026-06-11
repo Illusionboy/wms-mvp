@@ -684,7 +684,7 @@ tr:hover td { background: var(--accent-bg); }
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>客户</th><th>JAN</th><th>品名</th><th>箱数</th><th>箱入</th><th>数量</th></tr></thead>
+            <thead><tr><th>客户</th><th>JAN</th><th>品名</th><th>箱数</th><th>箱入</th><th>数量</th><th></th></tr></thead>
             <tbody id="trade-lines-body"></tbody>
           </table>
         </div>
@@ -1908,11 +1908,12 @@ function renderTradePreview(data) {
 
   document.getElementById('trade-lines-body').innerHTML = lines.map((line, idx) => `<tr data-line="${idx}">
     <td><input type="text" data-field="customer_name" value="${esc(line.customer_name)}" style="width:70px"></td>
-    <td><input type="text" data-field="jan_code" value="${esc(line.jan_code)}" style="width:120px;font-family:monospace"></td>
+    <td><input type="text" data-field="jan_code" value="${esc(line.jan_code)}" style="width:140px;font-family:monospace"></td>
     <td><input type="text" data-field="product_name" value="${esc(line.product_name || '')}" style="width:160px"></td>
     <td><input type="number" data-field="box_count" min="1" value="${line.box_count}" style="width:60px"></td>
     <td><input type="number" data-field="units_per_box" min="1" value="${line.units_per_box}" style="width:60px"></td>
     <td><span data-field="quantity-display">${line.quantity}</span></td>
+    <td><button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('tr').remove()" title="删除此行">✕</button></td>
   </tr>`).join('');
 
   document.getElementById('trade-confirm-btn').disabled = blocking.length > 0;
@@ -1944,22 +1945,26 @@ function collectTradeLines() {
   });
 }
 
-async function revalidateTradeDraft() {
-  if (!_tradeDraftId) return;
+async function _saveTradeDraftLines() {
   const wOpt = document.getElementById('trade-warehouse').selectedOptions[0];
   const lines = collectTradeLines();
+  const url = `/api/v1/inventory/imports/trade-shipment/draft/${_tradeDraftId}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ warehouse_name: wOpt.text, lines }),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+async function revalidateTradeDraft() {
+  if (!_tradeDraftId) return;
   try {
-    const url = `/api/v1/inventory/imports/trade-shipment/draft/${_tradeDraftId}`;
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${_token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ warehouse_name: wOpt.text, lines }),
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
-    }
-    const data = await res.json();
+    const data = await _saveTradeDraftLines();
     renderTradePreview(data);
     toast('已重新校验', 'ok');
   } catch (e) { toast('校验失败: ' + e.message, 'err'); }
@@ -1973,6 +1978,13 @@ async function applyTradeDraft() {
   btn.disabled = true;
   btn.textContent = '出库中…';
   try {
+    // 先保存表格中的编辑（含删除行）到草稿，再应用，确保 apply 使用的是最新数据
+    const previewData = await _saveTradeDraftLines();
+    if (previewData.blocking_issues && previewData.blocking_issues.length) {
+      renderTradePreview(previewData);
+      toast('存在阻塞问题，请先处理', 'err');
+      return;
+    }
     const url = `/api/v1/inventory/imports/trade-shipment/draft/${_tradeDraftId}/apply`;
     const res = await fetch(url, {
       method: 'POST',
