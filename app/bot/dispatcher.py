@@ -75,6 +75,21 @@ async def search(message: Message) -> None:
     if not keyword:
         await message.answer("用法: /search JAN或商品名")
         return
+    await _do_search(message, keyword)
+
+
+@telegram_router.message(lambda message: bool(message.text) and not message.text.startswith("/"))
+async def default_search(message: Message) -> None:
+    """未带任何指令的纯文本消息，默认按 /search 处理。"""
+    if not await _require_query_permission(message):
+        return
+    keyword = (message.text or "").strip()
+    if not keyword:
+        return
+    await _do_search(message, keyword)
+
+
+async def _do_search(message: Message, keyword: str) -> None:
     async with AsyncSessionLocal() as session:
         items = await search_inventory_items(session=session, keyword=keyword, limit=10)
     if not items:
