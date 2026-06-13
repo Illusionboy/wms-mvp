@@ -28,7 +28,7 @@ from app.schemas.inventory import SafetyStockRecommendation
 # 供应商 -> 补货前置时间（天）。未来可移入配置或 DB；目前仅作为示例映射。
 SUPPLIER_LEAD_TIME_DAYS: dict[str, int] = {}
 
-DEFAULT_LEAD_TIME_DAYS = 14
+DEFAULT_LEAD_TIME_DAYS = 5
 DEFAULT_LOOKBACK_DAYS = 30
 
 

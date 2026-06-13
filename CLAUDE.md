@@ -258,7 +258,7 @@ ROP = D_avg * L + SS
 ```
 
 - `Z`：服务水平系数，`settings.safety_stock_z`（默认 1.65 ≈ 95% 不缺货概率，可通过 `SAFETY_STOCK_Z` env 覆盖）
-- `L`（补货前置时间/天）：取该 JAN 最近一次 IN 事务的 `supplier`，查 `SUPPLIER_LEAD_TIME_DAYS` 字典映射；未匹配或 `supplier` 为空时用 `DEFAULT_LEAD_TIME_DAYS=14`
+- `L`（补货前置时间/天）：取该 JAN 最近一次 IN 事务的 `supplier`，查 `SUPPLIER_LEAD_TIME_DAYS` 字典映射；未匹配或 `supplier` 为空时用 `DEFAULT_LEAD_TIME_DAYS=5`
 - `D_avg` / `sigma_D`：过去 30 天（`DEFAULT_LOOKBACK_DAYS`）按 `COALESCE(transaction_date, created_at::date)` 聚合的每日 OUT 总量的均值/标准差（缺失日期记 0）
 - `sufficient_data=false` 表示过去 30 天无任何出库记录（新品），此时 `std_dev=0`、`SS=0`，ROP 仅反映 `D_avg * L = 0`
 
