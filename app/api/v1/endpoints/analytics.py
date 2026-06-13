@@ -5,6 +5,7 @@
 - GET /analytics/supplier-history      — 按供应商 + 日期范围查询入库事务
 - GET /analytics/customer-history      — 按客户 + 日期范围查询出库事务
 - GET /analytics/product-history       — 按 JAN 码 + 日期范围查询所有事务
+- GET /analytics/safety-stock-recommendations — 动态安全库存/再订货点预警
 """
 from datetime import date
 
@@ -17,6 +18,8 @@ from app.db.session import get_db_session
 from app.models.inventory_record import InventoryRecord
 from app.models.product import Product
 from app.models.stock_transaction import StockTransaction, StockTransactionType
+from app.schemas.inventory import SafetyStockRecommendation
+from app.services.inventory_planning import list_safety_stock_recommendations
 
 router = APIRouter()
 
@@ -259,3 +262,15 @@ async def product_summary(
         "name_zh": product.name_zh if product else None,
         "summary": summary,
     }
+
+
+@router.get("/safety-stock-recommendations", response_model=list[SafetyStockRecommendation])
+async def safety_stock_recommendations(
+    warehouse_id: int | None = Query(default=None),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[SafetyStockRecommendation]:
+    """基于 SS = Z * sigma_D * sqrt(L) 计算各 SKU 的安全库存与再订货点，
+
+    返回当前库存量低于建议再订货点（ROP）的商品列表。详见 docs/safety_stock_manage.md。
+    """
+    return await list_safety_stock_recommendations(session, warehouse_id=warehouse_id)

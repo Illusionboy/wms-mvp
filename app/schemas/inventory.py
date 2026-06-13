@@ -449,3 +449,19 @@ class InventoryImportRead(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SafetyStockRecommendation(BaseModel):
+    jan_code: str
+    name_jp: str
+    name_zh: str | None
+    warehouse_id: int
+    warehouse_name: str
+    supplier: str | None
+    lead_time_days: int
+    daily_avg: float
+    std_dev: float
+    safety_stock: float
+    reorder_point: float
+    current_quantity: int
+    sufficient_data: bool

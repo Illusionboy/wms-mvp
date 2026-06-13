@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     telegram_admin_user_ids: str = ""
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
+    # 安全库存公式 SS = Z * sigma_D * sqrt(L) 中的服务水平系数，默认对应 95% 不缺货概率
+    safety_stock_z: float = Field(default=1.65, validation_alias="SAFETY_STOCK_Z")
     jwt_secret_key: str = Field(
         default="change-me-in-production",
         validation_alias="JWT_SECRET_KEY",
