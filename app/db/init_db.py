@@ -45,10 +45,12 @@ async def init_db() -> None:
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS outer_jan VARCHAR(13)"
         ))
         # Partial unique index: prevents duplicate batch transactions at the DB level.
+        # Includes transaction_type so that a transfer's paired OUT+IN rows (same reference_id,
+        # different transaction_type) are allowed to coexist without violating the constraint.
         # NULL reference_id (manual web_ui entries) is excluded by the WHERE clause.
         await conn.execute(text("""
             CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_tx_source_ref
-              ON stock_transactions(source, reference_id)
+              ON stock_transactions(source, reference_id, transaction_type)
               WHERE reference_id IS NOT NULL
         """))
         # telegram_allowed_users is created by create_all via the model import;
