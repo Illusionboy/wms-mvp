@@ -451,6 +451,87 @@ class InventoryImportRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class UnresolvedOrderLine(BaseModel):
+    product_number: str
+    sku_number: str | None = None
+    quantity: int
+
+
+class RakutenOrderLine(BaseModel):
+    jan_code: str
+    product_name: str | None
+    ordered_qty: int
+    current_stock: int | None  # None = product in DB but no 乐天仓库 record
+    shortage: int               # max(0, ordered - max(0, stock))
+    status: str                 # "ok" | "insufficient" | "no_record" | "unknown"
+
+
+class RakutenOrderAnalysisResult(BaseModel):
+    draft_id: int | None = None
+    store1_lines: int           # raw item-lines parsed from file 1
+    store2_lines: int           # 0 if only one file uploaded
+    unresolved_count: int       # lines whose JAN could not be resolved
+    unknown_jan_count: int      # JAN not found in WMS product catalog
+    items: list[RakutenOrderLine] = Field(default_factory=list)
+    unresolved: list[UnresolvedOrderLine] = Field(default_factory=list)
+
+
+class RakutenOrderDraftDocument(BaseModel):
+    items: list[RakutenOrderLine] = Field(default_factory=list)
+    unresolved: list[UnresolvedOrderLine] = Field(default_factory=list)
+
+
+class RakutenOrderMutation(BaseModel):
+    jan_code: str
+    quantity: int
+    transaction: StockTransactionRead
+    low_stock_alert: LowStockAlertRead | None = None
+
+
+class RakutenOrderApplyResult(BaseModel):
+    applied: bool
+    mutations: list[RakutenOrderMutation] = Field(default_factory=list)
+    shortage_items: list[RakutenOrderLine] = Field(default_factory=list)
+    unresolved: list[UnresolvedOrderLine] = Field(default_factory=list)
+    skipped_duplicates: int = 0
+
+
+class CustomerAllocationRead(BaseModel):
+    id: int
+    planned_outbound_date: date
+    customer_name: str
+    jan_code: str
+    quantity: int
+    status: str
+    source_filename: str | None
+    note: str | None
+    product_name: str | None = None   # joined from products table
+    current_stock: int | None = None  # joined at query time
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CustomerAllocationUploadResult(BaseModel):
+    planned_outbound_date: date
+    source_filename: str
+    total_rows: int
+    reserved: int    # immediately satisfied
+    waiting: int     # insufficient stock at upload time
+    updated: int     # quantity changed on existing record
+    skipped: int     # quantity unchanged duplicate
+
+
+class CustomerAllocationStatusResult(BaseModel):
+    customer_name: str
+    planned_outbound_date: date
+    ready_count: int
+    waiting_count: int
+    shipped_count: int
+    items: list[CustomerAllocationRead] = Field(default_factory=list)
+
+
 class SafetyStockRecommendation(BaseModel):
     jan_code: str
     name_jp: str

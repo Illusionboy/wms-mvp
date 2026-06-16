@@ -32,6 +32,7 @@ from app.services.inventory import (
     search_inventory_items,
     stock_out_item,
 )
+from app.common.jan_resolver import resolve_jan_quantities
 from app.tools.convert_rakuten_csv_encoding import decode_csv_bytes
 
 
@@ -79,83 +80,25 @@ def _parse_rakuten_row(
     order_number: str | None,
     product_name: str | None,
 ) -> tuple[list[RakutenShipmentLine], NonJanLine | None]:
-    """Implements JAN_QUANTITY_SPEC.md resolution logic.
+    """Implements JAN_QUANTITY_SPEC.md resolution logic via the shared `jan_resolver`.
 
     Returns (shipment_lines, non_jan_err). Exactly one side is non-empty.
     Bundle products (套装) expand into multiple lines, one per JAN.
     """
     order_count = _parse_positive_int(order_count_value, default=1)
 
-    # --- Step 1: parse 商品番号 for barcode + set_count ---
-    # Suffix "-0" means 可变套装 (variable bundle/option) — actual JAN/quantity
-    # must come from システム連携用SKU番号, do not short-circuit on 商品番号.
-    barcode = product_number
-    set_count = 1
-    is_variable_set = False
-    if "-" in product_number:
-        parts = product_number.rsplit("-", 1)
-        suffix = parts[1].strip()
-        if suffix.isdigit() and 1 <= len(suffix) <= 3:
-            barcode = parts[0].strip()
-            if int(suffix) == 0:
-                is_variable_set = True
-            else:
-                set_count = int(suffix)
-
-    # 13-digit JAN in 商品番号 (non-variable-set) → use directly, skip システム連携用SKU番号
-    if barcode.isdigit() and len(barcode) == 13 and not is_variable_set:
-        return [RakutenShipmentLine(
-            jan_code=barcode,
-            quantity=set_count * order_count,
-            order_number=order_number,
-            product_name=product_name,
-            raw_product_number=product_number,
-        )], None
-
-    # --- Step 2: use システム連携用SKU番号 ---
-    if sku_number:
-        sys_parts = sku_number.split("-")
-
-        # Bundle detection: 13-digit + one-or-more 4-digit parts + trailing digit count
-        # e.g. "4971710376227-7002-2" → JANs [4971710376227, 4971710377002], qty = order_count each
-        if (
-            len(sys_parts) >= 3
-            and sys_parts[0].isdigit() and len(sys_parts[0]) == 13
-            and all(p.isdigit() and len(p) == 4 for p in sys_parts[1:-1])
-            and sys_parts[-1].isdigit()
-        ):
-            first_jan = sys_parts[0]
-            prefix9 = first_jan[:9]
-            all_jans = [first_jan] + [prefix9 + p for p in sys_parts[1:-1]]
-            return [
-                RakutenShipmentLine(
-                    jan_code=jan,
-                    quantity=order_count,
-                    order_number=order_number,
-                    product_name=product_name,
-                    raw_product_number=product_number,
-                )
-                for jan in all_jans
-            ], None
-
-        # Regular single product: JAN13[-set_count]
-        sku_jan = sku_number
-        sku_qty = 1
-        if "-" in sku_number:
-            parts = sku_number.rsplit("-", 1)
-            suffix = parts[1].strip()
-            if suffix.isdigit() and 1 <= len(suffix) <= 3:
-                sku_jan = parts[0].strip()
-                sku_qty = int(suffix) if int(suffix) > 0 else 1
-
-        if sku_jan.isdigit() and len(sku_jan) == 13:
-            return [RakutenShipmentLine(
-                jan_code=sku_jan,
-                quantity=sku_qty * order_count,
+    resolved = resolve_jan_quantities(product_number, sku_number, order_count)
+    if resolved:
+        return [
+            RakutenShipmentLine(
+                jan_code=jan,
+                quantity=qty,
                 order_number=order_number,
                 product_name=product_name,
                 raw_product_number=product_number,
-            )], None
+            )
+            for jan, qty in resolved
+        ], None
 
     # --- All failed: report to operator for manual handling ---
     try:

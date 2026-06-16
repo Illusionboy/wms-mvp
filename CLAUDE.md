@@ -133,7 +133,7 @@ docker compose exec api python -m tools.consolidate_inventory_buckets
 
 This merges duplicate records, re-routes transactions, and normalises `location_code="A-00-00"`, `customer_id=NULL`.
 
-All quantities are in individual units (not cases). Every change writes an immutable `StockTransaction`; the `source` field values are: `telegram` / `rakuten_csv` / `chat_report` / `physical_count` / `web_ui` / `qinsi_scrape` / `trade_shipment`.
+All quantities are in individual units (not cases). Every change writes an immutable `StockTransaction`; the `source` field values are: `telegram` / `rakuten_csv` / `chat_report` / `physical_count` / `web_ui` / `qinsi_scrape` / `trade_shipment` / `rakuten_order`.
 
 Low-stock alert: `total_quantity < 2 * units_per_case` (only when `units_per_case` is set). `low_stock_alert_sent` flag prevents duplicates; resets automatically when stock recovers.
 
@@ -264,9 +264,24 @@ ROP = D_avg * L + SS
 
 设计文档见 `docs/safety_stock_manage.md`。`SUPPLIER_LEAD_TIME_DAYS` 目前为空字典，按需在 `app/services/inventory_planning.py` 中填充供应商→天数映射。
 
+### 共享 JAN 解析模块 (`app/common/jan_resolver.py`)
+
+`resolve_jan_quantities(product_no, sys_sku_raw, order_count, product_dict=None) → list[tuple[str, int]]` — 纯函数，将乐天订单行（`商品番号` + `システム連携用SKU番号` + `個数`）解析为 `[(JAN, 数量), ...]`；套装商品返回多条。完整规则见 `Shipping-tools/JAN_QUANTITY_SPEC.md`。
+
+`app/common/product_dict.json` — 兜底字典 `{barcode: {sku_jan: 13位JAN}}`，用于 `resolve_jan_quantities` 无法通过 `システム連携用SKU番号` 直接推断 JAN 的情况。
+
+**同步说明**：本文件与 `/Users/mac/Documents/AgentProject/rakuten-shipping/jan_resolver.py`（快递文件生成子项目）内容应保持一致。若解析规则有变更（尤其是 `-0` 可变套装规则、套装重建前缀逻辑），**必须同步修改两边的 `jan_resolver.py` 和 `product_dict.json`**。
+
+使用方：
+
+- `app/services/rakuten_shipments.py` — Rakuten CSV 出库解析（`_parse_rakuten_row`）
+- `app/services/rakuten_order_analysis.py` — 乐天采购需求分析（`_aggregate_orders`）
+
 ### Rakuten Order Analysis (`app/api/v1/endpoints/rakuten_order.py`)
 
-`POST /api/v1/rakuten/order-analysis` — 上传1~2个乐天订单文件（CSV/XLSX），按 JAN 汇总订购数量并与「乐天仓库」当前库存比对，返回每个 JAN 的状态：`ok`（库存充足）/ `insufficient`（库存不足）/ `no_record`（无乐天仓库库存记录）/ `unknown`（JAN 不在商品目录）。只读，不产生任何库存变动。
+`POST /api/v1/rakuten/order-analysis` — 上传1~2个乐天订单文件（CSV/XLSX），按 JAN 汇总订购数量（通过 `resolve_jan_quantities` 解析，包含 `システム連携用SKU番号` 套装逻辑）并与「乐天仓库」当前库存比对，返回状态：`ok`（库存充足）/ `insufficient`（库存不足）/ `no_record`（无乐天仓库库存记录）/ `unknown`（JAN 不在商品目录）。同时在响应的 `unresolved` 字段返回无法解析 JAN 的行（供人工登记新SKU/JAN）。创建 `RakutenOrderDraft`（`draft_id` 在响应中）。
+
+`POST /api/v1/rakuten/order-analysis/{draft_id}/apply` — 对 `status=="ok"` 的行执行乐天仓库出库扣减（`source="rakuten_order"`，幂等 `reference_id="rakuten_order:{draft_id}:{jan_code}"`）；`insufficient`/`no_record`/`unknown`/`unresolved` 行不扣减，以 `shortage_items`/`unresolved` 形式返回供「调货」处理。需认证。
 
 ## Concurrency Model
 
@@ -296,6 +311,7 @@ ROP = D_avg * L + SS
 | `RakutenShipmentDraft` | Web UI 上传 CSV | Web UI 确认按钮 |
 | `InventoryCountDraft` | Web UI 上传文件 | Web UI 确认按钮 |
 | `TradeShipmentDraft` | Web UI 上传 Excel 或拍照（Gemini 识别） | Web UI 确认按钮（`source="trade_shipment"`） |
+| `RakutenOrderDraft` | Web UI 上传一/二号店订单文件（CSV/XLSX） | Web UI「确认出库」按钮（`source="rakuten_order"`）；仅扣减 `status="ok"` 行，`insufficient`/`no_record`/`unknown` 行及 JAN 无法解析行（`unresolved`）返回供「调货/登记新SKU」处理 |
 
 所有草稿模型有 `status` 字段（`"parsed"` → `"applied"`），apply 时用 `SELECT FOR UPDATE` 锁定草稿行防止重复提交。
 

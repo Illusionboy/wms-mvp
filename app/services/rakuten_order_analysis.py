@@ -1,8 +1,16 @@
 """Rakuten order analysis service.
 
-Parses Rakuten RMS order-detail CSV/XLSX files (cp932 / utf-8-sig),
+Parses Rakuten RMS order-detail CSV/XLSX files (cp932 / utf-8-sig), resolves
+JAN codes via the shared `resolve_jan_quantities` (see
+`app/common/jan_resolver.py` and `Shipping-tools/JAN_QUANTITY_SPEC.md`),
 aggregates quantities per JAN, and compares against 乐天仓库 inventory.
-No stock mutations are performed.
+
+Lines whose JAN cannot be resolved are returned as `unresolved` for manual
+SKU/JAN registration ("需人工登记新SKU/JAN"). `analyse_rakuten_orders` itself
+performs no stock mutations; the resulting draft can be applied via
+`apply_rakuten_order_draft`, which deducts 乐天仓库 stock for `status=="ok"`
+lines and leaves `insufficient` / `no_record` / `unknown` lines (plus
+`unresolved`) for "调货" follow-up.
 """
 from __future__ import annotations
 
@@ -10,48 +18,45 @@ import io
 from collections import defaultdict
 
 import pandas as pd
-from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.jan_resolver import resolve_jan_quantities
 from app.models.inventory_record import InventoryRecord
 from app.models.product import Product
+from app.models.rakuten_order_draft import RakutenOrderDraft
+from app.models.stock_transaction import StockTransaction
 from app.models.warehouse import Warehouse
+from app.schemas.inventory import (
+    RakutenOrderAnalysisResult,
+    RakutenOrderApplyResult,
+    RakutenOrderDraftDocument,
+    RakutenOrderLine,
+    RakutenOrderMutation,
+    StockOutCreate,
+    StockTransactionRead,
+    UnresolvedOrderLine,
+)
+from app.services.inventory import (
+    InsufficientStockError,
+    InventoryRecordNotFoundError,
+    stock_out_item,
+)
 
 
 # Columns required from the Rakuten order CSV
-_NEEDED_COLS = ["商品番号", "個数"]
+_NEEDED_COLS = ["商品番号", "システム連携用SKU番号", "個数"]
 
 # dtype overrides to prevent pandas from mangling product numbers / phone numbers
-_DTYPE = {"商品番号": str, "商品管理番号": str, "SKU管理番号": str}
+_DTYPE = {"商品番号": str, "システム連携用SKU番号": str, "商品管理番号": str, "SKU管理番号": str}
 
-# Product numbers matching these patterns are silently skipped (no JAN, handled offline)
-_SKIP_PREFIXES = ("decorte-",)
-
-
-# ---------------------------------------------------------------------------
-# Pydantic response models
-# ---------------------------------------------------------------------------
-
-class OrderedItem(BaseModel):
-    jan_code: str
-    product_name: str | None
-    ordered_qty: int
-    current_stock: int | None  # None = product in DB but no 乐天仓库 record
-    shortage: int               # max(0, ordered - max(0, stock))
-    status: str                 # "ok" | "insufficient" | "no_record" | "unknown"
-
-
-class OrderAnalysisResult(BaseModel):
-    store1_lines: int           # raw item-lines parsed from file 1
-    store2_lines: int           # 0 if only one file uploaded
-    silently_skipped: int       # decorte-* etc.
-    unknown_jan_count: int      # JAN not found in WMS product catalog
-    items: list[OrderedItem]    # aggregated, sorted by status then jan_code
+RAKUTEN_WAREHOUSE_NAME = "乐天仓库"
+RAKUTEN_ORDER_SOURCE = "rakuten_order"
+DEFAULT_RAKUTEN_ORDER_CUSTOMER = "乐天"
 
 
 # ---------------------------------------------------------------------------
-# Parsing helpers (mirrors merge_tool.py logic, read-only)
+# Parsing helpers
 # ---------------------------------------------------------------------------
 
 def _detect_encoding(raw: bytes) -> str:
@@ -93,6 +98,8 @@ def _read_order_file(filename: str, content: bytes) -> tuple[pd.DataFrame, int]:
         raise ValueError(f"ファイル '{filename}' に '商品番号' 列が見つかりません")
 
     df = df[available].copy()
+    if "システム連携用SKU番号" not in df.columns:
+        df["システム連携用SKU番号"] = ""
     if "個数" not in df.columns:
         df["個数"] = 1
 
@@ -101,77 +108,53 @@ def _read_order_file(filename: str, content: bytes) -> tuple[pd.DataFrame, int]:
     return df, raw_count
 
 
-def _parse_product_number(product_number: str, order_count_raw) -> tuple[str, int] | None:
-    """Convert 商品番号 + 個数 into (jan_code, total_quantity).
-
-    Format: JAN[-setCount]  (e.g. "4902806314946-2" means 2 units/set)
-    Returns None for non-JAN entries (decorte-*, empty, etc.).
-    """
-    p = str(product_number).strip()
-    if not p or p.lower() in ("nan", "none", ""):
-        return None
-
-    # Silently skip known non-JAN patterns
-    p_lower = p.lower()
-    if any(p_lower.startswith(prefix) for prefix in _SKIP_PREFIXES):
-        return None
-    # Also skip if the barcode part contains letters (not a real JAN)
-    barcode_part = p.rsplit("-", 1)[0] if "-" in p else p
-    if not barcode_part.isdigit():
-        return None
-
+def _parse_order_count(raw) -> int:
     try:
-        order_count = int(float(order_count_raw))
+        order_count = int(float(raw))
     except (ValueError, TypeError):
         order_count = 1
-    if order_count <= 0:
-        order_count = 1
-
-    if "-" in p:
-        parts = p.rsplit("-", 1)
-        barcode = parts[0]
-        try:
-            set_count = int(parts[1])
-        except ValueError:
-            set_count = 1
-    else:
-        barcode = p
-        set_count = 1
-
-    if set_count <= 0:
-        set_count = 1
-
-    return barcode, set_count * order_count
+    return order_count if order_count > 0 else 1
 
 
-def _aggregate_orders(*dfs: tuple[pd.DataFrame, int]) -> tuple[dict[str, int], int, list[int]]:
+def _aggregate_orders(
+    *dfs: tuple[pd.DataFrame, int],
+) -> tuple[dict[str, int], list[UnresolvedOrderLine], list[int]]:
     """Aggregate JAN → total_quantity across all DataFrames.
 
-    Returns (jan_totals, silently_skipped_count, per_file_line_counts).
+    Returns (jan_totals, unresolved_lines, per_file_line_counts).
     """
     jan_totals: dict[str, int] = defaultdict(int)
-    skipped = 0
+    unresolved: list[UnresolvedOrderLine] = []
     line_counts: list[int] = []
 
     for df, raw_count in dfs:
         line_counts.append(raw_count)
         for _, row in df.iterrows():
-            result = _parse_product_number(row["商品番号"], row.get("個数", 1))
-            if result is None:
-                skipped += 1
-            else:
-                jan, qty = result
+            product_number = str(row["商品番号"]).strip()
+            if not product_number or product_number.lower() in ("nan", "none"):
+                continue
+            sku_number = str(row.get("システム連携用SKU番号", "") or "").strip()
+            if sku_number.lower() in ("nan", "none"):
+                sku_number = ""
+            order_count = _parse_order_count(row.get("個数", 1))
+
+            resolved = resolve_jan_quantities(product_number, sku_number, order_count)
+            if not resolved:
+                unresolved.append(UnresolvedOrderLine(
+                    product_number=product_number,
+                    sku_number=sku_number or None,
+                    quantity=order_count,
+                ))
+                continue
+            for jan, qty in resolved:
                 jan_totals[jan] += qty
 
-    return dict(jan_totals), skipped, line_counts
+    return dict(jan_totals), unresolved, line_counts
 
 
 # ---------------------------------------------------------------------------
 # Main analysis function
 # ---------------------------------------------------------------------------
-
-RAKUTEN_WAREHOUSE_NAME = "乐天仓库"
-
 
 async def analyse_rakuten_orders(
     session: AsyncSession,
@@ -179,8 +162,8 @@ async def analyse_rakuten_orders(
     file1_content: bytes,
     file2_name: str | None = None,
     file2_content: bytes | None = None,
-) -> OrderAnalysisResult:
-    """Parse order files and compare against 乐天仓库 inventory."""
+) -> RakutenOrderAnalysisResult:
+    """Parse order files and compare against 乐天仓库 inventory, creating a draft."""
 
     df1, rc1 = _read_order_file(file1_name, file1_content)
     pairs: list[tuple[pd.DataFrame, int]] = [(df1, rc1)]
@@ -190,7 +173,7 @@ async def analyse_rakuten_orders(
         df2, rc2 = _read_order_file(file2_name, file2_content)
         pairs.append((df2, rc2))
 
-    jan_totals, skipped, line_counts = _aggregate_orders(*pairs)
+    jan_totals, unresolved, line_counts = _aggregate_orders(*pairs)
 
     # Fetch 乐天仓库
     warehouse = await session.scalar(
@@ -221,14 +204,14 @@ async def analyse_rakuten_orders(
         products = {}
         inventory = {}
 
-    items: list[OrderedItem] = []
+    items: list[RakutenOrderLine] = []
     unknown_jan_count = 0
 
     for jan, ordered_qty in sorted(jan_totals.items()):
         product = products.get(jan)
         if product is None:
             unknown_jan_count += 1
-            items.append(OrderedItem(
+            items.append(RakutenOrderLine(
                 jan_code=jan,
                 product_name=None,
                 ordered_qty=ordered_qty,
@@ -249,7 +232,7 @@ async def analyse_rakuten_orders(
             shortage = ordered_qty - current_stock
             status = "insufficient"
 
-        items.append(OrderedItem(
+        items.append(RakutenOrderLine(
             jan_code=jan,
             product_name=product.name_jp,
             ordered_qty=ordered_qty,
@@ -262,10 +245,129 @@ async def analyse_rakuten_orders(
     _order = {"unknown": 0, "no_record": 1, "insufficient": 2, "ok": 3}
     items.sort(key=lambda x: (_order.get(x.status, 9), x.jan_code))
 
-    return OrderAnalysisResult(
+    draft = await create_rakuten_order_draft(
+        session=session,
+        items=items,
+        unresolved=unresolved,
+        original_filename=file1_name if not file2_name else f"{file1_name}, {file2_name}",
+    )
+
+    return RakutenOrderAnalysisResult(
+        draft_id=draft.id,
         store1_lines=line_counts[0] if line_counts else 0,
         store2_lines=line_counts[1] if len(line_counts) > 1 else 0,
-        silently_skipped=skipped,
+        unresolved_count=len(unresolved),
         unknown_jan_count=unknown_jan_count,
         items=items,
+        unresolved=unresolved,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Draft-Apply
+# ---------------------------------------------------------------------------
+
+async def create_rakuten_order_draft(
+    session: AsyncSession,
+    items: list[RakutenOrderLine],
+    unresolved: list[UnresolvedOrderLine],
+    original_filename: str,
+) -> RakutenOrderDraft:
+    document = RakutenOrderDraftDocument(items=items, unresolved=unresolved)
+    draft = RakutenOrderDraft(
+        original_filename=original_filename,
+        status="parsed",
+        document=document.model_dump(mode="json"),
+    )
+    session.add(draft)
+    await session.commit()
+    await session.refresh(draft)
+    return draft
+
+
+async def get_rakuten_order_draft(
+    session: AsyncSession,
+    draft_id: int,
+    *,
+    with_for_update: bool = False,
+) -> RakutenOrderDraft | None:
+    stmt = select(RakutenOrderDraft).where(RakutenOrderDraft.id == draft_id)
+    if with_for_update:
+        stmt = stmt.with_for_update()
+    return await session.scalar(stmt)
+
+
+async def apply_rakuten_order_draft(
+    session: AsyncSession,
+    draft: RakutenOrderDraft,
+    user_id: int | None = None,
+) -> RakutenOrderApplyResult:
+    document = RakutenOrderDraftDocument.model_validate(draft.document)
+
+    warehouse = await session.scalar(
+        select(Warehouse).where(Warehouse.name == RAKUTEN_WAREHOUSE_NAME)
+    )
+    if warehouse is None:
+        return RakutenOrderApplyResult(
+            applied=False,
+            shortage_items=document.items,
+            unresolved=document.unresolved,
+        )
+
+    mutations: list[RakutenOrderMutation] = []
+    shortage_items: list[RakutenOrderLine] = []
+    skipped_duplicates = 0
+
+    for item in document.items:
+        if item.status != "ok":
+            shortage_items.append(item)
+            continue
+
+        reference_id = f"rakuten_order:{draft.id}:{item.jan_code}"
+        existing = await session.scalar(
+            select(StockTransaction.id).where(
+                StockTransaction.source == RAKUTEN_ORDER_SOURCE,
+                StockTransaction.reference_id == reference_id,
+            ).limit(1)
+        )
+        if existing:
+            skipped_duplicates += 1
+            continue
+
+        try:
+            result = await stock_out_item(
+                session=session,
+                payload=StockOutCreate(
+                    sku=item.jan_code,
+                    warehouse_id=warehouse.id,
+                    quantity=item.ordered_qty,
+                    source=RAKUTEN_ORDER_SOURCE,
+                    reference_id=reference_id,
+                    note="乐天采购分析自动出库",
+                    customer=DEFAULT_RAKUTEN_ORDER_CUSTOMER,
+                ),
+                commit=False,
+                user_id=user_id,
+            )
+        except (InsufficientStockError, InventoryRecordNotFoundError):
+            shortage_items.append(item)
+            continue
+
+        mutations.append(RakutenOrderMutation(
+            jan_code=item.jan_code,
+            quantity=item.ordered_qty,
+            transaction=StockTransactionRead.model_validate(result.transaction),
+            low_stock_alert=result.low_stock_alert,
+        ))
+
+    draft.status = "applied"
+    await session.commit()
+    await session.refresh(draft)
+
+    return RakutenOrderApplyResult(
+        applied=True,
+        mutations=mutations,
+        shortage_items=shortage_items,
+        unresolved=document.unresolved,
+        skipped_duplicates=skipped_duplicates,
     )

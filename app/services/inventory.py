@@ -219,6 +219,9 @@ async def stock_in_item(
     )
     session.add(transaction)
     await session.flush()
+    # Auto-reserve: promote waiting CustomerAllocation rows for this JAN if stock now sufficient
+    from app.services.customer_allocations import try_auto_reserve  # lazy to avoid circular import
+    await try_auto_reserve(session, payload.sku, payload.warehouse_id)
     if commit:
         await session.commit()
     refreshed_record = await _get_inventory_record_for_response(session, record.id)

@@ -314,6 +314,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="trade-shipment" onclick="nav(this)">
         <span class="icon">⇄</span> 贸易出库
       </button>
+      <button class="nav-item" data-section="alloc" onclick="nav(this)">
+        <span class="icon">◈</span> 客户预留
+      </button>
       <button class="nav-item" data-section="count-import" onclick="nav(this)">
         <span class="icon">≡</span> 盘点导入
       </button>
@@ -619,13 +622,15 @@ tr:hover td { background: var(--accent-bg); }
 
       <div id="oa-result" style="display:none;margin-top:16px">
         <div id="oa-summary" style="margin-bottom:12px"></div>
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
           <button class="btn btn-sm btn-ghost" onclick="filterOA('all')">全部</button>
           <button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:1px solid #dc2626" onclick="filterOA('problem')">⚠ 有问题</button>
           <button class="btn btn-sm" style="background:#fffbeb;color:#d97706;border:1px solid #d97706" onclick="filterOA('insufficient')">库存不足</button>
           <button class="btn btn-sm" style="background:#f5f3ff;color:#7c3aed;border:1px solid #7c3aed" onclick="filterOA('no_record')">无库存记录</button>
           <button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:1px solid #dc2626" onclick="filterOA('unknown')">商品未知</button>
           <button class="btn btn-sm" style="background:#f0fdf4;color:#16a34a;border:1px solid #16a34a" onclick="filterOA('ok')">库存充足</button>
+          <span style="flex:1"></span>
+          <button class="btn btn-primary" id="oa-apply-btn" onclick="applyOrderAnalysis()" style="display:none">确认出库（充足项）</button>
         </div>
         <div style="overflow-x:auto">
           <table class="table" id="oa-table">
@@ -640,7 +645,9 @@ tr:hover td { background: var(--accent-bg); }
             <tbody id="oa-tbody"></tbody>
           </table>
         </div>
+        <div id="oa-unresolved" style="display:none;margin-top:14px"></div>
       </div>
+      <div id="oa-apply-result" style="display:none;margin-top:16px"></div>
     </div>
 
     <!-- Rakuten CSV -->
@@ -765,6 +772,69 @@ tr:hover td { background: var(--accent-bg); }
           </div>
         </div>
         <div id="trade-result-issues" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <!-- 客户预留 Customer Allocations -->
+    <div class="section" id="section-alloc">
+      <div class="section-title">客户预留</div>
+      <div class="section-sub">上传客户需求 Excel（每 sheet = 客户代码），系统自动预留普通仓库库存，并在入库后自动调转</div>
+
+      <!-- 上传区 -->
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div class="form-row">
+            <label>需求 Excel（每 sheet 为客户代码）</label>
+            <input type="file" id="alloc-file" accept=".xlsx,.xls" style="padding:6px 0;border:none;background:none">
+          </div>
+          <div class="form-row">
+            <label>计划出库日期（文件名含日期时可不填）</label>
+            <input type="date" id="alloc-date">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="uploadAllocation()">上传并预留</button>
+        <div id="alloc-upload-result" style="margin-top:12px"></div>
+      </div>
+
+      <!-- 查询区 -->
+      <div class="card" style="margin-top:16px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+          <div class="form-row" style="margin:0;flex:1;min-width:140px">
+            <label>客户代码</label>
+            <input type="text" id="alloc-filter-customer" placeholder="mm / kk / cp…">
+          </div>
+          <div class="form-row" style="margin:0;flex:1;min-width:140px">
+            <label>出库日期</label>
+            <input type="date" id="alloc-filter-date">
+          </div>
+          <div class="form-row" style="margin:0">
+            <label>状态</label>
+            <select id="alloc-filter-status">
+              <option value="">全部</option>
+              <option value="waiting">等待中</option>
+              <option value="reserved">已调转</option>
+              <option value="shipped">已出库</option>
+              <option value="cancelled">已取消</option>
+            </select>
+          </div>
+          <button class="btn btn-ghost" onclick="loadAllocations()" style="margin-bottom:0">查询</button>
+        </div>
+        <div id="alloc-summary" style="margin-bottom:8px"></div>
+        <div style="overflow-x:auto">
+          <table class="table" id="alloc-table">
+            <thead><tr>
+              <th>出库日期</th>
+              <th>客户</th>
+              <th>JAN</th>
+              <th>商品名</th>
+              <th>需求量</th>
+              <th>当前库存</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr></thead>
+            <tbody id="alloc-tbody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -1534,22 +1604,39 @@ async function doSearch() {
     if (!items.length) { el.innerHTML = '<p class="loading">无结果</p>'; return; }
     el.innerHTML = items.map(p => {
       const records = p.inventory_records || [];
+      const upc = p.units_per_case ? `${p.units_per_case}入` : '—';
+      const editBtn = `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="jumpToProductEdit('${esc(p.jan_code)}')">编辑</button>`;
       const warning = p.outer_jan_warning
         ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#92400e">${esc(p.outer_jan_warning)}</div>`
         : '';
       const rows = records.length
-        ? records.map(r => `<tr>
+        ? records.map((r, i) => `<tr>
             <td><code style="font-size:11px">${p.jan_code}</code></td>
             <td>${esc(p.name_jp)}<br><small style="color:var(--muted)">${esc(p.name_zh||'')}</small></td>
             <td>${r.warehouse?.name||'—'}</td>
             <td>${r.customer?.name||'—'}</td>
             <td>${r.location_code}</td>
             <td><strong style="color:${r.quantity < 0 ? 'var(--danger)' : 'inherit'}">${r.quantity}</strong></td>
+            <td>${upc}</td>
+            <td>${i === 0 ? editBtn : ''}</td>
           </tr>`).join('')
-        : `<tr><td colspan="6" style="color:var(--muted)"><code style="font-size:11px">${p.jan_code}</code> ${esc(p.name_jp)} — 无库存记录</td></tr>`;
-      return warning + '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品名</th><th>仓库</th><th>客户</th><th>库位</th><th>数量</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+        : `<tr>
+            <td><code style="font-size:11px">${p.jan_code}</code></td>
+            <td>${esc(p.name_jp)}<br><small style="color:var(--muted)">${esc(p.name_zh||'')}</small></td>
+            <td colspan="4" style="color:var(--muted)">无库存记录</td>
+            <td>${upc}</td>
+            <td>${editBtn}</td>
+          </tr>`;
+      return warning + '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品名</th><th>仓库</th><th>客户</th><th>库位</th><th>数量</th><th>入数</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
     }).join('<hr style="margin:12px 0;border-color:var(--border)">');
   } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+
+function jumpToProductEdit(janCode) {
+  const btn = document.querySelector('.nav-item[data-section="products"]');
+  if (btn) nav(btn);
+  document.getElementById('prod-search-kw').value = janCode;
+  searchProducts();
 }
 
 // ── Chat Report ────────────────────────────────────────────────────────────
@@ -1619,6 +1706,7 @@ function resetChatReport() {
 // ── 乐天出荷分析 ──────────────────────────────────────────────────────────────
 
 let _oaItems = [];
+let _oaDraftId = null;
 
 async function runOrderAnalysis() {
   const f1 = document.getElementById('oa-file1').files[0];
@@ -1631,17 +1719,41 @@ async function runOrderAnalysis() {
   try {
     const res = await api('POST', '/rakuten/order-analysis', fd, true);
     _oaItems = res.items || [];
+    _oaDraftId = res.draft_id || null;
     document.getElementById('oa-result').style.display = 'block';
+    document.getElementById('oa-apply-result').style.display = 'none';
+    const okCount = _oaItems.filter(i => i.status === 'ok').length;
     const problems = _oaItems.filter(i => i.status !== 'ok').length;
     const parts = [
       `一号店 ${res.store1_lines} 行`,
       res.store2_lines ? `二号店 ${res.store2_lines} 行` : null,
-      `静默跳过 ${res.silently_skipped} 条（无JAN商品）`,
+      res.unresolved_count ? `<span style="color:var(--danger)">${res.unresolved_count} 条无法解析JAN（需人工登记）</span>` : null,
       res.unknown_jan_count ? `<span style="color:var(--danger)">${res.unknown_jan_count} 条未知JAN</span>` : null,
       problems ? `<span style="color:var(--warn)">${problems} 条需关注</span>` : `<span style="color:var(--success)">库存全部充足</span>`,
     ].filter(Boolean);
     document.getElementById('oa-summary').innerHTML = `<div class="card" style="padding:10px 14px;font-size:14px">${parts.join('　|　')}</div>`;
     renderOATable(_oaItems);
+    // show apply button only when there are ok items and draft was created
+    const applyBtn = document.getElementById('oa-apply-btn');
+    applyBtn.style.display = (okCount > 0 && _oaDraftId) ? '' : 'none';
+    applyBtn.disabled = false;
+    applyBtn.textContent = `确认出库（${okCount} 项充足）`;
+    // render unresolved section
+    const unresolvedEl = document.getElementById('oa-unresolved');
+    const unresolved = res.unresolved || [];
+    if (unresolved.length > 0) {
+      unresolvedEl.style.display = '';
+      unresolvedEl.innerHTML = `<div class="card" style="border-left:3px solid #dc2626;padding:10px 14px">
+        <div style="font-weight:600;margin-bottom:8px;color:#dc2626">无法解析JAN — 需人工登记新SKU（${unresolved.length} 条）</div>
+        <table class="table"><thead><tr><th>商品番号</th><th>SKU番号</th><th>数量</th></tr></thead>
+        <tbody>${unresolved.map(u => `<tr>
+          <td><code style="font-size:12px">${esc(u.product_number)}</code></td>
+          <td><code style="font-size:12px">${esc(u.sku_number || '—')}</code></td>
+          <td style="text-align:center">${u.quantity}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+    } else {
+      unresolvedEl.style.display = 'none';
+    }
     toast('分析完成', 'ok');
   } catch (e) { toast('分析失败: ' + e.message, 'err'); }
 }
@@ -1675,6 +1787,62 @@ function renderOATable(items) {
       <td style="text-align:center">${shortageDisplay}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--muted)">暂无数据</td></tr>';
+}
+
+async function applyOrderAnalysis() {
+  if (!_oaDraftId) { toast('草稿 ID 丢失，请重新分析', 'err'); return; }
+  const btn = document.getElementById('oa-apply-btn');
+  btn.disabled = true;
+  btn.textContent = '确认中…';
+  toast('出库中…', 'info');
+  try {
+    const res = await api('POST', `/rakuten/order-analysis/${_oaDraftId}/apply`);
+    renderOAApplyResult(res);
+    toast(`出库完成：${res.mutations.length} 条成功`, 'ok');
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '确认出库（充足项）';
+    toast('出库失败: ' + e.message, 'err');
+  }
+}
+
+function renderOAApplyResult(res) {
+  const el = document.getElementById('oa-apply-result');
+  el.style.display = '';
+  let html = `<div class="card" style="border-left:3px solid #16a34a;padding:10px 14px;margin-bottom:12px">
+    <div style="font-weight:600;margin-bottom:8px">出库结果：${res.mutations.length} 条成功${res.skipped_duplicates ? `，${res.skipped_duplicates} 条已跳过（重复）` : ''}</div>`;
+  if (res.mutations.length) {
+    html += `<table class="table"><thead><tr><th>JAN</th><th>数量</th></tr></thead><tbody>
+      ${res.mutations.map(m => `<tr><td><code style="font-size:12px">${esc(m.jan_code)}</code></td><td style="text-align:center">${m.quantity}</td></tr>`).join('')}
+    </tbody></table>`;
+  }
+  html += '</div>';
+  if (res.shortage_items && res.shortage_items.length) {
+    html += `<div class="card" style="border-left:3px solid #d97706;padding:10px 14px;margin-bottom:12px">
+      <div style="font-weight:600;color:#d97706;margin-bottom:8px">需调货 / 无库存记录（${res.shortage_items.length} 条）</div>
+      <table class="table"><thead><tr><th>状态</th><th>JAN</th><th>商品名</th><th>缺口</th></tr></thead><tbody>
+      ${res.shortage_items.map(i => `<tr>
+        <td><span style="font-size:12px;padding:2px 6px;border-radius:4px;background:#fffbeb;color:#d97706;border:1px solid #d97706">${esc(i.status)}</span></td>
+        <td><code style="font-size:12px">${esc(i.jan_code)}</code></td>
+        <td style="font-size:13px">${esc(i.product_name || '—')}</td>
+        <td style="text-align:center;color:#d97706;font-weight:700">${i.shortage}</td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+  }
+  if (res.unresolved && res.unresolved.length) {
+    html += `<div class="card" style="border-left:3px solid #dc2626;padding:10px 14px">
+      <div style="font-weight:600;color:#dc2626;margin-bottom:8px">无法解析JAN — 需人工登记（${res.unresolved.length} 条）</div>
+      <table class="table"><thead><tr><th>商品番号</th><th>SKU番号</th><th>数量</th></tr></thead><tbody>
+      ${res.unresolved.map(u => `<tr>
+        <td><code style="font-size:12px">${esc(u.product_number)}</code></td>
+        <td><code style="font-size:12px">${esc(u.sku_number || '—')}</code></td>
+        <td style="text-align:center">${u.quantity}</td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+  }
+  el.innerHTML = html;
+  // hide apply button to prevent re-apply
+  document.getElementById('oa-apply-btn').style.display = 'none';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2099,6 +2267,108 @@ function renderTradeResult(data) {
   document.getElementById('trade-result-issues').innerHTML = issues.map(i =>
     `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">⚠ <code style="font-size:11px">${esc(i.jan_code)}</code> ${esc(i.message)}</div>`
   ).join('');
+}
+
+// ── 客户预留 Customer Allocations ─────────────────────────────────────────
+
+const ALLOC_STATUS = {
+  waiting:   { label: '等待中', color: '#d97706', bg: '#fffbeb' },
+  reserved:  { label: '已调转', color: '#16a34a', bg: '#f0fdf4' },
+  shipped:   { label: '已出库', color: '#6366f1', bg: '#eef2ff' },
+  cancelled: { label: '已取消', color: '#9ca3af', bg: '#f3f4f6' },
+};
+
+async function uploadAllocation() {
+  const file = document.getElementById('alloc-file').files[0];
+  if (!file) { toast('请选择需求 Excel 文件', 'err'); return; }
+  const dateVal = document.getElementById('alloc-date').value;
+  const fd = new FormData();
+  fd.append('file', file);
+  let url = '/trade/allocations/upload';
+  if (dateVal) url += `?planned_outbound_date=${encodeURIComponent(dateVal)}`;
+  toast('上传中…', 'info');
+  try {
+    const res = await api('POST', url, fd, true);
+    document.getElementById('alloc-upload-result').innerHTML = `<div class="card" style="border-left:3px solid var(--success);padding:10px 14px;font-size:13px">
+      <strong>${res.source_filename}</strong>（${res.planned_outbound_date}）<br>
+      共 ${res.total_rows} 行　|　已调转 <span style="color:var(--success);font-weight:700">${res.reserved}</span>　|　等待库存 <span style="color:#d97706;font-weight:700">${res.waiting}</span>　|　更新 ${res.updated}　|　跳过 ${res.skipped}
+    </div>`;
+    toast('上传完成', 'ok');
+    loadAllocations();
+  } catch (e) { toast('上传失败: ' + e.message, 'err'); }
+}
+
+async function loadAllocations() {
+  const customer = document.getElementById('alloc-filter-customer').value.trim();
+  const date = document.getElementById('alloc-filter-date').value;
+  const status = document.getElementById('alloc-filter-status').value;
+  let url = '/trade/allocations?';
+  if (customer) url += `customer_name=${encodeURIComponent(customer)}&`;
+  if (date) url += `planned_outbound_date=${encodeURIComponent(date)}&`;
+  if (status) url += `status=${encodeURIComponent(status)}&`;
+  try {
+    const items = await api('GET', url);
+    renderAllocTable(items);
+    // summary
+    const ready = items.filter(i => i.status === 'reserved').length;
+    const waiting = items.filter(i => i.status === 'waiting').length;
+    document.getElementById('alloc-summary').innerHTML = items.length
+      ? `<span style="font-size:13px;color:var(--muted)">共 ${items.length} 条　已调转 <span style="color:var(--success);font-weight:600">${ready}</span>　等待 <span style="color:#d97706;font-weight:600">${waiting}</span></span>`
+      : '';
+  } catch (e) { toast('查询失败: ' + e.message, 'err'); }
+}
+
+function renderAllocTable(items) {
+  document.getElementById('alloc-tbody').innerHTML = items.map(item => {
+    const s = ALLOC_STATUS[item.status] || ALLOC_STATUS.waiting;
+    const badge = `<span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span>`;
+    const stockDisplay = item.current_stock === null ? '—' : `<strong style="color:${item.current_stock < item.quantity ? '#d97706' : 'inherit'}">${item.current_stock}</strong>`;
+    let ops = '';
+    if (item.status === 'waiting') {
+      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocReserve(${item.id})">调转</button> `;
+    }
+    if (item.status === 'reserved') {
+      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocRevert(${item.id})">撤销</button> `;
+    }
+    if (item.status !== 'shipped' && item.status !== 'cancelled') {
+      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:#9ca3af" onclick="allocCancel(${item.id})">取消</button>`;
+    }
+    return `<tr style="background:${item.status === 'waiting' && item.current_stock !== null && item.current_stock < item.quantity ? '#fffbeb' : ''}">
+      <td style="font-size:12px">${esc(item.planned_outbound_date)}</td>
+      <td><strong>${esc(item.customer_name)}</strong></td>
+      <td><code style="font-size:11px">${esc(item.jan_code)}</code></td>
+      <td style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.product_name||'')}">${esc(item.product_name||'—')}</td>
+      <td style="text-align:center">${item.quantity}</td>
+      <td style="text-align:center">${stockDisplay}</td>
+      <td>${badge}</td>
+      <td style="white-space:nowrap">${ops}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">暂无数据</td></tr>';
+}
+
+async function allocReserve(id) {
+  try {
+    await api('PATCH', `/trade/allocations/${id}/reserve`);
+    toast('调转成功', 'ok');
+    loadAllocations();
+  } catch (e) { toast('调转失败: ' + e.message, 'err'); }
+}
+
+async function allocRevert(id) {
+  try {
+    await api('PATCH', `/trade/allocations/${id}/revert`);
+    toast('撤销成功', 'ok');
+    loadAllocations();
+  } catch (e) { toast('撤销失败: ' + e.message, 'err'); }
+}
+
+async function allocCancel(id) {
+  if (!confirm('确认取消该预留？')) return;
+  try {
+    await api('PATCH', `/trade/allocations/${id}/cancel`);
+    toast('已取消', 'ok');
+    loadAllocations();
+  } catch (e) { toast('取消失败: ' + e.message, 'err'); }
 }
 
 // ── Count Import ───────────────────────────────────────────────────────────
