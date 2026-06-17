@@ -18,6 +18,7 @@ from app.services.customer_allocations import (
     get_allocation_summary,
     revert_to_waiting,
     try_reserve_one,
+    update_allocation_quantity,
     upsert_allocations_from_excel,
 )
 
@@ -61,14 +62,16 @@ async def list_allocations(
     customer_name: str | None = None,
     planned_outbound_date: date | None = None,
     status: str | None = None,
+    jan_code: str | None = None,
     session: AsyncSession = Depends(get_db_session),
 ) -> list[CustomerAllocationRead]:
-    """查询客户预留列表。可按客户名、计划出库日期、状态筛选。"""
+    """查询客户预留列表。可按客户名、计划出库日期、状态、JAN 筛选。"""
     return await get_allocation_status(
         session,
         customer_name=customer_name,
         planned_outbound_date=planned_outbound_date,
         status_filter=status,
+        jan_code=jan_code,
     )
 
 
@@ -100,6 +103,26 @@ async def manual_reserve(
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     r = CustomerAllocationRead.model_validate(alloc)
     return r
+
+
+@router.patch(
+    "/allocations/{allocation_id}/quantity",
+    response_model=CustomerAllocationRead,
+    dependencies=[Depends(require_auth)],
+)
+async def adjust_allocation_quantity(
+    allocation_id: int,
+    quantity: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> CustomerAllocationRead:
+    """手动修正预留数量（纠正重复上传/录入错误导致的多算或少算）。"""
+    try:
+        alloc = await update_allocation_quantity(session, allocation_id, quantity)
+    except ValueError as exc:
+        status_code = 404 if "不存在" in str(exc) else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return CustomerAllocationRead.model_validate(alloc)
 
 
 @router.patch(

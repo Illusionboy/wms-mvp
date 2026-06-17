@@ -286,8 +286,42 @@ async def try_auto_reserve(
 
 
 # ---------------------------------------------------------------------------
-# 手动调转 / 撤销 / 取消
+# 手动调转 / 撤销 / 取消 / 调整数量
 # ---------------------------------------------------------------------------
+
+async def update_allocation_quantity(
+    session: AsyncSession,
+    allocation_id: int,
+    quantity: int,
+) -> CustomerAllocation:
+    """手动修正预留数量（用于纠正重复上传/录入错误导致的多算或少算）。
+
+    修改后立即重新评估同 JAN 的所有预留，可能导致该行或其他行的 status 变化。
+    """
+    if quantity <= 0:
+        raise ValueError("数量必须大于0；如需移除该条预留请使用「取消」")
+
+    alloc = await session.scalar(
+        select(CustomerAllocation).where(CustomerAllocation.id == allocation_id).with_for_update()
+    )
+    if alloc is None:
+        raise ValueError("预留记录不存在")
+    if alloc.status in ("shipped", "cancelled"):
+        raise ValueError(f"当前状态 {alloc.status}，无法调整数量")
+
+    alloc.quantity = quantity
+    await session.flush()
+
+    warehouse = await session.scalar(
+        select(Warehouse).where(Warehouse.name == ALLOCATION_WAREHOUSE_NAME)
+    )
+    if warehouse:
+        await _revalidate_for_jan(session, alloc.jan_code, warehouse)
+
+    await session.commit()
+    await session.refresh(alloc)
+    return alloc
+
 
 async def try_reserve_one(
     session: AsyncSession,
@@ -386,6 +420,7 @@ async def get_allocation_status(
     customer_name: str | None = None,
     planned_outbound_date: date | None = None,
     status_filter: str | None = None,
+    jan_code: str | None = None,
 ) -> list[CustomerAllocationRead]:
     """查询预留状态，实时附带当前库存和商品名。"""
     warehouse = await session.scalar(
@@ -399,6 +434,8 @@ async def get_allocation_status(
         stmt = stmt.where(CustomerAllocation.planned_outbound_date == planned_outbound_date)
     if status_filter:
         stmt = stmt.where(CustomerAllocation.status == status_filter)
+    if jan_code:
+        stmt = stmt.where(CustomerAllocation.jan_code == jan_code)
     stmt = stmt.order_by(
         CustomerAllocation.planned_outbound_date.asc(),
         CustomerAllocation.customer_name.asc(),

@@ -1627,9 +1627,44 @@ async function doSearch() {
             <td>${upc}</td>
             <td>${editBtn}</td>
           </tr>`;
-      return warning + '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品名</th><th>仓库</th><th>客户</th><th>库位</th><th>数量</th><th>入数</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+      return warning + '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品名</th><th>仓库</th><th>客户</th><th>库位</th><th>数量</th><th>入数</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+        + `<div id="search-alloc-${esc(p.jan_code)}" style="margin:4px 0 4px 2px"></div>`;
     }).join('<hr style="margin:12px 0;border-color:var(--border)">');
+    items.forEach(p => {
+      const normalStock = (p.inventory_records || [])
+        .filter(r => r.warehouse?.name === '普通仓库')
+        .reduce((sum, r) => sum + r.quantity, 0);
+      loadSearchAllocInfo(p.jan_code, normalStock);
+    });
   } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+
+async function loadSearchAllocInfo(janCode, normalStock) {
+  const el = document.getElementById(`search-alloc-${janCode}`);
+  if (!el) return;
+  try {
+    const allocs = await api('GET', `/trade/allocations?jan_code=${encodeURIComponent(janCode)}`);
+    const active = allocs.filter(a => a.status === 'waiting' || a.status === 'reserved');
+    if (!active.length) return;
+    const s = ALLOC_STATUS;
+    const reserved = active.filter(a => a.status === 'reserved');
+    const waiting = active.filter(a => a.status === 'waiting');
+    const reservedTotal = reserved.reduce((sum, a) => sum + a.quantity, 0);
+    const unallocated = normalStock - reservedTotal;
+
+    const parts = [];
+    parts.push(`<span style="margin-right:8px"><strong>默认（未预留）</strong> <span style="color:${unallocated < 0 ? 'var(--danger)' : 'inherit'}">${unallocated}</span>件</span>`);
+    reserved.forEach(a => {
+      parts.push(`<span style="margin-right:8px"><strong>${esc(a.customer_name)}</strong> ${a.quantity}件 <span style="color:${s.reserved.color}">(已调转)</span></span>`);
+    });
+    waiting.forEach(a => {
+      parts.push(`<span style="margin-right:8px;color:var(--muted)"><strong>${esc(a.customer_name)}</strong> ${a.quantity}件 <span style="color:${s.waiting.color}">(等待中，库存不足)</span></span>`);
+    });
+
+    el.innerHTML = `<div style="font-size:12px;color:var(--muted);padding:4px 8px;background:var(--bg-soft,#f8fafc);border-radius:6px">
+      普通仓库 ${normalStock} 件　${parts.join('')}
+    </div>`;
+  } catch { /* allocation lookup is best-effort, ignore errors */ }
 }
 
 function jumpToProductEdit(janCode) {
@@ -2318,11 +2353,15 @@ async function loadAllocations() {
   } catch (e) { toast('查询失败: ' + e.message, 'err'); }
 }
 
+let _allocItemsCache = [];
+
 function renderAllocTable(items) {
+  _allocItemsCache = items;
   document.getElementById('alloc-tbody').innerHTML = items.map(item => {
     const s = ALLOC_STATUS[item.status] || ALLOC_STATUS.waiting;
     const badge = `<span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span>`;
     const stockDisplay = item.current_stock === null ? '—' : `<strong style="color:${item.current_stock < item.quantity ? '#d97706' : 'inherit'}">${item.current_stock}</strong>`;
+    const editable = item.status !== 'shipped' && item.status !== 'cancelled';
     let ops = '';
     if (item.status === 'waiting') {
       ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocReserve(${item.id})">调转</button> `;
@@ -2330,15 +2369,16 @@ function renderAllocTable(items) {
     if (item.status === 'reserved') {
       ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocRevert(${item.id})">撤销</button> `;
     }
-    if (item.status !== 'shipped' && item.status !== 'cancelled') {
+    if (editable) {
+      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocEditQty(${item.id})">编辑数量</button> `;
       ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:#9ca3af" onclick="allocCancel(${item.id})">取消</button>`;
     }
-    return `<tr style="background:${item.status === 'waiting' && item.current_stock !== null && item.current_stock < item.quantity ? '#fffbeb' : ''}">
+    return `<tr data-alloc-id="${item.id}" style="background:${item.status === 'waiting' && item.current_stock !== null && item.current_stock < item.quantity ? '#fffbeb' : ''}">
       <td style="font-size:12px">${esc(item.planned_outbound_date)}</td>
       <td><strong>${esc(item.customer_name)}</strong></td>
       <td><code style="font-size:11px">${esc(item.jan_code)}</code></td>
       <td style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.product_name||'')}">${esc(item.product_name||'—')}</td>
-      <td style="text-align:center">${item.quantity}</td>
+      <td style="text-align:center" class="alloc-qty-cell">${item.quantity}</td>
       <td style="text-align:center">${stockDisplay}</td>
       <td>${badge}</td>
       <td style="white-space:nowrap">${ops}</td>
@@ -2369,6 +2409,29 @@ async function allocCancel(id) {
     toast('已取消', 'ok');
     loadAllocations();
   } catch (e) { toast('取消失败: ' + e.message, 'err'); }
+}
+
+function allocEditQty(id) {
+  const row = document.querySelector(`tr[data-alloc-id="${id}"]`);
+  if (!row) return;
+  const item = _allocItemsCache.find(i => i.id === id);
+  if (!item) return;
+  const cell = row.querySelector('.alloc-qty-cell');
+  cell.innerHTML = `<input type="number" id="alloc-qty-input-${id}" value="${item.quantity}" min="1" style="width:64px;text-align:center">`;
+  const opsCell = row.lastElementChild;
+  opsCell.innerHTML = `<button class="btn btn-primary btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocSaveQty(${id})">保存</button> ` +
+    `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="loadAllocations()">取消</button>`;
+}
+
+async function allocSaveQty(id) {
+  const input = document.getElementById(`alloc-qty-input-${id}`);
+  const qty = parseInt(input.value, 10);
+  if (!qty || qty <= 0) { toast('请输入大于0的数量', 'err'); return; }
+  try {
+    await api('PATCH', `/trade/allocations/${id}/quantity?quantity=${qty}`);
+    toast('数量已调整', 'ok');
+    loadAllocations();
+  } catch (e) { toast('调整失败: ' + e.message, 'err'); }
 }
 
 // ── Count Import ───────────────────────────────────────────────────────────
