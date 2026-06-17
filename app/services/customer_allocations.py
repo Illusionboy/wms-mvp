@@ -420,6 +420,39 @@ async def cancel_allocation(
     return alloc
 
 
+async def mark_as_shipped(
+    session: AsyncSession,
+    allocation_id: int,
+) -> CustomerAllocation:
+    """手动标记该预留对应的货已实际出库（reserved/waiting → shipped）。
+
+    出库渠道（秦丝同步/贸易出库等）的客户名格式与本表不一致，无法可靠自动匹配，
+    因此由操作员在确认实际出库后手动标记，避免误匹配到错误客户、污染其他人的预留状态。
+    标记后重新评估同 JAN 的其他行，确保基于出库后的真实库存重新核算（出库本身的
+    库存扣减发生在对应的 stock_out 调用里，与本次状态标记是两个独立动作）。
+    """
+    alloc = await session.scalar(
+        select(CustomerAllocation).where(CustomerAllocation.id == allocation_id).with_for_update()
+    )
+    if alloc is None:
+        raise ValueError("预留记录不存在")
+    if alloc.status in ("shipped", "cancelled"):
+        raise ValueError(f"当前状态 {alloc.status}，无法标记已出库")
+
+    alloc.status = "shipped"
+    await session.flush()
+
+    warehouse = await session.scalar(
+        select(Warehouse).where(Warehouse.name == ALLOCATION_WAREHOUSE_NAME)
+    )
+    if warehouse:
+        await _revalidate_for_jan(session, alloc.jan_code, warehouse)
+
+    await session.commit()
+    await session.refresh(alloc)
+    return alloc
+
+
 async def bulk_cancel_allocations(
     session: AsyncSession,
     customer_name: str,

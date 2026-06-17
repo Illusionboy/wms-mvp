@@ -18,6 +18,7 @@ from app.services.customer_allocations import (
     cancel_allocation,
     get_allocation_status,
     get_allocation_summary,
+    mark_as_shipped,
     revert_to_waiting,
     try_reserve_one,
     update_allocation_quantity,
@@ -160,6 +161,30 @@ async def cancel_reservation(
         alloc = await cancel_allocation(session, allocation_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return CustomerAllocationRead.model_validate(alloc)
+
+
+@router.patch(
+    "/allocations/{allocation_id}/ship",
+    response_model=CustomerAllocationRead,
+    dependencies=[Depends(require_auth)],
+)
+async def mark_allocation_shipped(
+    allocation_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> CustomerAllocationRead:
+    """手动标记该预留对应的货已实际出库（reserved/waiting → shipped）。
+
+    系统不会自动按客户名匹配秦丝同步/贸易出库等渠道的实际出库记录——
+    各渠道客户名格式不统一，自动匹配错了比不匹配更危险。
+    由操作员在确认实际出库已发生后手动标记，避免误标到错误客户的预留行。
+    """
+    try:
+        alloc = await mark_as_shipped(session, allocation_id)
+    except ValueError as exc:
+        status_code = 404 if "不存在" in str(exc) else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     return CustomerAllocationRead.model_validate(alloc)
 
 

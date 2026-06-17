@@ -2371,6 +2371,7 @@ function renderAllocTable(items) {
       ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocRevert(${item.id})">撤销</button> `;
     }
     if (editable) {
+      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:#6366f1" onclick="allocShip(${item.id})">标记已出库</button> `;
       ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocEditQty(${item.id})">编辑数量</button> `;
       ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:#9ca3af" onclick="allocCancel(${item.id})">取消</button>`;
     }
@@ -2410,6 +2411,17 @@ async function allocCancel(id) {
     toast('已取消', 'ok');
     loadAllocations();
   } catch (e) { toast('取消失败: ' + e.message, 'err'); }
+}
+
+async function allocShip(id) {
+  const item = _allocItemsCache.find(i => i.id === id);
+  const desc = item ? `「${item.customer_name}」${item.quantity}件 ${item.jan_code}` : '该预留';
+  if (!confirm(`确认 ${desc} 已经实际出库？\n（系统不会自动核对秦丝/贸易出库记录，请确保你已经在对应渠道完成了真实出库操作）`)) return;
+  try {
+    await api('PATCH', `/trade/allocations/${id}/ship`);
+    toast('已标记出库', 'ok');
+    loadAllocations();
+  } catch (e) { toast('标记失败: ' + e.message, 'err'); }
 }
 
 async function bulkCancelAllocations() {
