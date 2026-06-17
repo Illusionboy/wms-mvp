@@ -818,6 +818,7 @@ tr:hover td { background: var(--accent-bg); }
             </select>
           </div>
           <button class="btn btn-ghost" onclick="loadAllocations()" style="margin-bottom:0">查询</button>
+          <button class="btn btn-ghost" style="margin-bottom:0;color:var(--danger)" onclick="bulkCancelAllocations()">批量取消（按客户+日期）</button>
         </div>
         <div id="alloc-summary" style="margin-bottom:8px"></div>
         <div style="overflow-x:auto">
@@ -2409,6 +2410,21 @@ async function allocCancel(id) {
     toast('已取消', 'ok');
     loadAllocations();
   } catch (e) { toast('取消失败: ' + e.message, 'err'); }
+}
+
+async function bulkCancelAllocations() {
+  const customer = document.getElementById('alloc-filter-customer').value.trim();
+  const date = document.getElementById('alloc-filter-date').value;
+  if (!customer || !date) {
+    toast('批量取消需要同时填写客户代码和出库日期，避免误删', 'err');
+    return;
+  }
+  if (!confirm(`确认取消「${customer}」在 ${date} 的所有预留记录？（已出库/已取消的不受影响）`)) return;
+  try {
+    const res = await api('POST', `/trade/allocations/bulk-cancel?customer_name=${encodeURIComponent(customer)}&planned_outbound_date=${encodeURIComponent(date)}`);
+    toast(`已取消 ${res.cancelled_count} 条`, 'ok');
+    loadAllocations();
+  } catch (e) { toast('批量取消失败: ' + e.message, 'err'); }
 }
 
 function allocEditQty(id) {

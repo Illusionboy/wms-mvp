@@ -523,6 +523,10 @@ class CustomerAllocationUploadResult(BaseModel):
     skipped: int     # quantity unchanged duplicate
 
 
+class BulkCancelAllocationResult(BaseModel):
+    cancelled_count: int
+
+
 class CustomerAllocationStatusResult(BaseModel):
     customer_name: str
     planned_outbound_date: date

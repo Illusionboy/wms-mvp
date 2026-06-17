@@ -7,12 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_auth
 from app.db.session import get_db_session
 from app.schemas.inventory import (
+    BulkCancelAllocationResult,
     CustomerAllocationRead,
     CustomerAllocationStatusResult,
     CustomerAllocationUploadResult,
 )
 from app.services.auth import CurrentUser
 from app.services.customer_allocations import (
+    bulk_cancel_allocations,
     cancel_allocation,
     get_allocation_status,
     get_allocation_summary,
@@ -159,3 +161,22 @@ async def cancel_reservation(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return CustomerAllocationRead.model_validate(alloc)
+
+
+@router.post(
+    "/allocations/bulk-cancel",
+    response_model=BulkCancelAllocationResult,
+    dependencies=[Depends(require_auth)],
+)
+async def bulk_cancel_reservation(
+    customer_name: str,
+    planned_outbound_date: date,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> BulkCancelAllocationResult:
+    """按客户名+计划出库日期批量取消（典型用途：上传时填错日期，整批撤销重传）。
+
+    只取消 waiting/reserved 状态的行；shipped/cancelled 不受影响。
+    """
+    count = await bulk_cancel_allocations(session, customer_name, planned_outbound_date)
+    return BulkCancelAllocationResult(cancelled_count=count)

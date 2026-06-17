@@ -128,11 +128,16 @@ async def _revalidate_for_jan(
     session: AsyncSession,
     jan_code: str,
     warehouse: Warehouse,
+    exclude_ids: set[int] | None = None,
 ) -> None:
     """原子地重分配该 JAN 的所有 waiting/reserved 行。
 
     持有 InventoryRecord 行锁，按 planned_outbound_date ASC 贪心：
     累积量 ≤ 当前库存 → reserved；超出 → waiting。
+
+    `exclude_ids`：本次重新评估时跳过这些行（不参与排队，也不占用库存额度）。
+    用于手动撤销场景——撤销后若不排除自身，库存充足时会被立即重新判定为 reserved，
+    导致撤销操作看起来毫无效果。
     """
     inv_record = await session.scalar(
         select(InventoryRecord).where(
@@ -142,13 +147,16 @@ async def _revalidate_for_jan(
     )
     current_stock = inv_record.quantity if inv_record else 0
 
-    allocs = (await session.scalars(
-        select(CustomerAllocation).where(
-            CustomerAllocation.jan_code == jan_code,
-            CustomerAllocation.status.in_(["waiting", "reserved"]),
-        ).order_by(CustomerAllocation.planned_outbound_date.asc(), CustomerAllocation.id.asc())
-        .with_for_update()
-    )).all()
+    stmt = select(CustomerAllocation).where(
+        CustomerAllocation.jan_code == jan_code,
+        CustomerAllocation.status.in_(["waiting", "reserved"]),
+    )
+    if exclude_ids:
+        stmt = stmt.where(CustomerAllocation.id.notin_(exclude_ids))
+    stmt = stmt.order_by(
+        CustomerAllocation.planned_outbound_date.asc(), CustomerAllocation.id.asc()
+    ).with_for_update()
+    allocs = (await session.scalars(stmt)).all()
 
     running = 0
     for alloc in allocs:
@@ -374,7 +382,8 @@ async def revert_to_waiting(
         select(Warehouse).where(Warehouse.name == ALLOCATION_WAREHOUSE_NAME)
     )
     if warehouse:
-        await _revalidate_for_jan(session, alloc.jan_code, warehouse)
+        # exclude self: 否则库存充足时会被立即重新判定为 reserved，撤销形同没做
+        await _revalidate_for_jan(session, alloc.jan_code, warehouse, exclude_ids={alloc.id})
 
     await session.commit()
     await session.refresh(alloc)
@@ -409,6 +418,49 @@ async def cancel_allocation(
     await session.commit()
     await session.refresh(alloc)
     return alloc
+
+
+async def bulk_cancel_allocations(
+    session: AsyncSession,
+    customer_name: str,
+    planned_outbound_date: date,
+) -> int:
+    """按客户名+计划出库日期批量取消（典型用途：上传时填错日期，整批撤销重传）。
+
+    只取消 waiting/reserved 状态的行（shipped/cancelled 不受影响）。
+    返回实际取消的行数。
+    """
+    allocs = (await session.scalars(
+        select(CustomerAllocation).where(
+            CustomerAllocation.customer_name == customer_name,
+            CustomerAllocation.planned_outbound_date == planned_outbound_date,
+            CustomerAllocation.status.in_(["waiting", "reserved"]),
+        ).with_for_update()
+    )).all()
+
+    if not allocs:
+        return 0
+
+    affected_jans: set[str] = set()
+    had_reserved = False
+    for alloc in allocs:
+        if alloc.status == "reserved":
+            had_reserved = True
+        alloc.status = "cancelled"
+        affected_jans.add(alloc.jan_code)
+
+    await session.flush()
+
+    if had_reserved:
+        warehouse = await session.scalar(
+            select(Warehouse).where(Warehouse.name == ALLOCATION_WAREHOUSE_NAME)
+        )
+        if warehouse:
+            for jan_code in affected_jans:
+                await _revalidate_for_jan(session, jan_code, warehouse)
+
+    await session.commit()
+    return len(allocs)
 
 
 # ---------------------------------------------------------------------------
