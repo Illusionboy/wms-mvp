@@ -102,6 +102,10 @@ def _parse_allocation_excel(
             qty_raw = row[qty_col - 1].value
             if jan_raw is None or qty_raw is None:
                 continue
+            # Excel/Sheets often stores JAN as a number (e.g. 4987227028276.0);
+            # str() on that float would append ".0", inflating the digit count to 14.
+            if isinstance(jan_raw, float) and jan_raw.is_integer():
+                jan_raw = int(jan_raw)
             jan = "".join(c for c in str(jan_raw) if c.isdigit())
             if len(jan) != 13:
                 continue
