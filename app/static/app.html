@@ -1662,7 +1662,7 @@ async function loadSearchAllocInfo(janCode, normalStock) {
       parts.push(`<span style="margin-right:8px;color:var(--muted)"><strong>${esc(a.customer_name)}</strong> ${a.quantity}件 <span style="color:${s.waiting.color}">(等待中，库存不足)</span></span>`);
     });
 
-    el.innerHTML = `<div style="font-size:12px;color:var(--muted);padding:4px 8px;background:var(--bg-soft,#f8fafc);border-radius:6px">
+    el.innerHTML = `<div style="font-size:12px;color:var(--muted);padding:4px 8px;background:var(--accent-bg);border-radius:6px">
       普通仓库 ${normalStock} 件　${parts.join('')}
     </div>`;
   } catch { /* allocation lookup is best-effort, ignore errors */ }
@@ -2308,10 +2308,10 @@ function renderTradeResult(data) {
 // ── 客户预留 Customer Allocations ─────────────────────────────────────────
 
 const ALLOC_STATUS = {
-  waiting:   { label: '等待中', color: '#d97706', bg: '#fffbeb' },
-  reserved:  { label: '已调转', color: '#16a34a', bg: '#f0fdf4' },
-  shipped:   { label: '已出库', color: '#6366f1', bg: '#eef2ff' },
-  cancelled: { label: '已取消', color: '#9ca3af', bg: '#f3f4f6' },
+  waiting:   { label: '等待中', color: 'var(--warn)', bg: 'var(--warn-bg)' },
+  reserved:  { label: '已调转', color: 'var(--success)', bg: 'var(--success-bg)' },
+  shipped:   { label: '已出库', color: 'var(--accent)', bg: 'var(--accent-bg)' },
+  cancelled: { label: '已取消', color: 'var(--muted)', bg: 'var(--border)' },
 };
 
 async function uploadAllocation() {
@@ -2327,7 +2327,7 @@ async function uploadAllocation() {
     const res = await api('POST', url, fd, true);
     document.getElementById('alloc-upload-result').innerHTML = `<div class="card" style="border-left:3px solid var(--success);padding:10px 14px;font-size:13px">
       <strong>${res.source_filename}</strong>（${res.planned_outbound_date}）<br>
-      共 ${res.total_rows} 行　|　已调转 <span style="color:var(--success);font-weight:700">${res.reserved}</span>　|　等待库存 <span style="color:#d97706;font-weight:700">${res.waiting}</span>　|　更新 ${res.updated}　|　跳过 ${res.skipped}
+      共 ${res.total_rows} 行　|　已调转 <span style="color:var(--success);font-weight:700">${res.reserved}</span>　|　等待库存 <span style="color:var(--warn);font-weight:700">${res.waiting}</span>　|　更新 ${res.updated}　|　跳过 ${res.skipped}
     </div>`;
     toast('上传完成', 'ok');
     loadAllocations();
@@ -2349,7 +2349,7 @@ async function loadAllocations() {
     const ready = items.filter(i => i.status === 'reserved').length;
     const waiting = items.filter(i => i.status === 'waiting').length;
     document.getElementById('alloc-summary').innerHTML = items.length
-      ? `<span style="font-size:13px;color:var(--muted)">共 ${items.length} 条　已调转 <span style="color:var(--success);font-weight:600">${ready}</span>　等待 <span style="color:#d97706;font-weight:600">${waiting}</span></span>`
+      ? `<span style="font-size:13px;color:var(--muted)">共 ${items.length} 条　已调转 <span style="color:var(--success);font-weight:600">${ready}</span>　等待 <span style="color:var(--warn);font-weight:600">${waiting}</span></span>`
       : '';
   } catch (e) { toast('查询失败: ' + e.message, 'err'); }
 }
@@ -2360,8 +2360,8 @@ function renderAllocTable(items) {
   _allocItemsCache = items;
   document.getElementById('alloc-tbody').innerHTML = items.map(item => {
     const s = ALLOC_STATUS[item.status] || ALLOC_STATUS.waiting;
-    const badge = `<span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span>`;
-    const stockDisplay = item.current_stock === null ? '—' : `<strong style="color:${item.current_stock < item.quantity ? '#d97706' : 'inherit'}">${item.current_stock}</strong>`;
+    const badge = `<span style="font-size:11px;padding:2px 6px;border-radius:4px;white-space:nowrap;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span>`;
+    const stockDisplay = item.current_stock === null ? '—' : `<strong style="color:${item.current_stock < item.quantity ? 'var(--warn)' : 'inherit'}">${item.current_stock}</strong>`;
     const editable = item.status !== 'shipped' && item.status !== 'cancelled';
     let ops = '';
     if (item.status === 'waiting') {
@@ -2371,18 +2371,19 @@ function renderAllocTable(items) {
       ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocRevert(${item.id})">撤销</button> `;
     }
     if (editable) {
-      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:#6366f1" onclick="allocShip(${item.id})">标记已出库</button> `;
+      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:var(--accent)" onclick="allocShip(${item.id})">标记已出库</button> `;
       ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocEditQty(${item.id})">编辑数量</button> `;
-      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:#9ca3af" onclick="allocCancel(${item.id})">取消</button>`;
+      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:var(--muted)" onclick="allocCancel(${item.id})">取消</button>`;
     }
-    return `<tr data-alloc-id="${item.id}" style="background:${item.status === 'waiting' && item.current_stock !== null && item.current_stock < item.quantity ? '#fffbeb' : ''}">
-      <td style="font-size:12px">${esc(item.planned_outbound_date)}</td>
-      <td><strong>${esc(item.customer_name)}</strong></td>
-      <td><code style="font-size:11px">${esc(item.jan_code)}</code></td>
+    const rowBg = item.status === 'waiting' && item.current_stock !== null && item.current_stock < item.quantity ? 'var(--warn-bg)' : '';
+    return `<tr data-alloc-id="${item.id}" style="background:${rowBg}">
+      <td style="font-size:12px;white-space:nowrap">${esc(item.planned_outbound_date)}</td>
+      <td style="white-space:nowrap"><strong>${esc(item.customer_name)}</strong></td>
+      <td style="white-space:nowrap"><code style="font-size:11px">${esc(item.jan_code)}</code></td>
       <td style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.product_name||'')}">${esc(item.product_name||'—')}</td>
-      <td style="text-align:center" class="alloc-qty-cell">${item.quantity}</td>
-      <td style="text-align:center">${stockDisplay}</td>
-      <td>${badge}</td>
+      <td style="text-align:center;white-space:nowrap" class="alloc-qty-cell">${item.quantity}</td>
+      <td style="text-align:center;white-space:nowrap">${stockDisplay}</td>
+      <td style="white-space:nowrap">${badge}</td>
       <td style="white-space:nowrap">${ops}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">暂无数据</td></tr>';
