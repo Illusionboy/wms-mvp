@@ -1,6 +1,7 @@
 import csv
 import io
 from datetime import datetime
+from urllib.parse import quote
 
 import openpyxl
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile, status
@@ -98,6 +99,9 @@ async def export_inventory(
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     filename = f"库存_{warehouse_name}_{timestamp}.{fmt}"
+    # Content-Disposition headers must be latin-1; CJK filenames need RFC 5987 encoding
+    # (filename*=UTF-8''...) plus an ASCII fallback, or Starlette raises UnicodeEncodeError.
+    content_disposition = f"attachment; filename=\"export.{fmt}\"; filename*=UTF-8''{quote(filename)}"
 
     if fmt == "csv":
         buf = io.StringIO()
@@ -108,7 +112,7 @@ async def export_inventory(
         return StreamingResponse(
             io.BytesIO(content),
             media_type="text/csv; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": content_disposition},
         )
 
     # xlsx
@@ -130,7 +134,7 @@ async def export_inventory(
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": content_disposition},
     )
 
 
