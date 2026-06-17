@@ -67,6 +67,7 @@ def _parse_allocation_excel(
       - 每个 sheet 名即客户代码（mm / kk / cp 等）
       - 每行有 JAN（13位纯数字）和数量两列；列名不敏感，只要含 jan/JAN 和 数量/qty/quantity
       - 数量 ≤ 0 的行跳过
+      - JAN 跨多行合并居中、数量分行填写时，合并单元格按锚点值回填，同 JAN 多行数量自动相加
     """
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     rows: list[tuple[str, str, int]] = []
@@ -75,6 +76,16 @@ def _parse_allocation_excel(
         customer_name = sheet.title.strip()
         if not customer_name:
             continue
+
+        # Vertically merged cells (e.g. one JAN spanning rows 33-34, centered) leave
+        # value=None on every row except the top-left anchor; build a lookup so those
+        # rows resolve to the anchor's value instead of being silently dropped.
+        merged_value_map: dict[tuple[int, int], object] = {}
+        for merged_range in sheet.merged_cells.ranges:
+            anchor_value = sheet.cell(merged_range.min_row, merged_range.min_col).value
+            for r in range(merged_range.min_row, merged_range.max_row + 1):
+                for c in range(merged_range.min_col, merged_range.max_col + 1):
+                    merged_value_map[(r, c)] = anchor_value
 
         # detect header row
         header_row_idx: int | None = None
@@ -98,8 +109,14 @@ def _parse_allocation_excel(
             continue
 
         for row in sheet.iter_rows(min_row=header_row_idx + 1):
-            jan_raw = row[jan_col - 1].value
-            qty_raw = row[qty_col - 1].value
+            jan_cell = row[jan_col - 1]
+            qty_cell = row[qty_col - 1]
+            jan_raw = jan_cell.value
+            if jan_raw is None:
+                jan_raw = merged_value_map.get((jan_cell.row, jan_cell.column))
+            qty_raw = qty_cell.value
+            if qty_raw is None:
+                qty_raw = merged_value_map.get((qty_cell.row, qty_cell.column))
             if jan_raw is None or qty_raw is None:
                 continue
             # Excel/Sheets often stores JAN as a number (e.g. 4987227028276.0);
@@ -117,7 +134,15 @@ def _parse_allocation_excel(
                 continue
             rows.append((customer_name, jan, qty))
 
-    return rows
+    # Same (customer, jan) can legitimately appear on multiple rows — merged-cell
+    # splits, or simply repeated line items — sum them instead of letting the
+    # later UPSERT silently overwrite the earlier quantity.
+    summed: dict[tuple[str, str], int] = {}
+    for customer_name, jan, qty in rows:
+        key = (customer_name, jan)
+        summed[key] = summed.get(key, 0) + qty
+
+    return [(customer_name, jan, qty) for (customer_name, jan), qty in summed.items()]
 
 
 # ---------------------------------------------------------------------------
