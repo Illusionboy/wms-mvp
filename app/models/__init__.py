@@ -1,3 +1,4 @@
+from app.models.allocation_conflict_log import AllocationConflictLog
 from app.models.chat_report_draft import ChatReportDraft
 from app.models.customer_allocation import CustomerAllocation
 from app.models.telegram_allowed_user import TelegramAllowedUser
@@ -15,6 +16,7 @@ from app.models.user import User
 from app.models.warehouse import Warehouse
 
 __all__ = [
+    "AllocationConflictLog",
     "Customer",
     "ChatReportDraft",
     "CustomerAllocation",

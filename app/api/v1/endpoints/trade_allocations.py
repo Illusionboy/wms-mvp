@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_auth
 from app.db.session import get_db_session
 from app.schemas.inventory import (
+    AllocationConflictLogRead,
     BulkCancelAllocationResult,
+    BulkShipAllocationResult,
     CustomerAllocationRead,
     CustomerAllocationStatusResult,
     CustomerAllocationUploadResult,
@@ -15,9 +17,11 @@ from app.schemas.inventory import (
 from app.services.auth import CurrentUser
 from app.services.customer_allocations import (
     bulk_cancel_allocations,
+    bulk_mark_shipped_allocations,
     cancel_allocation,
     get_allocation_status,
     get_allocation_summary,
+    get_conflict_logs,
     mark_as_shipped,
     revert_to_waiting,
     try_reserve_one,
@@ -205,3 +209,36 @@ async def bulk_cancel_reservation(
     """
     count = await bulk_cancel_allocations(session, customer_name, planned_outbound_date)
     return BulkCancelAllocationResult(cancelled_count=count)
+
+
+@router.post(
+    "/allocations/bulk-ship",
+    response_model=BulkShipAllocationResult,
+    dependencies=[Depends(require_auth)],
+)
+async def bulk_ship_reservation(
+    customer_name: str,
+    planned_outbound_date: date,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> BulkShipAllocationResult:
+    """按客户名+计划出库日期一键标记已出库（典型用途：整批货已交给客户，逐条点太慢）。
+
+    只标记 waiting/reserved 状态的行；shipped/cancelled 不受影响。
+    """
+    count = await bulk_mark_shipped_allocations(session, customer_name, planned_outbound_date)
+    return BulkShipAllocationResult(shipped_count=count)
+
+
+@router.get("/allocation-conflicts", response_model=list[AllocationConflictLogRead])
+async def list_allocation_conflicts(
+    jan_code: str | None = None,
+    customer_name: str | None = None,
+    limit: int = 200,
+    session: AsyncSession = Depends(get_db_session),
+) -> list[AllocationConflictLogRead]:
+    """查询预留冲突日志：哪些客户的"已调转"预留因库存被外部出库/调整消耗而被迫退回等待中。
+
+    用于排查"系统显示已调转但实际发不出货"的情况，按时间倒序返回。
+    """
+    return await get_conflict_logs(session, jan_code=jan_code, customer_name=customer_name, limit=limit)

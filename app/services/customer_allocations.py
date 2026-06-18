@@ -22,11 +22,13 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.allocation_conflict_log import AllocationConflictLog
 from app.models.customer_allocation import CustomerAllocation
 from app.models.inventory_record import InventoryRecord
 from app.models.product import Product
 from app.models.warehouse import Warehouse
 from app.schemas.inventory import (
+    AllocationConflictLogRead,
     CustomerAllocationRead,
     CustomerAllocationStatusResult,
     CustomerAllocationUploadResult,
@@ -154,6 +156,7 @@ async def _revalidate_for_jan(
     jan_code: str,
     warehouse: Warehouse,
     exclude_ids: set[int] | None = None,
+    trigger: str = "revalidate",
 ) -> None:
     """原子地重分配该 JAN 的所有 waiting/reserved 行。
 
@@ -163,6 +166,10 @@ async def _revalidate_for_jan(
     `exclude_ids`：本次重新评估时跳过这些行（不参与排队，也不占用库存额度）。
     用于手动撤销场景——撤销后若不排除自身，库存充足时会被立即重新判定为 reserved，
     导致撤销操作看起来毫无效果。
+
+    任何 reserved → waiting 的降级（即库存不再能支撑某条原本已确认的预留，
+    典型场景是该 JAN 的库存被预留系统之外的出库/调整消耗掉）都会写入
+    `AllocationConflictLog`，`trigger` 标注是哪个动作触发了这次重新评估。
     """
     inv_record = await session.scalar(
         select(InventoryRecord).where(
@@ -186,7 +193,17 @@ async def _revalidate_for_jan(
     running = 0
     for alloc in allocs:
         running += alloc.quantity
-        alloc.status = "reserved" if running <= current_stock else "waiting"
+        new_status = "reserved" if running <= current_stock else "waiting"
+        if alloc.status == "reserved" and new_status == "waiting":
+            session.add(AllocationConflictLog(
+                jan_code=alloc.jan_code,
+                customer_name=alloc.customer_name,
+                planned_outbound_date=alloc.planned_outbound_date,
+                quantity=alloc.quantity,
+                current_stock=current_stock,
+                trigger=trigger,
+            ))
+        alloc.status = new_status
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +263,7 @@ async def upsert_allocations_from_excel(
 
     # 重新评估所有受影响的 JAN
     for jan_code in affected_jans:
-        await _revalidate_for_jan(session, jan_code, warehouse)
+        await _revalidate_for_jan(session, jan_code, warehouse, trigger="excel_upload")
 
     await session.flush()
 
@@ -315,7 +332,39 @@ async def try_auto_reserve(
     if has_waiting is None:
         return
 
-    await _revalidate_for_jan(session, jan_code, warehouse)
+    await _revalidate_for_jan(session, jan_code, warehouse, trigger="stock_in")
+
+
+async def check_for_reservation_conflict(
+    session: AsyncSession,
+    jan_code: str,
+    warehouse_id: int,
+    trigger: str,
+) -> None:
+    """出库/调整库存后调用，检测该 JAN 是否有 reserved 预留因库存被消耗而不再满足。
+
+    出库渠道（手动出库、秦丝同步、贸易出库、乐天订单等）和盘点调整都不知道
+    `CustomerAllocation` 的存在，可能消耗掉本应留给某客户的库存。若不主动重新评估，
+    该客户的预留会一直显示"已调转"，但实际库存已经不够——这里在每次出库/调整后
+    重新核算，库存不足的 reserved 行会自动降级为 waiting，并写入冲突日志。
+
+    在调用方的事务内运行（不自行 commit），由调用方统一提交。
+    只在仓库为普通仓库且存在 reserved 行时执行重分配。
+    """
+    warehouse = await session.get(Warehouse, warehouse_id)
+    if warehouse is None or warehouse.name != ALLOCATION_WAREHOUSE_NAME:
+        return
+
+    has_reserved = await session.scalar(
+        select(CustomerAllocation.id).where(
+            CustomerAllocation.jan_code == jan_code,
+            CustomerAllocation.status == "reserved",
+        ).limit(1)
+    )
+    if has_reserved is None:
+        return
+
+    await _revalidate_for_jan(session, jan_code, warehouse, trigger=trigger)
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +398,7 @@ async def update_allocation_quantity(
         select(Warehouse).where(Warehouse.name == ALLOCATION_WAREHOUSE_NAME)
     )
     if warehouse:
-        await _revalidate_for_jan(session, alloc.jan_code, warehouse)
+        await _revalidate_for_jan(session, alloc.jan_code, warehouse, trigger="manual_quantity_edit")
 
     await session.commit()
     await session.refresh(alloc)
@@ -375,7 +424,7 @@ async def try_reserve_one(
     if warehouse is None:
         raise ValueError(f"仓库「{ALLOCATION_WAREHOUSE_NAME}」不存在")
 
-    await _revalidate_for_jan(session, alloc.jan_code, warehouse)
+    await _revalidate_for_jan(session, alloc.jan_code, warehouse, trigger="manual_reserve")
     await session.flush()
 
     # Refresh to get updated status
@@ -408,7 +457,7 @@ async def revert_to_waiting(
     )
     if warehouse:
         # exclude self: 否则库存充足时会被立即重新判定为 reserved，撤销形同没做
-        await _revalidate_for_jan(session, alloc.jan_code, warehouse, exclude_ids={alloc.id})
+        await _revalidate_for_jan(session, alloc.jan_code, warehouse, exclude_ids={alloc.id}, trigger="manual_revert")
 
     await session.commit()
     await session.refresh(alloc)
@@ -438,7 +487,7 @@ async def cancel_allocation(
             select(Warehouse).where(Warehouse.name == ALLOCATION_WAREHOUSE_NAME)
         )
         if warehouse:
-            await _revalidate_for_jan(session, alloc.jan_code, warehouse)
+            await _revalidate_for_jan(session, alloc.jan_code, warehouse, trigger="manual_cancel")
 
     await session.commit()
     await session.refresh(alloc)
@@ -471,7 +520,7 @@ async def mark_as_shipped(
         select(Warehouse).where(Warehouse.name == ALLOCATION_WAREHOUSE_NAME)
     )
     if warehouse:
-        await _revalidate_for_jan(session, alloc.jan_code, warehouse)
+        await _revalidate_for_jan(session, alloc.jan_code, warehouse, trigger="mark_shipped")
 
     await session.commit()
     await session.refresh(alloc)
@@ -515,7 +564,46 @@ async def bulk_cancel_allocations(
         )
         if warehouse:
             for jan_code in affected_jans:
-                await _revalidate_for_jan(session, jan_code, warehouse)
+                await _revalidate_for_jan(session, jan_code, warehouse, trigger="bulk_cancel")
+
+    await session.commit()
+    return len(allocs)
+
+
+async def bulk_mark_shipped_allocations(
+    session: AsyncSession,
+    customer_name: str,
+    planned_outbound_date: date,
+) -> int:
+    """按客户名+计划出库日期一键标记已出库（典型用途：整批货已交给客户，逐条点太慢）。
+
+    只标记 waiting/reserved 状态的行（shipped/cancelled 不受影响）。
+    返回实际标记的行数。
+    """
+    allocs = (await session.scalars(
+        select(CustomerAllocation).where(
+            CustomerAllocation.customer_name == customer_name,
+            CustomerAllocation.planned_outbound_date == planned_outbound_date,
+            CustomerAllocation.status.in_(["waiting", "reserved"]),
+        ).with_for_update()
+    )).all()
+
+    if not allocs:
+        return 0
+
+    affected_jans: set[str] = set()
+    for alloc in allocs:
+        alloc.status = "shipped"
+        affected_jans.add(alloc.jan_code)
+
+    await session.flush()
+
+    warehouse = await session.scalar(
+        select(Warehouse).where(Warehouse.name == ALLOCATION_WAREHOUSE_NAME)
+    )
+    if warehouse:
+        for jan_code in affected_jans:
+            await _revalidate_for_jan(session, jan_code, warehouse, trigger="mark_shipped")
 
     await session.commit()
     return len(allocs)
@@ -595,3 +683,38 @@ async def get_allocation_summary(
         shipped_count=sum(1 for i in items if i.status == "shipped"),
         items=items,
     )
+
+
+# ---------------------------------------------------------------------------
+# 查询：预留冲突日志
+# ---------------------------------------------------------------------------
+
+async def get_conflict_logs(
+    session: AsyncSession,
+    jan_code: str | None = None,
+    customer_name: str | None = None,
+    limit: int = 200,
+) -> list[AllocationConflictLogRead]:
+    """查询预留冲突日志（reserved→waiting 的降级事件），按时间倒序。"""
+    stmt = select(AllocationConflictLog)
+    if jan_code:
+        stmt = stmt.where(AllocationConflictLog.jan_code == jan_code)
+    if customer_name:
+        stmt = stmt.where(AllocationConflictLog.customer_name == customer_name)
+    stmt = stmt.order_by(AllocationConflictLog.created_at.desc()).limit(limit)
+
+    logs = (await session.scalars(stmt)).all()
+    if not logs:
+        return []
+
+    jan_codes = list({log.jan_code for log in logs})
+    products_map: dict[str, str] = {}
+    for p in (await session.scalars(select(Product).where(Product.jan_code.in_(jan_codes)))).all():
+        products_map[p.jan_code] = p.name_jp
+
+    result = []
+    for log in logs:
+        r = AllocationConflictLogRead.model_validate(log)
+        r.product_name = products_map.get(log.jan_code)
+        result.append(r)
+    return result

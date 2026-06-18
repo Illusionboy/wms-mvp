@@ -527,6 +527,10 @@ class BulkCancelAllocationResult(BaseModel):
     cancelled_count: int
 
 
+class BulkShipAllocationResult(BaseModel):
+    shipped_count: int
+
+
 class CustomerAllocationStatusResult(BaseModel):
     customer_name: str
     planned_outbound_date: date
@@ -534,6 +538,20 @@ class CustomerAllocationStatusResult(BaseModel):
     waiting_count: int
     shipped_count: int
     items: list[CustomerAllocationRead] = Field(default_factory=list)
+
+
+class AllocationConflictLogRead(BaseModel):
+    id: int
+    jan_code: str
+    product_name: str | None = None  # joined from products table
+    customer_name: str
+    planned_outbound_date: date
+    quantity: int
+    current_stock: int
+    trigger: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SafetyStockRecommendation(BaseModel):

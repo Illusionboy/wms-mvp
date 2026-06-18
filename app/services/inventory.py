@@ -294,6 +294,10 @@ async def stock_out_item(
     )
     session.add(transaction)
     await session.flush()
+    # Outbound flows don't know about CustomerAllocation; re-check whether any
+    # reserved allocation for this JAN is no longer backed by enough stock.
+    from app.services.customer_allocations import check_for_reservation_conflict  # lazy to avoid circular import
+    await check_for_reservation_conflict(session, payload.sku, payload.warehouse_id, trigger="stock_out")
     if commit:
         await session.commit()
     refreshed_record = await _get_inventory_record_for_response(session, record.id)
@@ -338,6 +342,9 @@ async def adjust_stock_item(
     )
     session.add(transaction)
     await session.flush()
+    if quantity_delta < 0:
+        from app.services.customer_allocations import check_for_reservation_conflict  # lazy to avoid circular import
+        await check_for_reservation_conflict(session, payload.sku, payload.warehouse_id, trigger="stock_adjust")
     if commit:
         await session.commit()
     refreshed_record = await _get_inventory_record_for_response(session, record.id)

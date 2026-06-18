@@ -818,7 +818,8 @@ tr:hover td { background: var(--accent-bg); }
             </select>
           </div>
           <button class="btn btn-ghost" onclick="loadAllocations()" style="margin-bottom:0">查询</button>
-          <button class="btn btn-ghost" style="margin-bottom:0;color:var(--danger)" onclick="bulkCancelAllocations()">批量取消（按客户+日期）</button>
+          <button class="btn btn-ghost" style="margin-bottom:0;color:var(--accent)" onclick="bulkShipAllocations()">一键标记出库（按客户+日期）</button>
+          <button class="btn btn-ghost" style="margin-bottom:0;color:var(--danger)" onclick="bulkCancelAllocations()">一键取消（按客户+日期）</button>
         </div>
         <div id="alloc-summary" style="margin-bottom:8px"></div>
         <div style="overflow-x:auto">
@@ -834,6 +835,32 @@ tr:hover td { background: var(--accent-bg); }
               <th>操作</th>
             </tr></thead>
             <tbody id="alloc-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 预留冲突日志 -->
+      <div class="card" style="margin-top:16px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <strong style="font-size:14px;color:var(--warn)">⚠ 预留冲突日志</strong>
+          <button class="btn btn-ghost btn-sm" onclick="loadConflictLogs()">刷新</button>
+        </div>
+        <div class="section-sub" style="margin:0 0 10px">
+          某客户已调转（reserved）的预留，因库存被预留系统之外的出库/调整消耗而被迫退回等待中时，记录在此。
+        </div>
+        <div style="overflow-x:auto">
+          <table class="table" id="alloc-conflict-table">
+            <thead><tr>
+              <th>时间</th>
+              <th>JAN</th>
+              <th>商品名</th>
+              <th>客户</th>
+              <th>计划出库日期</th>
+              <th>受影响数量</th>
+              <th>当时库存</th>
+              <th>触发原因</th>
+            </tr></thead>
+            <tbody id="alloc-conflict-tbody"></tbody>
           </table>
         </div>
       </div>
@@ -1334,6 +1361,7 @@ function nav(btn) {
   if (btn.dataset.section === 'dashboard') loadDashboard();
   if (btn.dataset.section === 'settings') loadSettingsLists();
   if (btn.dataset.section === 'qinsi') checkQinsiAuth();
+  if (btn.dataset.section === 'alloc') loadConflictLogs();
   if (['supplier-history','customer-history'].includes(btn.dataset.section)) loadCounterpartyLists();
   closeSidebar();
   document.getElementById('main').scrollTo({ top: 0 });
@@ -2367,9 +2395,6 @@ function renderAllocTable(items) {
     if (item.status === 'waiting') {
       ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocReserve(${item.id})">调转</button> `;
     }
-    if (item.status === 'reserved') {
-      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocRevert(${item.id})">撤销</button> `;
-    }
     if (editable) {
       ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:var(--accent)" onclick="allocShip(${item.id})">标记已出库</button> `;
       ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocEditQty(${item.id})">编辑数量</button> `;
@@ -2387,6 +2412,36 @@ function renderAllocTable(items) {
       <td style="white-space:nowrap">${ops}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">暂无数据</td></tr>';
+}
+
+const ALLOC_CONFLICT_TRIGGER_LABELS = {
+  stock_out: '出库',
+  stock_adjust: '库存调整',
+  excel_upload: '上传补货需求',
+  stock_in: '入库',
+  manual_quantity_edit: '手动调整数量',
+  manual_reserve: '手动调转',
+  manual_revert: '手动撤销',
+  manual_cancel: '取消预留',
+  mark_shipped: '标记已出库',
+  bulk_cancel: '批量取消',
+  revalidate: '重新评估',
+};
+
+async function loadConflictLogs() {
+  try {
+    const logs = await api('GET', '/trade/allocation-conflicts?limit=200');
+    document.getElementById('alloc-conflict-tbody').innerHTML = logs.map(l => `<tr>
+      <td style="font-size:12px;white-space:nowrap">${esc(fmtDate(l.created_at))}</td>
+      <td style="white-space:nowrap"><code style="font-size:11px">${esc(l.jan_code)}</code></td>
+      <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.product_name||'')}">${esc(l.product_name||'—')}</td>
+      <td style="white-space:nowrap"><strong>${esc(l.customer_name)}</strong></td>
+      <td style="font-size:12px;white-space:nowrap">${esc(l.planned_outbound_date)}</td>
+      <td style="text-align:center;white-space:nowrap;color:var(--warn);font-weight:600">${l.quantity}</td>
+      <td style="text-align:center;white-space:nowrap">${l.current_stock}</td>
+      <td style="white-space:nowrap">${esc(ALLOC_CONFLICT_TRIGGER_LABELS[l.trigger] || l.trigger)}</td>
+    </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">暂无冲突记录</td></tr>';
+  } catch (e) { toast('查询冲突日志失败: ' + e.message, 'err'); }
 }
 
 async function allocReserve(id) {
@@ -2429,7 +2484,7 @@ async function bulkCancelAllocations() {
   const customer = document.getElementById('alloc-filter-customer').value.trim();
   const date = document.getElementById('alloc-filter-date').value;
   if (!customer || !date) {
-    toast('批量取消需要同时填写客户代码和出库日期，避免误删', 'err');
+    toast('一键取消需要同时填写客户代码和出库日期，避免误删', 'err');
     return;
   }
   if (!confirm(`确认取消「${customer}」在 ${date} 的所有预留记录？（已出库/已取消的不受影响）`)) return;
@@ -2437,7 +2492,22 @@ async function bulkCancelAllocations() {
     const res = await api('POST', `/trade/allocations/bulk-cancel?customer_name=${encodeURIComponent(customer)}&planned_outbound_date=${encodeURIComponent(date)}`);
     toast(`已取消 ${res.cancelled_count} 条`, 'ok');
     loadAllocations();
-  } catch (e) { toast('批量取消失败: ' + e.message, 'err'); }
+  } catch (e) { toast('一键取消失败: ' + e.message, 'err'); }
+}
+
+async function bulkShipAllocations() {
+  const customer = document.getElementById('alloc-filter-customer').value.trim();
+  const date = document.getElementById('alloc-filter-date').value;
+  if (!customer || !date) {
+    toast('一键标记出库需要同时填写客户代码和出库日期，避免误标', 'err');
+    return;
+  }
+  if (!confirm(`确认「${customer}」在 ${date} 的所有等待中/已调转预留都已实际出库？\n（系统不会自动核对秦丝/贸易出库记录，请确保你已经在对应渠道完成了真实出库操作）`)) return;
+  try {
+    const res = await api('POST', `/trade/allocations/bulk-ship?customer_name=${encodeURIComponent(customer)}&planned_outbound_date=${encodeURIComponent(date)}`);
+    toast(`已标记 ${res.shipped_count} 条为已出库`, 'ok');
+    loadAllocations();
+  } catch (e) { toast('一键标记出库失败: ' + e.message, 'err'); }
 }
 
 function allocEditQty(id) {
