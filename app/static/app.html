@@ -336,6 +336,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="product-history" onclick="nav(this)">
         <span class="icon">○</span> 商品进出库
       </button>
+      <button class="nav-item" data-section="system-log" onclick="nav(this)">
+        <span class="icon">⚠</span> 日志查看
+      </button>
     </div>
 
     <div class="nav-group">
@@ -1152,6 +1155,48 @@ tr:hover td { background: var(--accent-bg); }
       <div id="ph-result" style="margin-top:12px"></div>
     </div>
 
+    <!-- System Log -->
+    <div class="section" id="section-system-log">
+      <div class="section-title">日志查看</div>
+      <div class="section-sub">系统异常事件统一日志：出库/调整后出现负库存、客户预留冲突等，按时间倒序</div>
+      <div class="card">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+          <div class="form-row" style="margin:0">
+            <label>分类</label>
+            <select id="sl-filter-category">
+              <option value="">全部</option>
+              <option value="negative_stock">负库存</option>
+              <option value="allocation_conflict">预留冲突</option>
+            </select>
+          </div>
+          <div class="form-row" style="margin:0">
+            <label>级别</label>
+            <select id="sl-filter-level">
+              <option value="">全部</option>
+              <option value="warning">警告</option>
+              <option value="error">错误</option>
+              <option value="info">信息</option>
+            </select>
+          </div>
+          <button class="btn btn-ghost" onclick="loadSystemLogs()" style="margin-bottom:0">查询</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="table" id="system-log-table">
+            <thead><tr>
+              <th>时间</th>
+              <th>分类</th>
+              <th>级别</th>
+              <th>JAN</th>
+              <th>商品名</th>
+              <th>仓库</th>
+              <th>说明</th>
+            </tr></thead>
+            <tbody id="system-log-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- Products -->
     <div class="section" id="section-products">
       <div class="section-title">商品管理</div>
@@ -1362,6 +1407,7 @@ function nav(btn) {
   if (btn.dataset.section === 'settings') loadSettingsLists();
   if (btn.dataset.section === 'qinsi') checkQinsiAuth();
   if (btn.dataset.section === 'alloc') loadConflictLogs();
+  if (btn.dataset.section === 'system-log') loadSystemLogs();
   if (['supplier-history','customer-history'].includes(btn.dataset.section)) loadCounterpartyLists();
   closeSidebar();
   document.getElementById('main').scrollTo({ top: 0 });
@@ -2442,6 +2488,39 @@ async function loadConflictLogs() {
       <td style="white-space:nowrap">${esc(ALLOC_CONFLICT_TRIGGER_LABELS[l.trigger] || l.trigger)}</td>
     </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">暂无冲突记录</td></tr>';
   } catch (e) { toast('查询冲突日志失败: ' + e.message, 'err'); }
+}
+
+const SYSTEM_LOG_CATEGORY_LABELS = {
+  negative_stock: '负库存',
+  allocation_conflict: '预留冲突',
+};
+const SYSTEM_LOG_LEVEL_STYLE = {
+  warning: { bg: 'var(--warn-bg)', color: 'var(--warn)' },
+  error: { bg: 'var(--danger-bg)', color: 'var(--danger)' },
+  info: { bg: 'var(--accent-bg)', color: 'var(--accent)' },
+};
+
+async function loadSystemLogs() {
+  const category = document.getElementById('sl-filter-category').value;
+  const level = document.getElementById('sl-filter-level').value;
+  let url = '/analytics/system-logs?limit=200';
+  if (category) url += `&category=${encodeURIComponent(category)}`;
+  if (level) url += `&level=${encodeURIComponent(level)}`;
+  try {
+    const logs = await api('GET', url);
+    document.getElementById('system-log-tbody').innerHTML = logs.map(l => {
+      const s = SYSTEM_LOG_LEVEL_STYLE[l.level] || SYSTEM_LOG_LEVEL_STYLE.info;
+      return `<tr>
+      <td style="font-size:12px;white-space:nowrap">${esc(fmtDate(l.created_at))}</td>
+      <td style="white-space:nowrap">${esc(SYSTEM_LOG_CATEGORY_LABELS[l.category] || l.category)}</td>
+      <td style="white-space:nowrap"><span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${esc(l.level)}</span></td>
+      <td style="white-space:nowrap"><code style="font-size:11px">${esc(l.jan_code||'—')}</code></td>
+      <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.product_name||'')}">${esc(l.product_name||'—')}</td>
+      <td style="font-size:12px;white-space:nowrap">${esc(l.warehouse_name||'—')}</td>
+      <td style="font-size:12px">${esc(l.message)}</td>
+    </tr>`;
+    }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--muted)">暂无日志</td></tr>';
+  } catch (e) { toast('查询系统日志失败: ' + e.message, 'err'); }
 }
 
 async function allocReserve(id) {

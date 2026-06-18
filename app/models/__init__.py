@@ -11,6 +11,7 @@ from app.models.qinsi_scrape_cache import QinsiScrapeCache
 from app.models.rakuten_order_draft import RakutenOrderDraft
 from app.models.rakuten_shipment_draft import RakutenShipmentDraft
 from app.models.stock_transaction import StockTransaction, StockTransactionType
+from app.models.system_log import SystemLog
 from app.models.trade_shipment_draft import TradeShipmentDraft
 from app.models.user import User
 from app.models.warehouse import Warehouse
@@ -29,6 +30,7 @@ __all__ = [
     "RakutenShipmentDraft",
     "StockTransaction",
     "StockTransactionType",
+    "SystemLog",
     "TelegramAllowedUser",
     "TradeShipmentDraft",
     "User",

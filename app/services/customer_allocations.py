@@ -203,6 +203,14 @@ async def _revalidate_for_jan(
                 current_stock=current_stock,
                 trigger=trigger,
             ))
+            from app.services.system_log import write_system_log  # lazy to avoid circular import
+            await write_system_log(
+                session,
+                category="allocation_conflict",
+                message=f"客户「{alloc.customer_name}」预留 {alloc.quantity} 件因库存不足（当前 {current_stock}）退回等待中",
+                jan_code=alloc.jan_code,
+                warehouse_name=warehouse.name,
+            )
         alloc.status = new_status
 
 

@@ -278,6 +278,16 @@ async def stock_out_item(
 
     record.quantity -= payload.quantity
     await session.flush()
+    if record.quantity < 0:
+        warehouse_for_log = await session.get(Warehouse, payload.warehouse_id)
+        from app.services.system_log import write_system_log  # lazy to avoid circular import
+        await write_system_log(
+            session,
+            category="negative_stock",
+            message=f"出库后库存变为负数：当前库存 {record.quantity}（出库 {payload.quantity}）",
+            jan_code=payload.sku,
+            warehouse_name=warehouse_for_log.name if warehouse_for_log else None,
+        )
     low_stock_alert = None
     if not payload.suppress_low_stock_alert:
         low_stock_alert = await _maybe_create_low_stock_alert(session=session, jan_code=payload.sku)
@@ -329,6 +339,16 @@ async def adjust_stock_item(
     quantity_delta = payload.actual_quantity - previous_quantity
     record.quantity = payload.actual_quantity
     await session.flush()
+    if record.quantity < 0:
+        warehouse_for_log = await session.get(Warehouse, payload.warehouse_id)
+        from app.services.system_log import write_system_log  # lazy to avoid circular import
+        await write_system_log(
+            session,
+            category="negative_stock",
+            message=f"调整后库存变为负数：当前库存 {record.quantity}",
+            jan_code=payload.sku,
+            warehouse_name=warehouse_for_log.name if warehouse_for_log else None,
+        )
     low_stock_alert = await _maybe_create_low_stock_alert(session=session, jan_code=payload.sku)
     transaction = _create_stock_transaction(
         record=record,

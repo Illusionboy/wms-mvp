@@ -554,6 +554,19 @@ class AllocationConflictLogRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SystemLogRead(BaseModel):
+    id: int
+    category: str
+    level: str
+    message: str
+    jan_code: str | None = None
+    product_name: str | None = None  # joined from products table
+    warehouse_name: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class SafetyStockRecommendation(BaseModel):
     jan_code: str
     name_jp: str

@@ -6,6 +6,7 @@
 - GET /analytics/customer-history      — 按客户 + 日期范围查询出库事务
 - GET /analytics/product-history       — 按 JAN 码 + 日期范围查询所有事务
 - GET /analytics/safety-stock-recommendations — 动态安全库存/再订货点预警
+- GET /analytics/system-logs            — 系统异常日志（负库存、预留冲突等）
 """
 from datetime import date
 
@@ -18,8 +19,9 @@ from app.db.session import get_db_session
 from app.models.inventory_record import InventoryRecord
 from app.models.product import Product
 from app.models.stock_transaction import StockTransaction, StockTransactionType
-from app.schemas.inventory import SafetyStockRecommendation
+from app.schemas.inventory import SafetyStockRecommendation, SystemLogRead
 from app.services.inventory_planning import list_safety_stock_recommendations
+from app.services.system_log import get_system_logs
 
 router = APIRouter()
 
@@ -274,3 +276,14 @@ async def safety_stock_recommendations(
     返回当前库存量低于建议再订货点（ROP）的商品列表。详见 docs/safety_stock_manage.md。
     """
     return await list_safety_stock_recommendations(session, warehouse_id=warehouse_id)
+
+
+@router.get("/system-logs", response_model=list[SystemLogRead])
+async def system_logs(
+    category: str | None = Query(default=None, description="negative_stock / allocation_conflict 等"),
+    level: str | None = Query(default=None, description="warning / error / info"),
+    limit: int = Query(default=200, le=1000),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[SystemLogRead]:
+    """系统异常事件统一日志：出库/调整后出现负库存、预留冲突等，按时间倒序。"""
+    return await get_system_logs(session, category=category, level=level, limit=limit)
