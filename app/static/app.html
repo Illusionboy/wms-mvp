@@ -806,9 +806,19 @@ tr:hover td { background: var(--accent-bg); }
             <label>计划出库日期</label>
             <input type="date" id="alloc-overview-date">
           </div>
+          <div class="form-row" style="margin:0">
+            <label>只看状态</label>
+            <select id="alloc-overview-status" onchange="renderDailyOverview()">
+              <option value="">全部</option>
+              <option value="waiting">等待中</option>
+              <option value="reserved">已调转</option>
+              <option value="shipped">已出库</option>
+              <option value="cancelled">已取消</option>
+            </select>
+          </div>
           <button class="btn btn-ghost" onclick="loadDailyOverview()" style="margin-bottom:0">查看当天所有客户预留情况</button>
         </div>
-        <div class="section-sub" style="margin:0 0 10px">装柜前一次性检查：该日期下所有客户的预留齐货情况，按客户分组，等待中（缺货）的商品高亮显示。</div>
+        <div class="section-sub" style="margin:0 0 10px">装柜前一次性检查：该日期下所有客户的预留齐货情况，按客户分组，等待中（缺货）的商品高亮显示。筛选状态时，已没有匹配商品的客户不再显示。</div>
         <div id="alloc-overview-result"></div>
       </div>
 
@@ -2401,49 +2411,62 @@ const ALLOC_STATUS = {
   cancelled: { label: '已取消', color: 'var(--muted)', bg: 'var(--border)' },
 };
 
+let _dailyOverviewCache = [];
+
 async function loadDailyOverview() {
   const date = document.getElementById('alloc-overview-date').value;
   const container = document.getElementById('alloc-overview-result');
   if (!date) { toast('请选择计划出库日期', 'err'); return; }
   container.innerHTML = '<div class="section-sub">加载中…</div>';
   try {
-    const results = await api('GET', `/trade/allocations/daily-overview?planned_outbound_date=${encodeURIComponent(date)}`);
-    if (!results.length) {
-      container.innerHTML = '<div class="section-sub">该日期暂无预留记录</div>';
-      return;
-    }
-    container.innerHTML = results.map(r => {
-      const rows = r.items.map(item => {
-        const s = ALLOC_STATUS[item.status] || ALLOC_STATUS.waiting;
-        const badge = `<span style="font-size:11px;padding:2px 6px;border-radius:4px;white-space:nowrap;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span>`;
-        const stockDisplay = item.current_stock === null ? '—' : `<strong style="color:${item.current_stock < item.quantity ? 'var(--warn)' : 'inherit'}">${item.current_stock}</strong>`;
-        const rowBg = item.status === 'waiting' ? 'var(--warn-bg)' : 'transparent';
-        return `<tr style="background:${rowBg}">
-          <td style="white-space:nowrap"><code style="font-size:11px">${esc(item.jan_code)}</code></td>
-          <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.product_name||'')}">${esc(item.product_name||'—')}</td>
-          <td style="text-align:center;white-space:nowrap">${item.quantity}</td>
-          <td style="text-align:center;white-space:nowrap">${stockDisplay}</td>
-          <td style="white-space:nowrap">${badge}</td>
-        </tr>`;
-      }).join('');
-      return `<div class="card" style="margin-top:10px;padding:12px">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
-          <strong style="font-size:14px">${esc(r.customer_name)}</strong>
-          <span style="font-size:12px;color:var(--success)">已调转 ${r.ready_count}</span>
-          <span style="font-size:12px;color:var(--warn)">等待中 ${r.waiting_count}</span>
-          <span style="font-size:12px;color:var(--muted)">已出库 ${r.shipped_count}</span>
-        </div>
-        <div style="overflow-x:auto">
-          <table class="table">
-            <thead><tr><th>JAN</th><th>商品名</th><th>需求量</th><th>当前库存</th><th>状态</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-      </div>`;
-    }).join('');
+    _dailyOverviewCache = await api('GET', `/trade/allocations/daily-overview?planned_outbound_date=${encodeURIComponent(date)}`);
+    renderDailyOverview();
   } catch (e) {
     container.innerHTML = `<div class="section-sub" style="color:var(--danger)">${esc(e.message || '加载失败')}</div>`;
   }
+}
+
+function renderDailyOverview() {
+  const container = document.getElementById('alloc-overview-result');
+  const statusFilter = document.getElementById('alloc-overview-status').value;
+  if (!_dailyOverviewCache.length) {
+    container.innerHTML = '<div class="section-sub">该日期暂无预留记录</div>';
+    return;
+  }
+  const blocks = _dailyOverviewCache.map(r => {
+    const items = statusFilter ? r.items.filter(i => i.status === statusFilter) : r.items;
+    if (statusFilter && !items.length) return '';
+    const rows = items.map(item => {
+      const s = ALLOC_STATUS[item.status] || ALLOC_STATUS.waiting;
+      const badge = `<span style="font-size:11px;padding:2px 6px;border-radius:4px;white-space:nowrap;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span>`;
+      const stockDisplay = item.current_stock === null ? '—' : `<strong style="color:${item.current_stock < item.quantity ? 'var(--warn)' : 'inherit'}">${item.current_stock}</strong>`;
+      const rowBg = item.status === 'waiting' ? 'var(--warn-bg)' : 'transparent';
+      return `<tr style="background:${rowBg}">
+        <td style="white-space:nowrap"><code style="font-size:11px">${esc(item.jan_code)}</code></td>
+        <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.product_name||'')}">${esc(item.product_name||'—')}</td>
+        <td style="text-align:center;white-space:nowrap">${item.quantity}</td>
+        <td style="text-align:center;white-space:nowrap">${stockDisplay}</td>
+        <td style="white-space:nowrap">${badge}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="card" style="margin-top:10px;padding:12px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+        <strong style="font-size:14px">${esc(r.customer_name)}</strong>
+        <span style="font-size:12px;color:var(--success)">已调转 ${r.ready_count}</span>
+        <span style="font-size:12px;color:var(--warn)">等待中 ${r.waiting_count}</span>
+        <span style="font-size:12px;color:var(--muted)">已出库 ${r.shipped_count}</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="table">
+          <thead><tr><th>JAN</th><th>商品名</th><th>需求量</th><th>当前库存</th><th>状态</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }).filter(Boolean);
+  container.innerHTML = blocks.length
+    ? blocks.join('')
+    : '<div class="section-sub">没有符合所选状态的记录</div>';
 }
 
 async function uploadAllocation() {
@@ -2912,8 +2935,101 @@ async function searchProducts() {
         <td>${esc(p.name_zh||'')}</td>
         <td>${p.units_per_case||'—'}</td>
         <td>${p.outer_jan ? `<code style="font-size:11px;color:var(--warn)">${p.outer_jan}</code>` : '—'}</td>
-        <td><button class="btn btn-ghost btn-sm" onclick="editProductRow('${p.jan_code}','${esc(p.name_jp)}','${esc(p.name_zh||'')}','${p.units_per_case||''}','${p.outer_jan||''}')">编辑</button></td>
-      </tr>`).join('') + '</tbody></table></div>';
+        <td style="white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" onclick="editProductRow('${p.jan_code}','${esc(p.name_jp)}','${esc(p.name_zh||'')}','${p.units_per_case||''}','${p.outer_jan||''}')">编辑</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleAliasPanel('${p.jan_code}')">别名</button>
+        </td>
+      </tr>
+      <tr id="prow-alias-${p.jan_code}" style="display:none"><td colspan="6"><div id="alias-panel-${p.jan_code}" class="section-sub"></div></td></tr>`).join('') + '</tbody></table></div>';
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ── JAN 别名（重复JAN指向同一商品）──────────────────────────────────────────
+async function toggleAliasPanel(jan) {
+  const row = document.getElementById(`prow-alias-${jan}`);
+  if (!row) return;
+  const showing = row.style.display !== 'none';
+  if (showing) { row.style.display = 'none'; return; }
+  row.style.display = '';
+  await loadAliasPanel(jan);
+}
+
+async function loadAliasPanel(jan) {
+  const panel = document.getElementById(`alias-panel-${jan}`);
+  if (!panel) return;
+  panel.innerHTML = '加载中…';
+  try {
+    const aliases = await api('GET', `/inventory/products/${jan}/aliases`);
+    const list = aliases.length
+      ? aliases.map(a => `
+        <div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+          <code style="font-size:11px">${esc(a.alias_jan)}</code>
+          <span style="color:var(--muted);font-size:12px">${esc(a.note||'')}</span>
+          <button class="btn btn-ghost btn-sm" onclick="removeAliasRow('${jan}','${a.alias_jan}')">移除映射</button>
+        </div>`).join('')
+      : '<div style="color:var(--muted);font-size:13px">暂无别名</div>';
+    panel.innerHTML = `
+      <div style="margin-bottom:8px"><strong>已绑定别名（指向主JAN ${esc(jan)}）：</strong></div>
+      ${list}
+      <div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="alias-input-${jan}" placeholder="新别名JAN" style="width:140px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+        <input type="text" id="alias-note-${jan}" placeholder="备注（可选）" style="width:160px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+        <button class="btn btn-secondary btn-sm" onclick="previewAliasMerge('${jan}')">预览合并</button>
+      </div>
+      <div id="alias-preview-${jan}" style="margin-top:8px"></div>`;
+  } catch (e) {
+    panel.innerHTML = `<div style="color:var(--danger)">${esc(e.message||'加载失败')}</div>`;
+  }
+}
+
+async function previewAliasMerge(jan) {
+  const aliasJan = document.getElementById(`alias-input-${jan}`)?.value.trim();
+  const previewEl = document.getElementById(`alias-preview-${jan}`);
+  if (!aliasJan) { toast('请输入别名JAN', 'err'); return; }
+  previewEl.innerHTML = '预览中…';
+  try {
+    const preview = await api('GET', `/inventory/products/${jan}/aliases/preview?alias_jan=${encodeURIComponent(aliasJan)}`);
+    const rows = preview.warehouses.length
+      ? preview.warehouses.map(w => `
+        <tr>
+          <td>${esc(w.warehouse_name)}</td>
+          <td>${w.canonical_quantity}</td>
+          <td>${w.alias_quantity}</td>
+          <td><strong>${w.merged_quantity}</strong></td>
+        </tr>`).join('')
+      : '<tr><td colspan="4" style="color:var(--muted)">两个JAN在所有仓库均无库存</td></tr>';
+    previewEl.innerHTML = `
+      <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:10px 12px">
+        <div style="margin-bottom:6px">将把 <code>${esc(aliasJan)}</code>（${esc(preview.alias_name)}）合并为
+          <code>${esc(jan)}</code>（${esc(preview.canonical_name)}）的别名：</div>
+        <table style="width:100%;font-size:13px"><thead><tr><th style="text-align:left">仓库</th><th>主JAN现有</th><th>别名JAN现有</th><th>合并后</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+        <div style="margin-top:8px;color:#92400e;font-weight:600">⚠ 此操作不可逆：两JAN的库存与历史流水将合并，今后扫到别名JAN会自动归并到主JAN。</div>
+        <div style="margin-top:8px">
+          <button class="btn btn-primary btn-sm" onclick="confirmAliasMerge('${jan}','${aliasJan}')">确认合并</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('alias-preview-${jan}').innerHTML=''">取消</button>
+        </div>
+      </div>`;
+  } catch (e) {
+    previewEl.innerHTML = `<div style="color:var(--danger)">${esc(e.message||'预览失败')}</div>`;
+  }
+}
+
+async function confirmAliasMerge(jan, aliasJan) {
+  const note = document.getElementById(`alias-note-${jan}`)?.value.trim();
+  try {
+    await api('POST', `/inventory/products/${jan}/aliases`, { alias_jan: aliasJan, note: note || null });
+    toast('别名已合并', 'ok');
+    await loadAliasPanel(jan);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function removeAliasRow(jan, aliasJan) {
+  if (!confirm(`移除别名映射 ${aliasJan}？（不会撤销已经合并的库存历史）`)) return;
+  try {
+    await api('DELETE', `/inventory/products/aliases/${aliasJan}`);
+    toast('已移除', 'ok');
+    await loadAliasPanel(jan);
   } catch (e) { toast(e.message, 'err'); }
 }
 

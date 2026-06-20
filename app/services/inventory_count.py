@@ -25,6 +25,7 @@ from app.schemas.inventory_count import (
     QinsiSessionListResult,
 )
 from app.services.inventory import resolve_customer, resolve_warehouse
+from app.services.product_alias import resolve_canonical_jan
 
 logger = logging.getLogger(__name__)
 
@@ -475,7 +476,18 @@ async def _compute_draft_lines(
     lines: list[CountDraftLine] = []
     covered_jans: set[str] = set()
 
-    for jan_code, product_name, count_qty in parsed:
+    # 同一份盘点表里，别名JAN和主JAN可能各占一行——归一化后按canonical JAN合并数量，
+    # 否则会生成两条指向同一商品桶的对账行（取首次出现的商品名，与秦丝同JAN多行合并逻辑一致）。
+    merged: dict[str, tuple[str, int]] = {}
+    for raw_jan_code, product_name, count_qty in parsed:
+        jan_code = await resolve_canonical_jan(session, raw_jan_code)
+        if jan_code in merged:
+            existing_name, existing_qty = merged[jan_code]
+            merged[jan_code] = (existing_name, existing_qty + count_qty)
+        else:
+            merged[jan_code] = (product_name, count_qty)
+
+    for jan_code, (product_name, count_qty) in merged.items():
         covered_jans.add(jan_code)
 
         current_qty_result = await session.scalar(

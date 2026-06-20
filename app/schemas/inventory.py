@@ -98,6 +98,37 @@ class ProductUpdate(BaseModel):
     outer_jan: Annotated[str, StringConstraints(strip_whitespace=True, max_length=13)] | None = Field(default=None)
 
 
+class ProductJanAliasRead(BaseModel):
+    alias_jan: str
+    canonical_jan: str
+    note: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProductJanAliasCreate(BaseModel):
+    alias_jan: JanQuery
+    note: Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)] | None = None
+
+
+class AliasMergeWarehouseDiff(BaseModel):
+    warehouse_id: int
+    warehouse_name: str
+    canonical_quantity: int
+    alias_quantity: int
+    merged_quantity: int
+
+
+class AliasMergePreview(BaseModel):
+    canonical_jan: str
+    alias_jan: str
+    canonical_name: str
+    alias_name: str
+    warehouses: list[AliasMergeWarehouseDiff]
+
+
 class InventoryRecordRead(BaseModel):
     id: int
     product_jan: str

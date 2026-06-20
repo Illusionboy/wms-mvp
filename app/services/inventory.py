@@ -12,6 +12,7 @@ from app.models.product import Product
 from app.models.stock_transaction import StockTransaction, StockTransactionType
 from app.models.warehouse import Warehouse
 from app.schemas.inventory import InventoryImportCreate, StockAdjustCreate, StockInCreate, StockOutCreate, StockTransferCreate, WarehouseStatusRead
+from app.services.product_alias import resolve_canonical_jan
 
 
 async def resolve_warehouse(session: AsyncSession, name: str) -> Warehouse | None:
@@ -81,9 +82,19 @@ class StockMutationResult:
     low_stock_alert: LowStockAlert | None = None
 
 
+async def _resolve_alias_for_search(session: AsyncSession, keyword: str) -> str | None:
+    """若关键字精确等于某个别名JAN，返回其主JAN，便于把主商品也纳入搜索结果。"""
+    normalized = keyword.strip()
+    if not normalized.isdigit():
+        return None
+    canonical = await resolve_canonical_jan(session, normalized)
+    return canonical if canonical != normalized else None
+
+
 async def search_inventory_items(session: AsyncSession, keyword: str, limit: int = 20) -> list[Product]:
+    alias_canonical_jan = await _resolve_alias_for_search(session, keyword)
     statement = (
-        _product_search_statement(keyword=keyword, limit=limit)
+        _product_search_statement(keyword=keyword, limit=limit, alias_canonical_jan=alias_canonical_jan)
         .options(
             selectinload(Product.inventory_records).selectinload(InventoryRecord.warehouse),
             selectinload(Product.inventory_records).selectinload(InventoryRecord.customer),
@@ -94,7 +105,8 @@ async def search_inventory_items(session: AsyncSession, keyword: str, limit: int
 
 
 async def search_products(session: AsyncSession, keyword: str, limit: int = 20) -> list[Product]:
-    result = await session.scalars(_product_search_statement(keyword=keyword, limit=limit))
+    alias_canonical_jan = await _resolve_alias_for_search(session, keyword)
+    result = await session.scalars(_product_search_statement(keyword=keyword, limit=limit, alias_canonical_jan=alias_canonical_jan))
     return list(result.all())
 
 
@@ -115,12 +127,16 @@ def is_outer_jan_match(keyword: str, product: Product) -> bool:
     return outer_hit and not jan_hit
 
 
-def _product_search_statement(keyword: str, limit: int):
+def _product_search_statement(keyword: str, limit: int, alias_canonical_jan: str | None = None):
     normalized_keyword = keyword.strip()
     name_pattern = f"%{normalized_keyword}%"
 
     conditions = []
     rank_conditions = []
+    if alias_canonical_jan:
+        # 关键字精确命中了某个别名JAN：把主JAN对应的商品也纳入结果，与直接命中JAN同优先级。
+        conditions.append(Product.jan_code == alias_canonical_jan)
+        rank_conditions.append((Product.jan_code == alias_canonical_jan, 0))
     if normalized_keyword.isdigit():
         conditions.append(Product.jan_code == normalized_keyword)
         rank_conditions.append((Product.jan_code == normalized_keyword, 0))
@@ -180,6 +196,7 @@ async def stock_in_item(
     commit: bool = True,
     user_id: int | None = None,
 ) -> StockMutationResult:
+    payload.sku = await resolve_canonical_jan(session, payload.sku)
     product = await session.scalar(select(Product).where(Product.jan_code == payload.sku))
     warehouse = await session.scalar(select(Warehouse).where(Warehouse.id == payload.warehouse_id))
     if product is None or warehouse is None:
@@ -244,6 +261,7 @@ async def stock_out_item(
     user_id: int | None = None,
     force_negative: bool = False,
 ) -> StockMutationResult:
+    payload.sku = await resolve_canonical_jan(session, payload.sku)
     try:
         # with_for_update() inside _find_single_inventory_record prevents concurrent deduction
         record = await _find_single_inventory_record(
@@ -330,6 +348,7 @@ async def adjust_stock_item(
     commit: bool = True,
     user_id: int | None = None,
 ) -> StockMutationResult:
+    payload.sku = await resolve_canonical_jan(session, payload.sku)
     record = await _find_single_inventory_record(
         session=session,
         sku=payload.sku,

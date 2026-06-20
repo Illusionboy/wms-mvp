@@ -16,6 +16,7 @@ from app.db.session import get_db_session
 from app.models.inventory_record import InventoryRecord
 from app.models.product import Product
 from app.schemas.inventory import (
+    AliasMergePreview,
     ChatReportApplyResult,
     ChatReportDocument,
     ChatReportDraftRead,
@@ -24,6 +25,8 @@ from app.schemas.inventory import (
     ProductCatalogImportResult,
     ProductCreate,
     ProductInventoryRead,
+    ProductJanAliasCreate,
+    ProductJanAliasRead,
     ProductRead,
     ProductUpdate,
     RakutenApplyRequest,
@@ -45,6 +48,7 @@ from app.schemas.inventory import (
 from app.services.auth import CurrentUser
 from app.services.chat_reports import apply_chat_report, create_chat_report_draft, get_chat_report_draft, mark_chat_report_draft_applied
 from app.services.product_catalog import import_product_catalog_from_bytes
+from app.services.product_alias import create_alias, list_aliases, preview_alias_merge, remove_alias
 from app.services.inventory import (
     AmbiguousInventoryRecordError,
     InsufficientStockError,
@@ -231,6 +235,61 @@ async def create_product(
     await session.commit()
     await session.refresh(product)
     return product
+
+
+@router.get("/products/{jan_code}/aliases", response_model=list[ProductJanAliasRead])
+async def get_product_aliases(
+    jan_code: str,
+    session: AsyncSession = Depends(get_db_session),
+) -> list[ProductJanAliasRead]:
+    """列出该商品（主JAN）的所有别名。无需认证（只读）。"""
+    return await list_aliases(session, jan_code)
+
+
+@router.get("/products/{jan_code}/aliases/preview", response_model=AliasMergePreview)
+async def preview_product_alias(
+    jan_code: str,
+    alias_jan: str = Query(..., description="待合并的别名JAN"),
+    session: AsyncSession = Depends(get_db_session),
+) -> AliasMergePreview:
+    """预览将 alias_jan 合并为 jan_code 的别名会产生的库存变化。无需认证（只读，不写库）。"""
+    try:
+        return await preview_alias_merge(session, jan_code, alias_jan)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/products/{jan_code}/aliases",
+    response_model=ProductJanAliasRead,
+    dependencies=[Depends(require_auth)],
+)
+async def add_product_alias(
+    jan_code: str,
+    payload: ProductJanAliasCreate,
+    session: AsyncSession = Depends(get_db_session),
+) -> ProductJanAliasRead:
+    """确认合并：将 alias_jan 设为 jan_code 的别名，合并两边库存与历史流水。此操作不可逆。"""
+    try:
+        return await create_alias(session, jan_code, payload.alias_jan, payload.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/products/aliases/{alias_jan}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_auth)],
+)
+async def delete_product_alias(
+    alias_jan: str,
+    session: AsyncSession = Depends(get_db_session),
+) -> None:
+    """删除别名映射本身（不会撤销已经合并的库存历史）。"""
+    try:
+        await remove_alias(session, alias_jan)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 class _JanBatchRequest(BaseModel):
