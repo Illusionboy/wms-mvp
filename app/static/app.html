@@ -799,6 +799,19 @@ tr:hover td { background: var(--accent-bg); }
         <div id="alloc-upload-result" style="margin-top:12px"></div>
       </div>
 
+      <!-- 装柜前检查：某天所有客户预留一览 -->
+      <div class="card" style="margin-top:16px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+          <div class="form-row" style="margin:0;flex:1;min-width:140px">
+            <label>计划出库日期</label>
+            <input type="date" id="alloc-overview-date">
+          </div>
+          <button class="btn btn-ghost" onclick="loadDailyOverview()" style="margin-bottom:0">查看当天所有客户预留情况</button>
+        </div>
+        <div class="section-sub" style="margin:0 0 10px">装柜前一次性检查：该日期下所有客户的预留齐货情况，按客户分组，等待中（缺货）的商品高亮显示。</div>
+        <div id="alloc-overview-result"></div>
+      </div>
+
       <!-- 查询区 -->
       <div class="card" style="margin-top:16px">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
@@ -2387,6 +2400,51 @@ const ALLOC_STATUS = {
   shipped:   { label: '已出库', color: 'var(--accent)', bg: 'var(--accent-bg)' },
   cancelled: { label: '已取消', color: 'var(--muted)', bg: 'var(--border)' },
 };
+
+async function loadDailyOverview() {
+  const date = document.getElementById('alloc-overview-date').value;
+  const container = document.getElementById('alloc-overview-result');
+  if (!date) { toast('请选择计划出库日期', 'err'); return; }
+  container.innerHTML = '<div class="section-sub">加载中…</div>';
+  try {
+    const results = await api('GET', `/trade/allocations/daily-overview?planned_outbound_date=${encodeURIComponent(date)}`);
+    if (!results.length) {
+      container.innerHTML = '<div class="section-sub">该日期暂无预留记录</div>';
+      return;
+    }
+    container.innerHTML = results.map(r => {
+      const rows = r.items.map(item => {
+        const s = ALLOC_STATUS[item.status] || ALLOC_STATUS.waiting;
+        const badge = `<span style="font-size:11px;padding:2px 6px;border-radius:4px;white-space:nowrap;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span>`;
+        const stockDisplay = item.current_stock === null ? '—' : `<strong style="color:${item.current_stock < item.quantity ? 'var(--warn)' : 'inherit'}">${item.current_stock}</strong>`;
+        const rowBg = item.status === 'waiting' ? 'var(--warn-bg)' : 'transparent';
+        return `<tr style="background:${rowBg}">
+          <td style="white-space:nowrap"><code style="font-size:11px">${esc(item.jan_code)}</code></td>
+          <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.product_name||'')}">${esc(item.product_name||'—')}</td>
+          <td style="text-align:center;white-space:nowrap">${item.quantity}</td>
+          <td style="text-align:center;white-space:nowrap">${stockDisplay}</td>
+          <td style="white-space:nowrap">${badge}</td>
+        </tr>`;
+      }).join('');
+      return `<div class="card" style="margin-top:10px;padding:12px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+          <strong style="font-size:14px">${esc(r.customer_name)}</strong>
+          <span style="font-size:12px;color:var(--success)">已调转 ${r.ready_count}</span>
+          <span style="font-size:12px;color:var(--warn)">等待中 ${r.waiting_count}</span>
+          <span style="font-size:12px;color:var(--muted)">已出库 ${r.shipped_count}</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="table">
+            <thead><tr><th>JAN</th><th>商品名</th><th>需求量</th><th>当前库存</th><th>状态</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    container.innerHTML = `<div class="section-sub" style="color:var(--danger)">${esc(e.message || '加载失败')}</div>`;
+  }
+}
 
 async function uploadAllocation() {
   const file = document.getElementById('alloc-file').files[0];

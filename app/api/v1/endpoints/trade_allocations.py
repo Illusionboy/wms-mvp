@@ -22,6 +22,7 @@ from app.services.customer_allocations import (
     get_allocation_status,
     get_allocation_summary,
     get_conflict_logs,
+    get_daily_allocation_overview,
     mark_as_shipped,
     revert_to_waiting,
     try_reserve_one,
@@ -88,8 +89,21 @@ async def allocation_summary(
     planned_outbound_date: date,
     session: AsyncSession = Depends(get_db_session),
 ) -> CustomerAllocationStatusResult:
-    """查看某客户某日期的货齐了状态汇总。"""
-    return await get_allocation_summary(session, customer_name, planned_outbound_date)
+    """查看某客户某日期的货齐了状态汇总。`customer_name` 支持模糊搜索（子串/简繁体/拼音首字母），
+    但必须唯一命中一个客户，否则返回 422。"""
+    try:
+        return await get_allocation_summary(session, customer_name, planned_outbound_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/allocations/daily-overview", response_model=list[CustomerAllocationStatusResult])
+async def daily_allocation_overview(
+    planned_outbound_date: date,
+    session: AsyncSession = Depends(get_db_session),
+) -> list[CustomerAllocationStatusResult]:
+    """某天所有客户的预留情况一览，按客户分组（装柜前一次性检查还缺哪些商品）。"""
+    return await get_daily_allocation_overview(session, planned_outbound_date)
 
 
 @router.patch(
@@ -206,8 +220,12 @@ async def bulk_cancel_reservation(
     """按客户名+计划出库日期批量取消（典型用途：上传时填错日期，整批撤销重传）。
 
     只取消 waiting/reserved 状态的行；shipped/cancelled 不受影响。
+    `customer_name` 支持模糊搜索，但必须唯一命中一个客户，否则返回 422（绝不在批量修改场景猜测）。
     """
-    count = await bulk_cancel_allocations(session, customer_name, planned_outbound_date)
+    try:
+        count = await bulk_cancel_allocations(session, customer_name, planned_outbound_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return BulkCancelAllocationResult(cancelled_count=count)
 
 
@@ -225,8 +243,12 @@ async def bulk_ship_reservation(
     """按客户名+计划出库日期一键标记已出库（典型用途：整批货已交给客户，逐条点太慢）。
 
     只标记 waiting/reserved 状态的行；shipped/cancelled 不受影响。
+    `customer_name` 支持模糊搜索，但必须唯一命中一个客户，否则返回 422（绝不在批量修改场景猜测）。
     """
-    count = await bulk_mark_shipped_allocations(session, customer_name, planned_outbound_date)
+    try:
+        count = await bulk_mark_shipped_allocations(session, customer_name, planned_outbound_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return BulkShipAllocationResult(shipped_count=count)
 
 

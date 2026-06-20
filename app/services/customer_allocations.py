@@ -18,10 +18,11 @@ import re
 from datetime import date, datetime
 
 import openpyxl
-from sqlalchemy import select
+from sqlalchemy import and_, case, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.customer_search import resolve_customer_names
 from app.models.allocation_conflict_log import AllocationConflictLog
 from app.models.customer_allocation import CustomerAllocation
 from app.models.inventory_record import InventoryRecord
@@ -243,7 +244,11 @@ async def upsert_allocations_from_excel(
     affected_jans: set[str] = set()
 
     for customer_name, jan_code, quantity in rows:
-        # UPSERT: (date, customer, jan) 唯一，若 quantity 相同则跳过，否则更新
+        # UPSERT: (date, customer, jan) 唯一。
+        # - cancelled 行：无论数量是否相同都"复活"为 waiting（否则取消后无法通过重新上传找回，
+        #   因为旧的 where 条件只比较数量，数量相同时整行被跳过、status 永远卡在 cancelled）。
+        # - shipped 行：货已实际出库，重新上传不应改动，跳过。
+        # - waiting/reserved 行：数量不变则跳过，数量变了才更新（status 不动，留给后续重新评估）。
         stmt = pg_insert(CustomerAllocation).values(
             planned_outbound_date=planned_outbound_date,
             customer_name=customer_name,
@@ -255,10 +260,20 @@ async def upsert_allocations_from_excel(
             constraint="uq_customer_alloc_date_customer_jan",
             set_={
                 "quantity": quantity,
+                "status": case(
+                    (CustomerAllocation.status == "cancelled", "waiting"),
+                    else_=CustomerAllocation.status,
+                ),
                 "source_filename": filename,
                 "updated_at": datetime.utcnow(),
             },
-            where=CustomerAllocation.quantity != quantity,
+            where=and_(
+                CustomerAllocation.status != "shipped",
+                or_(
+                    CustomerAllocation.quantity != quantity,
+                    CustomerAllocation.status == "cancelled",
+                ),
+            ),
         )
         result = await session.execute(stmt)
         if result.rowcount == 0:
@@ -545,9 +560,10 @@ async def bulk_cancel_allocations(
     只取消 waiting/reserved 状态的行（shipped/cancelled 不受影响）。
     返回实际取消的行数。
     """
+    resolved_name = await _resolve_single_customer_name(session, customer_name)
     allocs = (await session.scalars(
         select(CustomerAllocation).where(
-            CustomerAllocation.customer_name == customer_name,
+            CustomerAllocation.customer_name == resolved_name,
             CustomerAllocation.planned_outbound_date == planned_outbound_date,
             CustomerAllocation.status.in_(["waiting", "reserved"]),
         ).with_for_update()
@@ -588,9 +604,10 @@ async def bulk_mark_shipped_allocations(
     只标记 waiting/reserved 状态的行（shipped/cancelled 不受影响）。
     返回实际标记的行数。
     """
+    resolved_name = await _resolve_single_customer_name(session, customer_name)
     allocs = (await session.scalars(
         select(CustomerAllocation).where(
-            CustomerAllocation.customer_name == customer_name,
+            CustomerAllocation.customer_name == resolved_name,
             CustomerAllocation.planned_outbound_date == planned_outbound_date,
             CustomerAllocation.status.in_(["waiting", "reserved"]),
         ).with_for_update()
@@ -621,6 +638,25 @@ async def bulk_mark_shipped_allocations(
 # 查询：货齐了状态
 # ---------------------------------------------------------------------------
 
+async def _fuzzy_customer_names(session: AsyncSession, query: str) -> list[str]:
+    """把模糊输入解析为命中的客户名列表（子串/简繁体/拼音首字母，见 app.common.customer_search）。"""
+    candidates = (await session.scalars(select(CustomerAllocation.customer_name).distinct())).all()
+    return resolve_customer_names(query, candidates)
+
+
+async def _resolve_single_customer_name(session: AsyncSession, query: str) -> str:
+    """把模糊输入解析为唯一客户名，供会修改数据的操作使用（批量取消/批量标记出库）。
+
+    命中 0 个或多个客户名都报错——绝不在批量修改场景里猜测，避免误打误撞影响到无关客户。
+    """
+    matched = await _fuzzy_customer_names(session, query)
+    if not matched:
+        raise ValueError(f"未找到匹配「{query}」的客户")
+    if len(matched) > 1:
+        raise ValueError(f"「{query}」匹配到多个客户：{'、'.join(matched)}，请输入更精确的关键字")
+    return matched[0]
+
+
 async def get_allocation_status(
     session: AsyncSession,
     customer_name: str | None = None,
@@ -628,14 +664,21 @@ async def get_allocation_status(
     status_filter: str | None = None,
     jan_code: str | None = None,
 ) -> list[CustomerAllocationRead]:
-    """查询预留状态，实时附带当前库存和商品名。"""
+    """查询预留状态，实时附带当前库存和商品名。
+
+    `customer_name` 为模糊匹配（子串/简繁体互认/拼音首字母，见 app.common.customer_search），
+    可能命中多个客户——这是只读查询，不像批量操作那样需要收窄到唯一客户。
+    """
     warehouse = await session.scalar(
         select(Warehouse).where(Warehouse.name == ALLOCATION_WAREHOUSE_NAME)
     )
 
     stmt = select(CustomerAllocation)
     if customer_name:
-        stmt = stmt.where(CustomerAllocation.customer_name == customer_name)
+        matched_names = await _fuzzy_customer_names(session, customer_name)
+        if not matched_names:
+            return []
+        stmt = stmt.where(CustomerAllocation.customer_name.in_(matched_names))
     if planned_outbound_date:
         stmt = stmt.where(CustomerAllocation.planned_outbound_date == planned_outbound_date)
     if status_filter:
@@ -682,15 +725,44 @@ async def get_allocation_summary(
     customer_name: str,
     planned_outbound_date: date,
 ) -> CustomerAllocationStatusResult:
-    items = await get_allocation_status(session, customer_name=customer_name, planned_outbound_date=planned_outbound_date)
+    """查看某客户某日期的货齐了状态汇总。`customer_name` 模糊匹配但要求唯一命中
+    （结果用一个 customer_name 标签展示总览，命中多个客户会产生误导，因此报错而非合并）。
+    """
+    resolved_name = await _resolve_single_customer_name(session, customer_name)
+    items = await get_allocation_status(session, customer_name=resolved_name, planned_outbound_date=planned_outbound_date)
     return CustomerAllocationStatusResult(
-        customer_name=customer_name,
+        customer_name=resolved_name,
         planned_outbound_date=planned_outbound_date,
         ready_count=sum(1 for i in items if i.status == "reserved"),
         waiting_count=sum(1 for i in items if i.status == "waiting"),
         shipped_count=sum(1 for i in items if i.status == "shipped"),
         items=items,
     )
+
+
+async def get_daily_allocation_overview(
+    session: AsyncSession,
+    planned_outbound_date: date,
+) -> list[CustomerAllocationStatusResult]:
+    """某天所有客户的预留情况一览，按客户名分组（装柜前一次性检查还缺哪些商品）。"""
+    items = await get_allocation_status(session, planned_outbound_date=planned_outbound_date)
+
+    by_customer: dict[str, list[CustomerAllocationRead]] = {}
+    for item in items:
+        by_customer.setdefault(item.customer_name, []).append(item)
+
+    results = []
+    for customer_name in sorted(by_customer):
+        customer_items = by_customer[customer_name]
+        results.append(CustomerAllocationStatusResult(
+            customer_name=customer_name,
+            planned_outbound_date=planned_outbound_date,
+            ready_count=sum(1 for i in customer_items if i.status == "reserved"),
+            waiting_count=sum(1 for i in customer_items if i.status == "waiting"),
+            shipped_count=sum(1 for i in customer_items if i.status == "shipped"),
+            items=customer_items,
+        ))
+    return results
 
 
 # ---------------------------------------------------------------------------
