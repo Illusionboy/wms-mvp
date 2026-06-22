@@ -34,6 +34,7 @@ from app.schemas.inventory import (
     CustomerAllocationStatusResult,
     CustomerAllocationUploadResult,
 )
+from app.services.product_alias import resolve_canonical_jan
 
 ALLOCATION_WAREHOUSE_NAME = "普通仓库"
 
@@ -233,6 +234,15 @@ async def upsert_allocations_from_excel(
     rows = _parse_allocation_excel(content)
     if not rows:
         raise ValueError("Excel 中未解析到有效行（需要 JAN 13位 + 数量列）")
+
+    # 别名归一化：Excel 里仍可能用旧/别名JAN填报，统一解析到主JAN再写库存评估，
+    # 否则预留行会卡在别名JAN上，永远查不到合并后的真实库存（见 product_alias.create_alias）。
+    resolved: dict[tuple[str, str], int] = {}
+    for customer_name, jan_code, quantity in rows:
+        canonical_jan = await resolve_canonical_jan(session, jan_code)
+        key = (customer_name, canonical_jan)
+        resolved[key] = resolved.get(key, 0) + quantity
+    rows = [(customer_name, jan_code, quantity) for (customer_name, jan_code), quantity in resolved.items()]
 
     warehouse = await session.scalar(
         select(Warehouse).where(Warehouse.name == ALLOCATION_WAREHOUSE_NAME)

@@ -136,8 +136,50 @@ async def create_alias(
             )
             await session.delete(alias_record)
 
+    # 客户预留：已存在的预留行可能还指向别名JAN，合并库存桶后若不迁移，
+    # _revalidate_for_jan 用主JAN查库存、用别名JAN过滤预留行，两边永远对不上，
+    # 预留会卡在"等待中"、冲突永远不会自动消除。
+    from app.models.customer_allocation import CustomerAllocation  # local: keep module deps minimal
+
+    alias_allocations = (
+        await session.execute(
+            select(CustomerAllocation).where(CustomerAllocation.jan_code == alias_jan).with_for_update()
+        )
+    ).scalars().all()
+    for alloc in alias_allocations:
+        existing = await session.scalar(
+            select(CustomerAllocation)
+            .where(
+                CustomerAllocation.planned_outbound_date == alloc.planned_outbound_date,
+                CustomerAllocation.customer_name == alloc.customer_name,
+                CustomerAllocation.jan_code == canonical_jan,
+            )
+            .with_for_update()
+        )
+        if existing is None:
+            alloc.jan_code = canonical_jan
+        elif alloc.status in ("waiting", "reserved") and existing.status in ("waiting", "reserved"):
+            # 同一客户同一天对两个（现已合并的）JAN 都有预留：数量合并到主JAN的行，删除别名行。
+            existing.quantity += alloc.quantity
+            await session.delete(alloc)
+        # 其余冲突情况（任一方已 shipped/cancelled）保留别名行不动，避免改写已完成的历史记录。
+
     alias = ProductJanAlias(alias_jan=alias_jan, canonical_jan=canonical_jan, note=note)
     session.add(alias)
+    await session.flush()
+
+    # 合并后的库存现在可能足够覆盖之前因别名分裂而卡在"等待中"的预留，立即重新评估一次。
+    from app.services.customer_allocations import (  # lazy: avoid import cycle with customer_allocations.py
+        ALLOCATION_WAREHOUSE_NAME,
+        _revalidate_for_jan,
+    )
+
+    alloc_warehouse = await session.scalar(
+        select(Warehouse).where(Warehouse.name == ALLOCATION_WAREHOUSE_NAME)
+    )
+    if alloc_warehouse is not None:
+        await _revalidate_for_jan(session, canonical_jan, alloc_warehouse, trigger="alias_merge")
+
     await session.commit()
     return alias
 
