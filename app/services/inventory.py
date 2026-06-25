@@ -134,12 +134,16 @@ def _product_search_statement(keyword: str, limit: int, alias_canonical_jan: str
     conditions = []
     rank_conditions = []
     if alias_canonical_jan:
-        # 关键字精确命中了某个别名JAN：把主JAN对应的商品也纳入结果，与直接命中JAN同优先级。
+        # 关键字精确命中了某个别名JAN：只返回主JAN对应的商品。
+        # 别名JAN自己的 Product 行在合并后仍然保留（用于历史追溯），但已经没有库存——
+        # 如果不在这里跳过下面的"精确匹配关键字本身"分支，它会和主JAN一起被搜到，
+        # 变成两个商品同时命中，导致贸易出库等需要"唯一匹配"的流程误判为 ambiguous_product。
         conditions.append(Product.jan_code == alias_canonical_jan)
         rank_conditions.append((Product.jan_code == alias_canonical_jan, 0))
-    if normalized_keyword.isdigit():
+    elif normalized_keyword.isdigit():
         conditions.append(Product.jan_code == normalized_keyword)
         rank_conditions.append((Product.jan_code == normalized_keyword, 0))
+    if normalized_keyword.isdigit():
         # 假设 normalized_keyword 是用户输入的 JAN 码片段
         keyword_len = len(normalized_keyword)
         

@@ -104,7 +104,7 @@ def _parse_allocation_excel(
                 if "jan" in val or "条码" in val or "barcode" in val:
                     jan_col = cell.column
                     header_row_idx = cell.row
-                if "数量" in val or "qty" in val or "quantity" in val or "個数" in val:
+                if "数量" in val or "qty" in val or "quantity" in val or "個数" in val or "总数" in val:
                     qty_col = cell.column
             if jan_col and qty_col:
                 break
