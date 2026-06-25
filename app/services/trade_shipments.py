@@ -42,6 +42,7 @@ _HEADER_ALIASES = {
     "product_name": ("品名", "商品名", "名称"),
     "box_count": ("箱数",),
     "units_per_box": ("箱入",),
+    "quantity": ("数量", "qty", "quantity", "総数", "总数"),
 }
 
 
@@ -57,7 +58,13 @@ class _TradeShipmentLinesSchema(BaseModel):
 
 def parse_trade_shipment_excel(content: bytes) -> list[TradeShipmentLine]:
     """Each worksheet name is a customer code (mm/kk/cp/...). Columns jan/品名/箱数/箱入
-    are detected from the header row, in any order."""
+    are detected from the header row, in any order.
+
+    Real shipment sheets routinely merge the jan/品名 cells vertically when the same
+    JAN is split across several box-size rows (e.g. 4箱×102入 + 12箱×48入 + 1箱×16入 for
+    one JAN) — openpyxl leaves every non-anchor cell in a merged range as None, so without
+    backfilling those rows look JAN-less and get silently dropped, undercounting the total.
+    """
     workbook = openpyxl.load_workbook(BytesIO(content), data_only=True)
     lines: list[TradeShipmentLine] = []
     for sheet in workbook.worksheets:
@@ -69,11 +76,29 @@ def parse_trade_shipment_excel(content: bytes) -> list[TradeShipmentLine]:
         if column_index is None:
             continue
         header_row_index, columns = column_index
-        for row in rows[header_row_index + 1:]:
-            line = _parse_trade_row(row, columns, customer_name)
+
+        merged_value_map: dict[tuple[int, int], object] = {}
+        for merged_range in sheet.merged_cells.ranges:
+            anchor_value = sheet.cell(merged_range.min_row, merged_range.min_col).value
+            for r in range(merged_range.min_row, merged_range.max_row + 1):
+                for c in range(merged_range.min_col, merged_range.max_col + 1):
+                    merged_value_map[(r, c)] = anchor_value
+
+        for offset, row in enumerate(rows[header_row_index + 1:]):
+            row_number = header_row_index + 2 + offset  # openpyxl rows are 1-indexed
+            line = _parse_trade_row(row, columns, customer_name, merged_value_map, row_number)
             if line is not None:
                 lines.append(line)
     return lines
+
+
+def _cell_value(row: tuple, col: int | None, merged_value_map: dict[tuple[int, int], object], row_number: int) -> object:
+    if col is None or col >= len(row):
+        return None
+    value = row[col]
+    if value is None:
+        value = merged_value_map.get((row_number, col + 1))
+    return value
 
 
 def _detect_columns(rows: list[tuple]) -> tuple[int, dict[str, int]] | None:
@@ -93,25 +118,41 @@ def _detect_columns(rows: list[tuple]) -> tuple[int, dict[str, int]] | None:
     return None
 
 
-def _parse_trade_row(row: tuple, columns: dict[str, int], customer_name: str) -> TradeShipmentLine | None:
-    raw_jan = row[columns["jan_code"]] if columns["jan_code"] < len(row) else None
+def _parse_trade_row(
+    row: tuple,
+    columns: dict[str, int],
+    customer_name: str,
+    merged_value_map: dict[tuple[int, int], object],
+    row_number: int,
+) -> TradeShipmentLine | None:
+    raw_jan = _cell_value(row, columns.get("jan_code"), merged_value_map, row_number)
     jan_digits = "".join(ch for ch in _clean_text(raw_jan) if ch.isdigit())
     if not jan_digits:
         return None
-    box_count = _parse_positive_int(row[columns["box_count"]] if columns["box_count"] < len(row) else None)
-    units_per_box = _parse_positive_int(row[columns["units_per_box"]] if columns["units_per_box"] < len(row) else None)
+    box_count = _parse_positive_int(_cell_value(row, columns.get("box_count"), merged_value_map, row_number))
+    units_per_box = _parse_positive_int(_cell_value(row, columns.get("units_per_box"), merged_value_map, row_number))
+    quantity_override = _parse_positive_int(_cell_value(row, columns.get("quantity"), merged_value_map, row_number))
+
     if box_count is None or units_per_box is None:
-        return None
+        # 箱数/箱入缺一个但有现成的总数/QTY列（例如合箱临时凑数的尾行）：
+        # 折算成 1箱×总数件，保留正确的总量，而不是直接丢掉这一行。
+        if quantity_override is None:
+            return None
+        box_count, units_per_box, quantity = 1, quantity_override, quantity_override
+    else:
+        quantity = box_count * units_per_box
+
     product_name = None
-    if "product_name" in columns and columns["product_name"] < len(row):
-        product_name = _clean_text(row[columns["product_name"]]) or None
+    name_value = _cell_value(row, columns.get("product_name"), merged_value_map, row_number)
+    if name_value is not None:
+        product_name = _clean_text(name_value) or None
     return TradeShipmentLine(
         customer_name=customer_name,
         jan_code=jan_digits,
         product_name=product_name,
         box_count=box_count,
         units_per_box=units_per_box,
-        quantity=box_count * units_per_box,
+        quantity=quantity,
     )
 
 
