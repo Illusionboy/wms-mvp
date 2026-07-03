@@ -385,7 +385,10 @@ async def adjust_stock_item(
     )
     session.add(transaction)
     await session.flush()
-    if quantity_delta < 0:
+    if quantity_delta > 0:
+        from app.services.customer_allocations import try_auto_reserve  # lazy to avoid circular import
+        await try_auto_reserve(session, payload.sku, payload.warehouse_id)
+    elif quantity_delta < 0:
         from app.services.customer_allocations import check_for_reservation_conflict  # lazy to avoid circular import
         await check_for_reservation_conflict(session, payload.sku, payload.warehouse_id, trigger="stock_adjust")
     if commit:

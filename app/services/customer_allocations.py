@@ -808,3 +808,26 @@ async def get_conflict_logs(
         r.product_name = products_map.get(log.jan_code)
         result.append(r)
     return result
+
+
+async def clear_conflict_logs(
+    session: AsyncSession,
+    jan_code: str | None = None,
+    customer_name: str | None = None,
+) -> int:
+    """清空预留冲突日志（测试阶段日志噪音大，需要能整批清掉）。
+
+    不传筛选条件则清空全部；传 jan_code/customer_name 则只清掉匹配的部分。
+    纯日志表，清空不影响 CustomerAllocation 本身的状态。
+    """
+    stmt = select(AllocationConflictLog)
+    if jan_code:
+        stmt = stmt.where(AllocationConflictLog.jan_code == jan_code)
+    if customer_name:
+        stmt = stmt.where(AllocationConflictLog.customer_name == customer_name)
+    logs = (await session.scalars(stmt)).all()
+    count = len(logs)
+    for log in logs:
+        await session.delete(log)
+    await session.commit()
+    return count

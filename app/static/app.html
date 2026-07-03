@@ -870,6 +870,7 @@ tr:hover td { background: var(--accent-bg); }
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
           <strong style="font-size:14px;color:var(--warn)">⚠ 预留冲突日志</strong>
           <button class="btn btn-ghost btn-sm" onclick="loadConflictLogs()">刷新</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="clearConflictLogs()">清空日志</button>
         </div>
         <div class="section-sub" style="margin:0 0 10px">
           某客户已调转（reserved）的预留，因库存被预留系统之外的出库/调整消耗而被迫退回等待中时，记录在此。
@@ -2569,6 +2570,15 @@ async function loadConflictLogs() {
       <td style="white-space:nowrap">${esc(ALLOC_CONFLICT_TRIGGER_LABELS[l.trigger] || l.trigger)}</td>
     </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">暂无冲突记录</td></tr>';
   } catch (e) { toast('查询冲突日志失败: ' + e.message, 'err'); }
+}
+
+async function clearConflictLogs() {
+  if (!confirm('确定清空全部预留冲突日志吗？此操作不可恢复（不影响预留本身的状态，只是清掉日志记录）。')) return;
+  try {
+    const result = await api('DELETE', '/trade/allocation-conflicts');
+    toast(`已清空 ${result.deleted} 条日志`, 'ok');
+    loadConflictLogs();
+  } catch (e) { toast('清空失败: ' + e.message, 'err'); }
 }
 
 const SYSTEM_LOG_CATEGORY_LABELS = {
