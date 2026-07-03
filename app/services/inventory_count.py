@@ -510,9 +510,12 @@ async def _compute_draft_lines(
             .limit(1)
         ))
 
-        known_product = bool(await session.scalar(
-            select(Product.jan_code).where(Product.jan_code == jan_code).limit(1)
-        ))
+        product = await session.scalar(
+            select(Product).where(Product.jan_code == jan_code).limit(1)
+        )
+        known_product = product is not None
+        # 商品名以商品字典为准；字典中不存在（新增SKU）时才回退到文件解析出的名字
+        display_name = product.name_jp if product is not None else product_name
 
         delta_result = await session.scalar(
             select(func.coalesce(func.sum(StockTransaction.quantity_change), 0))
@@ -529,7 +532,7 @@ async def _compute_draft_lines(
         lines.append(
             CountDraftLine(
                 jan_code=jan_code,
-                product_name=product_name,
+                product_name=display_name,
                 count_quantity=count_qty,
                 delta_after_count=delta,
                 target_quantity=target_qty,
