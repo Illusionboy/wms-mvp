@@ -3860,15 +3860,15 @@ document.getElementById('scan-overlay').addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && _scanState.active) closeScanner(); });
 
-// ── Scan → JAN resolution ────────────────────────────────────────────────────
-// Ordered match against the search endpoint: full code hits product JAN / alias
-// (exact) directly; the fallback re-queries with the first 5 of the last 6 digits,
-// which the backend uses to match product JAN and outer-box JAN positions.
+// ── Scan → JAN resolution (仅扫码路径用；后端搜索/手输逻辑一律不改) ──────────────
+// 扫码只吐原始码，这里按规则解析：先用完整码查（命中商品JAN/别名JAN的精确匹配）；
+// 仅当【码 ≥13 位】且完整码没命中时，才截取"最后6位的前5位"再查一次 —— 后端该 5 位
+// 分支同时匹配商品JAN与外箱JAN的对应位置，所以外箱码也在这一步被找到。短码(<13)不截取。
 async function resolveScan(code) {
   const raw = String(code || '').trim();
   try { const a = await api('GET', `/inventory/search?keyword=${encodeURIComponent(raw)}`); if (Array.isArray(a) && a.length) return { items: a, keyword: raw }; } catch {}
   const digits = raw.replace(/\D/g, '');
-  if (digits.length >= 6) {
+  if (digits.length >= 13) {
     const key5 = digits.slice(-6, -1);
     try { const b = await api('GET', `/inventory/search?keyword=${encodeURIComponent(key5)}`); if (Array.isArray(b) && b.length) return { items: b, keyword: key5 }; } catch {}
   }
@@ -3879,7 +3879,7 @@ async function resolveScanKeyword(code, endpoint) {
   const raw = String(code || '').trim();
   try { const a = await api('GET', `${endpoint}?keyword=${encodeURIComponent(raw)}`); if (Array.isArray(a) && a.length) return raw; } catch {}
   const digits = raw.replace(/\D/g, '');
-  if (digits.length >= 6) {
+  if (digits.length >= 13) {
     const key5 = digits.slice(-6, -1);
     try { const b = await api('GET', `${endpoint}?keyword=${encodeURIComponent(key5)}`); if (Array.isArray(b) && b.length) return key5; } catch {}
   }
