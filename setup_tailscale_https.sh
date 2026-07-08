@@ -32,7 +32,7 @@ fi
 
 # 2. 检查已登录 + 取本机 MagicDNS 名称（不依赖 jq/python，纯文本解析）
 DNSNAME="$(tailscale status --json 2>/dev/null | tr ',' '\n' | grep -m1 '"DNSName"' \
-           | sed -E 's/.*"DNSName":"([^"]+)".*/\1/; s/\.$//' || true)"
+           | sed -E 's/.*"DNSName"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/; s/\.$//' || true)"
 if [ -z "${DNSNAME}" ]; then
   echo "✗ 无法获取本机 MagicDNS 名称。请确认已登录：  ${SUDO} tailscale up" >&2
   echo "  然后再运行本脚本。" >&2
