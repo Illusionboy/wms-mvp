@@ -156,6 +156,34 @@ textarea { resize: vertical; min-height: 100px; }
 .sp-jan { font-size: 11px; color: var(--accent); font-family: monospace; }
 .sp-name { font-weight: 600; }
 
+/* ── Scan (barcode camera) ── */
+.input-scan { display: flex; gap: 6px; align-items: stretch; }
+.input-scan > input { flex: 1; min-width: 0; }
+.scan-btn {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 42px; padding: 0; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; cursor: pointer; color: var(--muted); transition: all .12s;
+}
+.scan-btn:hover { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+.scan-btn svg { width: 20px; height: 20px; }
+.scan-overlay {
+  display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.85);
+  align-items: center; justify-content: center; padding: 20px;
+}
+.scan-box { width: 100%; max-width: 460px; text-align: center; }
+.scan-video-wrap {
+  position: relative; width: 100%; aspect-ratio: 4/3; background: #000;
+  border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,.15);
+}
+.scan-video-wrap video { width: 100%; height: 100%; object-fit: cover; }
+.scan-frame {
+  position: absolute; left: 12%; right: 12%; top: 30%; bottom: 30%;
+  border: 2px solid rgba(255,255,255,.85); border-radius: 8px;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.28); pointer-events: none;
+}
+.scan-status { color: #fff; font-size: 13px; margin-top: 14px; min-height: 18px; }
+.scan-actions { margin-top: 14px; display: flex; gap: 10px; justify-content: center; }
+
 /* ── Tables ── */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); }
@@ -378,7 +406,10 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row">
           <label>搜索商品 (JAN / 商品名)</label>
           <div class="search-widget">
-            <input type="text" id="si-search" placeholder="扫描或输入…" oninput="debounceSearch('si')">
+            <div class="input-scan">
+              <input type="text" id="si-search" placeholder="扫描或输入…" oninput="debounceSearch('si')">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoWidget('si')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
             <div class="search-results" id="si-results" style="display:none"></div>
           </div>
           <div class="selected-product" id="si-selected">
@@ -428,7 +459,10 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row">
           <label>搜索商品 (JAN / 商品名)</label>
           <div class="search-widget">
-            <input type="text" id="so-search" placeholder="扫描或输入…" oninput="debounceSearch('so')">
+            <div class="input-scan">
+              <input type="text" id="so-search" placeholder="扫描或输入…" oninput="debounceSearch('so')">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoWidget('so')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
             <div class="search-results" id="so-results" style="display:none"></div>
           </div>
           <div class="selected-product" id="so-selected">
@@ -474,7 +508,10 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row">
           <label>搜索商品 (JAN / 商品名)</label>
           <div class="search-widget">
-            <input type="text" id="sa-search" placeholder="扫描或输入…" oninput="debounceSearch('sa')">
+            <div class="input-scan">
+              <input type="text" id="sa-search" placeholder="扫描或输入…" oninput="debounceSearch('sa')">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoWidget('sa')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
             <div class="search-results" id="sa-results" style="display:none"></div>
           </div>
           <div class="selected-product" id="sa-selected">
@@ -512,7 +549,10 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row">
           <label>搜索商品 (JAN / 商品名)</label>
           <div class="search-widget">
-            <input type="text" id="st-search" placeholder="扫描或输入…" oninput="debounceSearch('st')">
+            <div class="input-scan">
+              <input type="text" id="st-search" placeholder="扫描或输入…" oninput="debounceSearch('st')">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoWidget('st')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
             <div class="search-results" id="st-results" style="display:none"></div>
           </div>
           <div class="selected-product" id="st-selected">
@@ -555,7 +595,10 @@ tr:hover td { background: var(--accent-bg); }
       <div class="card" style="display:flex;gap:8px;align-items:flex-end">
         <div class="form-row" style="flex:1;margin:0">
           <label>关键词</label>
-          <input type="text" id="search-kw" placeholder="JAN、后6位、商品名…" onkeydown="if(event.key==='Enter')doSearch()">
+          <div class="input-scan">
+            <input type="text" id="search-kw" placeholder="JAN、后6位、商品名…" onkeydown="if(event.key==='Enter')doSearch()">
+            <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoInventorySearch()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+          </div>
         </div>
         <button class="btn btn-primary" onclick="doSearch()" style="margin-bottom:0">搜索</button>
       </div>
@@ -1146,7 +1189,10 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row">
           <label>搜索商品 (JAN / 商品名)</label>
           <div class="search-widget">
-            <input type="text" id="ph-search" placeholder="扫描或输入…" oninput="debounceSearch('ph')">
+            <div class="input-scan">
+              <input type="text" id="ph-search" placeholder="扫描或输入…" oninput="debounceSearch('ph')">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoWidget('ph')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
             <div class="search-results" id="ph-results" style="display:none"></div>
           </div>
           <div class="selected-product" id="ph-selected">
@@ -1240,7 +1286,10 @@ tr:hover td { background: var(--accent-bg); }
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="form-row">
             <label>JAN 码</label>
-            <input type="text" id="np-jan" placeholder="13位条码" maxlength="13">
+            <div class="input-scan">
+              <input type="text" id="np-jan" placeholder="13位条码" maxlength="13">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoRawJan('np-jan')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
           </div>
           <div class="form-row">
             <label>箱入数（选填）</label>
@@ -1263,6 +1312,7 @@ tr:hover td { background: var(--accent-bg); }
         <div class="card-title">商品搜索</div>
         <div style="display:flex;gap:8px">
           <input type="text" id="prod-search-kw" placeholder="JAN 或商品名…" style="flex:1" onkeydown="if(event.key==='Enter')searchProducts()">
+          <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoProductSearch()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
           <button class="btn btn-ghost" onclick="searchProducts()">搜索</button>
         </div>
         <div id="prod-search-result" style="margin-top:12px"></div>
@@ -1324,6 +1374,20 @@ tr:hover td { background: var(--accent-bg); }
 </div><!-- /app-shell -->
 
 <div id="toast-container"></div>
+
+<!-- Barcode scanner overlay -->
+<div id="scan-overlay" class="scan-overlay">
+  <div class="scan-box">
+    <div class="scan-video-wrap">
+      <video id="scan-video" playsinline muted></video>
+      <div class="scan-frame"></div>
+    </div>
+    <div id="scan-status" class="scan-status"></div>
+    <div class="scan-actions">
+      <button type="button" class="btn btn-ghost" onclick="closeScanner()">取消</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
@@ -3676,6 +3740,215 @@ async function loadCounterpartyLists() {
 // ── Product history search widget binding ────────────────────────────────────
 // Re-use the existing debounceSearch / selectProduct pattern for 'ph' prefix
 // selectProduct sets ph-jan, ph-jan-display, ph-name-display when user picks a product
+
+// ── Barcode scanning (camera) ────────────────────────────────────────────────
+// Reusable module: openScanner(onDetected) opens the camera overlay and calls
+// onDetected(code) with the first decoded barcode string, then closes itself.
+// Native BarcodeDetector is used when available (Android / desktop Chrome/Edge);
+// otherwise falls back to the locally-vendored ZXing library (iPhone / Safari).
+let _scanState = { active: false, stream: null, reader: null, raf: 0, onDetected: null };
+
+function _hasNativeDetector() { return typeof window.BarcodeDetector === 'function'; }
+
+function _stopScannerMedia() {
+  if (_scanState.raf) { cancelAnimationFrame(_scanState.raf); _scanState.raf = 0; }
+  if (_scanState.reader) { try { _scanState.reader.reset(); } catch {} _scanState.reader = null; }
+  if (_scanState.stream) { _scanState.stream.getTracks().forEach(t => { try { t.stop(); } catch {} }); _scanState.stream = null; }
+  const v = document.getElementById('scan-video');
+  if (v) { try { v.pause(); } catch {} v.srcObject = null; }
+}
+
+function closeScanner() {
+  _scanState.active = false;
+  _scanState.onDetected = null;
+  _stopScannerMedia();
+  document.getElementById('scan-overlay').style.display = 'none';
+}
+
+function handleScanResult(code) {
+  if (!_scanState.active || !code) return;
+  const cb = _scanState.onDetected;
+  closeScanner();
+  if (cb) { try { cb(String(code)); } catch (e) { console.error(e); } }
+}
+
+async function openScanner(onDetected) {
+  const overlay = document.getElementById('scan-overlay');
+  const video = document.getElementById('scan-video');
+  const statusEl = document.getElementById('scan-status');
+  _scanState.active = true;
+  _scanState.onDetected = onDetected;
+  overlay.style.display = 'flex';
+  statusEl.textContent = '正在启动摄像头…';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    statusEl.innerHTML = '当前环境无法访问摄像头。<br>摄像头需要 HTTPS（或 localhost）访问 —— 请改用 https 地址，或手动输入。';
+    return;
+  }
+  if (_hasNativeDetector()) {
+    try { await startNativeScan(video, statusEl); return; }
+    catch (e) { _stopScannerMedia(); if (!_scanState.active) return; }
+  }
+  try { await startZxingScan(video, statusEl); }
+  catch (e) {
+    if (!_scanState.active) return;
+    const msg = (e && e.name === 'NotAllowedError') ? '摄像头权限被拒绝，请在浏览器中允许摄像头访问。'
+      : '扫码启动失败：' + (e && e.message ? e.message : e);
+    statusEl.textContent = msg;
+  }
+}
+
+async function startNativeScan(video, statusEl) {
+  const wanted = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','codabar','qr_code'];
+  let supported = [];
+  try { supported = await window.BarcodeDetector.getSupportedFormats(); } catch {}
+  const formats = supported.length ? wanted.filter(f => supported.includes(f)) : wanted;
+  const detector = new window.BarcodeDetector(formats.length ? { formats } : undefined);
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+  _scanState.stream = stream;
+  video.srcObject = stream;
+  await video.play();
+  if (!_scanState.active) return;
+  statusEl.textContent = '将条码对准取景框…';
+  const tick = async () => {
+    if (!_scanState.active) return;
+    try {
+      const codes = await detector.detect(video);
+      if (codes && codes.length && codes[0].rawValue) { handleScanResult(codes[0].rawValue); return; }
+    } catch {}
+    _scanState.raf = requestAnimationFrame(tick);
+  };
+  _scanState.raf = requestAnimationFrame(tick);
+}
+
+let _zxingPromise = null;
+function loadZxing() {
+  if (window.ZXing && window.ZXing.BrowserMultiFormatReader) return Promise.resolve();
+  if (_zxingPromise) return _zxingPromise;
+  _zxingPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = '/static/vendor/zxing.min.js';
+    s.async = true;
+    s.onload = () => (window.ZXing && window.ZXing.BrowserMultiFormatReader) ? resolve() : reject(new Error('扫码库加载异常'));
+    s.onerror = () => { _zxingPromise = null; reject(new Error('扫码库加载失败')); };
+    document.head.appendChild(s);
+  });
+  return _zxingPromise;
+}
+
+async function startZxingScan(video, statusEl) {
+  statusEl.textContent = '加载扫码组件…';
+  await loadZxing();
+  if (!_scanState.active) return;
+  const reader = new ZXing.BrowserMultiFormatReader();
+  _scanState.reader = reader;
+  const onResult = (result) => {
+    if (result && _scanState.active) {
+      handleScanResult(typeof result.getText === 'function' ? result.getText() : result.text);
+    }
+  };
+  statusEl.textContent = '将条码对准取景框…';
+  if (typeof reader.decodeFromConstraints === 'function') {
+    await reader.decodeFromConstraints({ video: { facingMode: { ideal: 'environment' } } }, video, onResult);
+  } else {
+    await reader.decodeFromVideoDevice(undefined, video, onResult);
+  }
+}
+
+// Close overlay on backdrop click or Escape
+document.getElementById('scan-overlay').addEventListener('click', e => {
+  if (e.target.id === 'scan-overlay') closeScanner();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && _scanState.active) closeScanner(); });
+
+// ── Scan → JAN resolution ────────────────────────────────────────────────────
+// Ordered match against the search endpoint: full code hits product JAN / alias
+// (exact) directly; the fallback re-queries with the first 5 of the last 6 digits,
+// which the backend uses to match product JAN and outer-box JAN positions.
+async function resolveScan(code) {
+  const raw = String(code || '').trim();
+  try { const a = await api('GET', `/inventory/search?keyword=${encodeURIComponent(raw)}`); if (Array.isArray(a) && a.length) return { items: a, keyword: raw }; } catch {}
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length >= 6) {
+    const key5 = digits.slice(-6, -1);
+    try { const b = await api('GET', `/inventory/search?keyword=${encodeURIComponent(key5)}`); if (Array.isArray(b) && b.length) return { items: b, keyword: key5 }; } catch {}
+  }
+  return { items: [], keyword: raw };
+}
+
+async function resolveScanKeyword(code, endpoint) {
+  const raw = String(code || '').trim();
+  try { const a = await api('GET', `${endpoint}?keyword=${encodeURIComponent(raw)}`); if (Array.isArray(a) && a.length) return raw; } catch {}
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length >= 6) {
+    const key5 = digits.slice(-6, -1);
+    try { const b = await api('GET', `${endpoint}?keyword=${encodeURIComponent(key5)}`); if (Array.isArray(b) && b.length) return key5; } catch {}
+  }
+  return raw;
+}
+
+function _renderWidgetItems(prefix, items) {
+  const resultsEl = document.getElementById(`${prefix}-results`);
+  resultsEl.dataset.prefix = prefix;
+  resultsEl.innerHTML = items.map(p => `
+    <div class="search-result-item"
+         data-jan="${esc(p.jan_code)}"
+         data-namejp="${esc(p.name_jp)}"
+         data-namezh="${esc(p.name_zh||'')}">
+      <div class="sri-jan">${p.jan_code}</div>
+      <div class="sri-name">${p.name_jp}${p.name_zh ? ' / ' + p.name_zh : ''}</div>
+    </div>`).join('');
+  resultsEl.style.display = 'block';
+}
+
+// Scan into a product-search widget (si/so/sa/st/ph): auto-select a single hit,
+// list multiple candidates, or surface the raw code when nothing matches.
+function scanIntoWidget(prefix) {
+  openScanner(async (code) => {
+    const input = document.getElementById(`${prefix}-search`);
+    const { items, keyword } = await resolveScan(code);
+    if (!items.length) {
+      input.value = code;
+      document.getElementById(`${prefix}-results`).style.display = 'none';
+      toast(`未匹配到商品：${code}`, 'err');
+      return;
+    }
+    if (items.length === 1) {
+      const p = items[0];
+      selectProduct(prefix, p.jan_code, p.name_jp, p.name_zh || '');
+      toast('已识别并选中', 'ok');
+      return;
+    }
+    input.value = keyword;
+    _renderWidgetItems(prefix, items);
+    toast(`识别到 ${items.length} 个候选，请选择`, 'info');
+  });
+}
+
+// Scan into the 库存查询 keyword box → resolve → run search
+function scanIntoInventorySearch() {
+  openScanner(async (code) => {
+    document.getElementById('search-kw').value = await resolveScanKeyword(code, '/inventory/search');
+    doSearch();
+  });
+}
+
+// Scan into the 商品搜索 (商品管理) box → resolve → run product search
+function scanIntoProductSearch() {
+  openScanner(async (code) => {
+    document.getElementById('prod-search-kw').value = await resolveScanKeyword(code, '/inventory/search_sku');
+    searchProducts();
+  });
+}
+
+// Scan into a raw JAN field (新增商品): no matching — just fill the recognized code
+function scanIntoRawJan(inputId) {
+  openScanner((code) => {
+    const el = document.getElementById(inputId);
+    const digits = String(code || '').replace(/\D/g, '').slice(0, 13);
+    el.value = digits || String(code || '');
+    toast(`已识别：${el.value}`, 'ok');
+  });
+}
 </script>
 </body>
 </html>
