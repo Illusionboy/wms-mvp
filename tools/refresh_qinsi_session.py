@@ -48,8 +48,18 @@ env = load_env(project_root / ".env")
 QINSI_USERNAME = env.get("QINSI_USERNAME", "")
 QINSI_PASSWORD = env.get("QINSI_PASSWORD", "")
 QINSI_BASE_URL = env.get("QINSI_BASE_URL", "https://web.syt.qinsilk.com/gis/admin/")
-_DEFAULT_API = env.get("NAS_API_URL", "http://localhost:8000")
-_DEFAULT_TOKEN = env.get("NAS_JWT_TOKEN") or None
+def _targets_from_env() -> list[tuple[str, str | None, str | None]]:
+    """从 .env 收集所有上传目标（NAS + VULTR…），一次登录同步给所有服务器。
+
+    每个前缀读取 {PREFIX}_API_URL / {PREFIX}_JWT_TOKEN / {PREFIX}_API_KEY。
+    返回 [(api_url, jwt_token, api_key), ...]；都没配则回退本地写文件。
+    """
+    out: list[tuple[str, str | None, str | None]] = []
+    for prefix in ("NAS", "VULTR"):
+        base = env.get(f"{prefix}_API_URL")
+        if base:
+            out.append((base, env.get(f"{prefix}_JWT_TOKEN") or None, env.get(f"{prefix}_API_KEY") or None))
+    return out or [("http://localhost:8000", None, None)]
 
 
 async def _check_qinsi_auth(cookies: dict[str, str]) -> bool:
@@ -64,7 +74,7 @@ async def _check_qinsi_auth(cookies: dict[str, str]) -> bool:
         return False
 
 
-async def do_login_and_upload(api_base: str, api_token: str | None) -> bool:
+async def do_login_and_upload(targets: list[tuple[str, str | None, str | None]]) -> bool:
     try:
         from playwright.async_api import async_playwright
     except ImportError:
@@ -78,7 +88,7 @@ async def do_login_and_upload(api_base: str, api_token: str | None) -> bool:
     print("=" * 60)
     print(f"账号: {QINSI_USERNAME or '(未配置，请检查 .env)'}")
     print(f"秦丝: {QINSI_BASE_URL}")
-    print(f"WMS:  {api_base}")
+    print(f"WMS 目标: {', '.join(t[0] for t in targets)}")
     print()
 
     if not QINSI_USERNAME:
@@ -134,8 +144,9 @@ async def do_login_and_upload(api_base: str, api_token: str | None) -> bool:
             if flat and await _check_qinsi_auth(flat):
                 print(f"✓  登录成功！获取到 {len(cookies_list)} 个 cookies")
                 success = True
-                # 上传到 WMS API
-                await _upload_cookies(api_base, api_token, cookies_list)
+                # 上传到所有 WMS 目标（NAS / Vultr…），一次登录同步给所有服务器
+                for _base, _token, _key in targets:
+                    await _upload_cookies(_base, _token, _key, cookies_list)
                 break
             if i % 5 == 0 and i > 0:
                 remaining = 300 - i * 2
@@ -149,7 +160,7 @@ async def do_login_and_upload(api_base: str, api_token: str | None) -> bool:
         return success
 
 
-async def _upload_cookies(api_base: str, api_token: str | None, cookies_list: list) -> None:
+async def _upload_cookies(api_base: str, api_token: str | None, api_key: str | None, cookies_list: list) -> None:
     target = f"{api_base.rstrip('/')}/api/v1/qinsi/upload-session"
 
     # 如果 api_base 是本地，直接写文件更简单
@@ -160,10 +171,13 @@ async def _upload_cookies(api_base: str, api_token: str | None, cookies_list: li
         print(f"✓  Session 已直接写入本地文件: {session_file}")
         return
 
-    # 远程上传到 NAS API
-    if not api_token:
-        print("⚠   未提供 --token，无法上传到远程 WMS")
-        print("    本地保存 cookies 到 qinsi_session_backup.json，请手动复制到 NAS")
+    # 远程上传：优先用 API_KEY（不过期，推荐自动化用），否则用 JWT（30 天过期）
+    if api_key:
+        auth_headers = {"X-API-Key": api_key}
+    elif api_token:
+        auth_headers = {"Authorization": f"Bearer {api_token}"}
+    else:
+        print(f"⚠   {api_base} 未配置 token/api_key，跳过上传；本地备份 cookies")
         bak = project_root / "app" / "data" / "scraper_debug" / "qinsi_session_backup.json"
         bak.parent.mkdir(parents=True, exist_ok=True)
         bak.write_text(json.dumps(cookies_list, ensure_ascii=False, indent=2))
@@ -176,7 +190,7 @@ async def _upload_cookies(api_base: str, api_token: str | None, cookies_list: li
             r = await client.post(
                 target,
                 json={"cookies": cookies_list},
-                headers={"Authorization": f"Bearer {api_token}"},
+                headers=auth_headers,
             )
             data = r.json()
             if data.get("ok"):
@@ -194,18 +208,16 @@ async def _upload_cookies(api_base: str, api_token: str | None, cookies_list: li
 
 def main():
     parser = argparse.ArgumentParser(description="秦丝生意通 Session 续期工具")
-    parser.add_argument(
-        "--api",
-        default=_DEFAULT_API,
-        help=f"WMS API 地址（默认读取 .env NAS_API_URL: {_DEFAULT_API}）",
-    )
-    parser.add_argument(
-        "--token",
-        default=_DEFAULT_TOKEN,
-        help="WMS JWT token（默认读取 .env NAS_JWT_TOKEN）",
-    )
+    parser.add_argument("--api", default=None, help="单个 WMS API 地址（给定则覆盖 .env 的多目标）")
+    parser.add_argument("--token", default=None, help="配合 --api 的 JWT token")
+    parser.add_argument("--api-key", default=None, help="配合 --api 的 X-API-Key（不过期，推荐）")
     args = parser.parse_args()
-    asyncio.run(do_login_and_upload(args.api, args.token))
+    if args.api:
+        targets = [(args.api, args.token, args.api_key)]
+    else:
+        # 默认从 .env 收集所有目标（NAS + VULTR…），一次登录同步给全部
+        targets = _targets_from_env()
+    asyncio.run(do_login_and_upload(targets))
 
 
 if __name__ == "__main__":
