@@ -102,6 +102,8 @@ async def _llm_repair_column_map(headers: list[str], sample_rows: list[list[str]
     from google import genai  # type: ignore
     from app.core.config import settings
 
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY 未配置，盘点列自动修复（LLM 兜底）不可用；请检查文件列名或配置 Key。")
     client = genai.Client(api_key=settings.gemini_api_key)
 
     headers_str = json.dumps(headers, ensure_ascii=False)

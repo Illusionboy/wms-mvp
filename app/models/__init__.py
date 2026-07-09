@@ -6,6 +6,7 @@ from app.models.customer import Customer
 from app.models.inventory_count_draft import InventoryCountDraft
 from app.models.inventory_record import InventoryRecord
 from app.models.inventory_import_job import InventoryImportJob
+from app.models.pallet import Pallet, PalletItem
 from app.models.product import Product
 from app.models.product_jan_alias import ProductJanAlias
 from app.models.qinsi_scrape_cache import QinsiScrapeCache
@@ -25,6 +26,8 @@ __all__ = [
     "InventoryCountDraft",
     "InventoryImportJob",
     "InventoryRecord",
+    "Pallet",
+    "PalletItem",
     "Product",
     "ProductJanAlias",
     "QinsiScrapeCache",

@@ -562,6 +562,11 @@ class BulkShipAllocationResult(BaseModel):
     shipped_count: int
 
 
+class BulkRescheduleAllocationResult(BaseModel):
+    rescheduled_count: int
+    pallets_rescheduled_count: int = 0
+
+
 class CustomerAllocationStatusResult(BaseModel):
     customer_name: str
     planned_outbound_date: date

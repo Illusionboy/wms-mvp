@@ -22,10 +22,13 @@ refresh_qinsi.sh
 # macOS
 .DS_Store
 **/.DS_Store
-4-30-normal.xlsx
-4-30-rakuten.xlsx
-rakuten_20260511.csv
-20260511.csv
+# 4-30-normal.xlsx
+# 4-30-rakuten.xlsx
+# rakuten_20260511.csv
+# 20260511.csv
+*.csv
+*.xlsx
+product_dict.json
 import_products.py
 process_excel.py
 rakuten_delivery_dtl.py
@@ -34,3 +37,4 @@ merge_tool.py
 秦丝生意通-库存盘点单*.html
 秦丝生意通-库存盘点单*_files/
 docs/
+.claude/

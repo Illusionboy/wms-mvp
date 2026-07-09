@@ -177,6 +177,8 @@ def _parse_trade_shipment_images_sync(images: list[tuple[bytes, str]]) -> list[T
     from google import genai
     from google.genai import types
 
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY 未配置，贸易出库拍照识别功能不可用。")
     client = genai.Client(api_key=settings.gemini_api_key)
     parts = [types.Part.from_bytes(data=data, mime_type=mime) for data, mime in images]
     parts.append(types.Part.from_text(text=_TRADE_SHIPMENT_IMAGE_PROMPT))

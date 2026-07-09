@@ -18,7 +18,7 @@ import re
 from datetime import date, datetime
 
 import openpyxl
-from sqlalchemy import and_, case, or_, select
+from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,7 @@ from app.common.customer_search import resolve_customer_names
 from app.models.allocation_conflict_log import AllocationConflictLog
 from app.models.customer_allocation import CustomerAllocation
 from app.models.inventory_record import InventoryRecord
+from app.models.pallet import Pallet
 from app.models.product import Product
 from app.models.warehouse import Warehouse
 from app.schemas.inventory import (
@@ -642,6 +643,78 @@ async def bulk_mark_shipped_allocations(
 
     await session.commit()
     return len(allocs)
+
+
+async def reschedule_allocations(
+    session: AsyncSession,
+    customer_name: str,
+    from_date: date,
+    to_date: date,
+) -> tuple[int, int]:
+    """把某客户在 from_date 的所有 waiting/reserved 预留整批改到 to_date。
+
+    典型用途：上传时填错计划出库日期，直接改期，免得整批撤销重传。
+    - 只移动 waiting/reserved 行（shipped/cancelled 不动）。
+    - 目标日期若已存在该客户同 JAN 的记录（唯一键跨所有状态）→ 报错列出，绝不静默合并。
+    - 改期后对受影响 JAN 重新评估 reserved/waiting（预留排队按日期，日期变了会影响优先级）。
+    - **级联**：把该客户该原日期下未装柜的托盘（staging/empty）一并改到新日期，
+      避免托盘与预留脱节（已装柜 loaded 的不动，属装柜后范畴）。
+    返回 (改期预留行数, 级联改期托盘数)。
+    """
+    if from_date == to_date:
+        raise ValueError("原日期与目标日期相同，无需改期")
+    resolved_name = await _resolve_single_customer_name(session, customer_name)
+    allocs = (await session.scalars(
+        select(CustomerAllocation).where(
+            CustomerAllocation.customer_name == resolved_name,
+            CustomerAllocation.planned_outbound_date == from_date,
+            CustomerAllocation.status.in_(["waiting", "reserved"]),
+        ).with_for_update()
+    )).all()
+    if not allocs:
+        return 0, 0
+
+    moved_jans = {a.jan_code for a in allocs}
+    # 目标日期唯一键冲突检查（唯一约束 (date, customer, jan) 跨所有状态）
+    existing = (await session.scalars(
+        select(CustomerAllocation.jan_code).where(
+            CustomerAllocation.customer_name == resolved_name,
+            CustomerAllocation.planned_outbound_date == to_date,
+            CustomerAllocation.jan_code.in_(moved_jans),
+        )
+    )).all()
+    if existing:
+        conflict = "、".join(sorted(set(existing)))
+        raise ValueError(
+            f"目标日期 {to_date} 已存在客户「{resolved_name}」的记录（JAN：{conflict}），"
+            f"请先处理这些冲突或改用撤销重传"
+        )
+
+    for alloc in allocs:
+        alloc.planned_outbound_date = to_date
+    await session.flush()
+
+    warehouse = await session.scalar(
+        select(Warehouse).where(Warehouse.name == ALLOCATION_WAREHOUSE_NAME)
+    )
+    if warehouse:
+        for jan_code in moved_jans:
+            await _revalidate_for_jan(session, jan_code, warehouse, trigger="reschedule")
+
+    # 级联改期未装柜托盘（staging/empty），与预留保持同步
+    pallet_result = await session.execute(
+        update(Pallet)
+        .where(
+            Pallet.customer_name == resolved_name,
+            Pallet.planned_outbound_date == from_date,
+            Pallet.status.in_(["staging", "empty"]),
+        )
+        .values(planned_outbound_date=to_date)
+    )
+    pallets_moved = pallet_result.rowcount or 0
+
+    await session.commit()
+    return len(allocs), pallets_moved
 
 
 # ---------------------------------------------------------------------------

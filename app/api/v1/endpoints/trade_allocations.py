@@ -9,6 +9,7 @@ from app.db.session import get_db_session
 from app.schemas.inventory import (
     AllocationConflictLogRead,
     BulkCancelAllocationResult,
+    BulkRescheduleAllocationResult,
     BulkShipAllocationResult,
     CustomerAllocationRead,
     CustomerAllocationStatusResult,
@@ -25,6 +26,7 @@ from app.services.customer_allocations import (
     get_conflict_logs,
     get_daily_allocation_overview,
     mark_as_shipped,
+    reschedule_allocations,
     revert_to_waiting,
     try_reserve_one,
     update_allocation_quantity,
@@ -251,6 +253,33 @@ async def bulk_ship_reservation(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return BulkShipAllocationResult(shipped_count=count)
+
+
+@router.post(
+    "/allocations/bulk-reschedule",
+    response_model=BulkRescheduleAllocationResult,
+    dependencies=[Depends(require_auth)],
+)
+async def bulk_reschedule_reservation(
+    customer_name: str,
+    from_date: date,
+    to_date: date,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_auth),
+) -> BulkRescheduleAllocationResult:
+    """按客户名把某计划出库日期的所有 waiting/reserved 预留整批改到新日期
+    （典型用途：上传时填错日期，直接改期，免得整批撤销重传）。
+
+    只移动 waiting/reserved 行；shipped/cancelled 不受影响。
+    同时**级联**把该客户该原日期下未装柜的托盘（staging/empty）改到新日期。
+    `customer_name` 支持模糊搜索，但必须唯一命中一个客户，否则返回 422。
+    目标日期已存在该客户同 JAN 记录（唯一键冲突）时返回 422 并列出冲突 JAN。
+    """
+    try:
+        count, pallets = await reschedule_allocations(session, customer_name, from_date, to_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return BulkRescheduleAllocationResult(rescheduled_count=count, pallets_rescheduled_count=pallets)
 
 
 @router.get("/allocation-conflicts", response_model=list[AllocationConflictLogRead])

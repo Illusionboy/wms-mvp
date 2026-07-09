@@ -76,6 +76,19 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); font
 .nav-item:hover { background: var(--border); color: var(--text); }
 .nav-item.active { background: var(--accent-bg); color: var(--accent); }
 .nav-item .icon { font-size: 15px; width: 18px; text-align: center; }
+/* ── Workspace switch (工作区切换) ── */
+.ws-switch { display: flex; gap: 4px; padding: 0 8px 12px; }
+.ws-switch button {
+  flex: 1; padding: 7px 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--muted);
+  transition: all .12s;
+}
+.ws-switch button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+/* 集装箱工作区：移动/扫码优先，候选表状态芯片 */
+.cand-chip { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+.cand-chip.reserved { background: var(--success-bg); color: var(--success); }
+.cand-chip.waiting { background: var(--warn-bg); color: var(--warn); }
+.pallet-badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; background:var(--border); color:var(--text); }
 .sidebar-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
 .user-chip {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
@@ -302,14 +315,19 @@ tr:hover td { background: var(--accent-bg); }
   <nav id="sidebar">
     <div class="brand">WMS</div>
 
-    <div class="nav-group">
+    <div class="ws-switch">
+      <button type="button" data-ws="ops" class="active" onclick="switchWorkspace('ops')">仓库作业</button>
+      <button type="button" data-ws="container" onclick="switchWorkspace('container')">集装箱装柜</button>
+    </div>
+
+    <div class="nav-group" data-workspace="ops">
       <div class="nav-label">总览</div>
       <button class="nav-item active" data-section="dashboard" onclick="nav(this)">
         <span class="icon">◈</span> 仪表盘
       </button>
     </div>
 
-    <div class="nav-group">
+    <div class="nav-group" data-workspace="ops">
       <div class="nav-label">库存操作</div>
       <button class="nav-item" data-section="stock-in" onclick="nav(this)">
         <span class="icon">↑</span> 入库
@@ -328,7 +346,7 @@ tr:hover td { background: var(--accent-bg); }
       </button>
     </div>
 
-    <div class="nav-group">
+    <div class="nav-group" data-workspace="ops">
       <div class="nav-label">批量导入</div>
       <button class="nav-item" data-section="chat-report" onclick="nav(this)" style="display:none">
         <span class="icon">✦</span> 微信报库
@@ -353,7 +371,7 @@ tr:hover td { background: var(--accent-bg); }
       </button>
     </div>
 
-    <div class="nav-group">
+    <div class="nav-group" data-workspace="ops">
       <div class="nav-label">历史查询</div>
       <button class="nav-item" data-section="supplier-history" onclick="nav(this)">
         <span class="icon">↑</span> 供应商记录
@@ -369,13 +387,29 @@ tr:hover td { background: var(--accent-bg); }
       </button>
     </div>
 
-    <div class="nav-group">
+    <div class="nav-group" data-workspace="ops">
       <div class="nav-label">管理</div>
       <button class="nav-item" data-section="products" onclick="nav(this)">
         <span class="icon">□</span> 商品管理
       </button>
       <button class="nav-item" data-section="settings" onclick="nav(this)">
         <span class="icon">◎</span> 设置
+      </button>
+    </div>
+
+    <div class="nav-group" data-workspace="container" style="display:none">
+      <div class="nav-label">集装箱装柜</div>
+      <button class="nav-item" data-section="container-pallets" onclick="nav(this)">
+        <span class="icon">▦</span> 托盘查询
+      </button>
+      <button class="nav-item" data-section="container-create" onclick="nav(this)">
+        <span class="icon">＋</span> 建空托盘
+      </button>
+      <button class="nav-item" data-section="container-add" onclick="nav(this)">
+        <span class="icon">⊕</span> 加货
+      </button>
+      <button class="nav-item" data-section="container-place" onclick="nav(this)">
+        <span class="icon">⚲</span> 库位绑定
       </button>
     </div>
 
@@ -889,6 +923,11 @@ tr:hover td { background: var(--accent-bg); }
           <button class="btn btn-ghost" onclick="loadAllocations()" style="margin-bottom:0">查询</button>
           <button class="btn btn-ghost" style="margin-bottom:0;color:var(--accent)" onclick="bulkShipAllocations()">一键标记出库（按客户+日期）</button>
           <button class="btn btn-ghost" style="margin-bottom:0;color:var(--danger)" onclick="bulkCancelAllocations()">一键取消（按客户+日期）</button>
+          <div class="form-row" style="margin:0;min-width:140px">
+            <label>改到新日期</label>
+            <input type="date" id="alloc-reschedule-date">
+          </div>
+          <button class="btn btn-ghost" style="margin-bottom:0;color:var(--accent)" onclick="rescheduleAllocations()">改期（按客户+原日期）</button>
         </div>
         <div id="alloc-summary" style="margin-bottom:8px"></div>
         <div style="overflow-x:auto">
@@ -1370,6 +1409,94 @@ tr:hover td { background: var(--accent-bg); }
       </div>
     </div>
 
+    <!-- ══ 集装箱装柜工作区 ══ -->
+    <!-- 托盘查询 -->
+    <div class="section" id="section-container-pallets">
+      <div class="section-title">托盘查询</div>
+      <div class="section-sub">按日期 / 客户 / 状态 / 托盘码查询托盘及其货物</div>
+      <div class="card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-row" style="margin:0"><label>计划出库日期</label><input type="date" id="cp-f-date"></div>
+        <div class="form-row" style="margin:0"><label>客户</label><input type="text" id="cp-f-customer" placeholder="客户代码"></div>
+        <div class="form-row" style="margin:0"><label>状态</label>
+          <select id="cp-f-status"><option value="">全部</option><option value="staging">备货中</option><option value="empty">空</option><option value="loaded">已装柜</option></select>
+        </div>
+        <div class="form-row" style="margin:0"><label>托盘码</label><input type="text" id="cp-f-code" placeholder="托盘码" onkeydown="if(event.key==='Enter')loadPalletList()"></div>
+        <button class="btn btn-primary" style="margin-bottom:0" onclick="loadPalletList()">查询</button>
+      </div>
+      <div id="cp-list" style="margin-top:12px"></div>
+      <div id="cp-detail" style="margin-top:12px"></div>
+    </div>
+
+    <!-- 建空托盘 -->
+    <div class="section" id="section-container-create">
+      <div class="section-title">建空托盘</div>
+      <div class="section-sub">绑定计划出库日期 + 客户；客户只能从当天预留中选择（不可手输）</div>
+      <div class="card">
+        <div class="form-row"><label>计划出库日期</label><input type="date" id="cc-date" onchange="loadCreateCustomers()"></div>
+        <div class="form-row"><label>客户（从当天预留中选）</label><select id="cc-customer"><option value="">请先选日期</option></select></div>
+        <div class="form-row"><label>托盘码（扫码或输入）</label>
+          <div class="input-scan">
+            <input type="text" id="cc-code" placeholder="扫托盘条码或手输…">
+            <button type="button" class="scan-btn" title="扫码" onclick="scanIntoText('cc-code')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="submitCreatePallet()">建托盘</button>
+        <div id="cc-result" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- 加货 -->
+    <div class="section" id="section-container-add">
+      <div class="section-title">加货</div>
+      <div class="section-sub">选托盘 → 从预留候选选货（或手动加 JAN）→ 手动填数量。只改托盘，不动库存/预留</div>
+      <div class="card">
+        <div class="form-row"><label>托盘码（扫码或输入）</label>
+          <div class="input-scan">
+            <input type="text" id="ca-code" placeholder="扫托盘条码或手输…" onkeydown="if(event.key==='Enter')loadAddPallet()">
+            <button type="button" class="scan-btn" title="扫码" onclick="scanIntoText('ca-code')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+          </div>
+        </div>
+        <button class="btn btn-ghost" onclick="loadAddPallet()">加载托盘</button>
+      </div>
+      <div id="ca-body" style="margin-top:12px;display:none">
+        <div class="card" id="ca-info"></div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">预留候选（reserved + waiting，两者都可装）</div>
+          <div id="ca-candidates"></div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">手动加 JAN（不在预留中的货）</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+            <div class="form-row" style="margin:0;flex:1;min-width:160px"><label>JAN（扫商品/外箱码或输入）</label>
+              <div class="input-scan"><input type="text" id="ca-manual-jan" placeholder="JAN…"><button type="button" class="scan-btn" title="扫码" onclick="scanIntoText('ca-manual-jan')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button></div>
+            </div>
+            <div class="form-row" style="margin:0;width:90px"><label>数量</label><input type="number" id="ca-manual-qty" min="1" value="1"></div>
+            <button class="btn btn-primary" style="margin-bottom:0" onclick="addManualItem()">加入</button>
+          </div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">托盘当前内容</div>
+          <div id="ca-items"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 库位绑定 -->
+    <div class="section" id="section-container-place">
+      <div class="section-title">库位绑定</div>
+      <div class="section-sub">扫托盘码 + 扫库位码 → 确定，把托盘放到该库位（仅记录位置，不动库存）</div>
+      <div class="card">
+        <div class="form-row"><label>托盘码</label>
+          <div class="input-scan"><input type="text" id="pl-code" placeholder="扫托盘条码…"><button type="button" class="scan-btn" title="扫码" onclick="scanIntoText('pl-code')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button></div>
+        </div>
+        <div class="form-row"><label>库位码（区-排-层，如 A-12-03；建议 1D 条码）</label>
+          <div class="input-scan"><input type="text" id="pl-loc" placeholder="A-12-03" maxlength="32"><button type="button" class="scan-btn" title="扫码" onclick="scanIntoText('pl-loc')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button></div>
+        </div>
+        <button class="btn btn-primary" onclick="submitPlacePallet()">确定放置</button>
+        <div id="pl-result" style="margin-top:12px"></div>
+      </div>
+    </div>
+
   </div><!-- /main -->
 </div><!-- /app-shell -->
 
@@ -1421,6 +1548,7 @@ function showApp() {
   document.getElementById('sidebar-username').textContent = _username;
   loadGlobals();
   loadDashboard();
+  initWorkspace();
 }
 
 // ── API helper ─────────────────────────────────────────────────────────────
@@ -1496,6 +1624,7 @@ function nav(btn) {
   if (btn.dataset.section === 'qinsi') checkQinsiAuth();
   if (btn.dataset.section === 'alloc') loadConflictLogs();
   if (btn.dataset.section === 'system-log') loadSystemLogs();
+  if (btn.dataset.section === 'container-pallets') loadPalletList();
   if (['supplier-history','customer-history'].includes(btn.dataset.section)) loadCounterpartyLists();
   closeSidebar();
   document.getElementById('main').scrollTo({ top: 0 });
@@ -2744,6 +2873,26 @@ async function bulkShipAllocations() {
   } catch (e) { toast('一键标记出库失败: ' + e.message, 'err'); }
 }
 
+async function rescheduleAllocations() {
+  const customer = document.getElementById('alloc-filter-customer').value.trim();
+  const fromDate = document.getElementById('alloc-filter-date').value;
+  const toDate = document.getElementById('alloc-reschedule-date').value;
+  if (!customer || !fromDate) {
+    toast('改期需要填写客户代码和原出库日期（上方"出库日期"）', 'err');
+    return;
+  }
+  if (!toDate) { toast('请在"改到新日期"选择目标日期', 'err'); return; }
+  if (fromDate === toDate) { toast('原日期与目标日期相同', 'err'); return; }
+  if (!confirm(`确认把「${customer}」在 ${fromDate} 的所有等待中/已调转预留改到 ${toDate}？\n（已出库/已取消的不受影响）`)) return;
+  try {
+    const res = await api('POST', `/trade/allocations/bulk-reschedule?customer_name=${encodeURIComponent(customer)}&from_date=${encodeURIComponent(fromDate)}&to_date=${encodeURIComponent(toDate)}`);
+    const palletMsg = res.pallets_rescheduled_count ? `，同时改了 ${res.pallets_rescheduled_count} 个托盘` : '';
+    toast(`已把 ${res.rescheduled_count} 条预留改到 ${toDate}${palletMsg}`, 'ok');
+    document.getElementById('alloc-filter-date').value = toDate;
+    loadAllocations();
+  } catch (e) { toast('改期失败: ' + e.message, 'err'); }
+}
+
 function allocEditQty(id) {
   const row = document.querySelector(`tr[data-alloc-id="${id}"]`);
   if (!row) return;
@@ -3948,6 +4097,215 @@ function scanIntoRawJan(inputId) {
     el.value = digits || String(code || '');
     toast(`已识别：${el.value}`, 'ok');
   });
+}
+
+// ══ 贸易集装箱工作区 (P1) ══════════════════════════════════════════════════
+let _workspace = 'ops';
+let _addPalletId = null;
+
+// 扫码填入原始文本（托盘码/库位码不是 JAN，不能剥成纯数字）
+function scanIntoText(inputId) {
+  openScanner((code) => {
+    const el = document.getElementById(inputId);
+    el.value = String(code || '').trim();
+    toast(`已识别：${el.value}`, 'ok');
+  });
+}
+
+function switchWorkspace(name) {
+  _workspace = name;
+  try { localStorage.setItem('wms_workspace', name); } catch {}
+  try { if (location.hash !== '#ws=' + name) history.replaceState(null, '', '#ws=' + name); } catch {}
+  document.querySelectorAll('.ws-switch [data-ws]').forEach(b => b.classList.toggle('active', b.dataset.ws === name));
+  document.querySelectorAll('.nav-group[data-workspace]').forEach(g => { g.style.display = (g.dataset.workspace === name) ? '' : 'none'; });
+  const first = document.querySelector('.nav-group[data-workspace="' + name + '"] .nav-item');
+  if (first) nav(first);
+}
+function initWorkspace() {
+  let saved = null;
+  try { saved = localStorage.getItem('wms_workspace'); } catch {}
+  if (location.hash.includes('ws=container') || saved === 'container') switchWorkspace('container');
+}
+
+function _palletStatusLabel(s) { return ({ empty: '空', staging: '备货中', loaded: '已装柜' })[s] || s; }
+function _cval(id) { const e = document.getElementById(id); return e ? e.value.trim() : ''; }
+
+function _renderPalletInfo(p) {
+  return `<div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center">
+    <div><strong style="font-size:15px">${esc(p.code)}</strong> <span class="pallet-badge">${_palletStatusLabel(p.status)}</span></div>
+    <div style="color:var(--muted);font-size:13px">客户 ${esc(p.customer_name || '—')} · 出库日 ${p.planned_outbound_date || '—'} · 库位 ${esc(p.shelf_location || '—')}</div>
+  </div>`;
+}
+function _renderItemsStatic(p) {
+  if (!p.items.length) return '<p class="loading" style="margin:0">托盘暂无货物</p>';
+  return '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品</th><th>数量</th></tr></thead><tbody>'
+    + p.items.map(it => `<tr><td><code style="font-size:11px">${it.jan_code}</code></td><td>${esc(it.product_name || '—')}</td><td>${it.quantity}</td></tr>`).join('')
+    + '</tbody></table></div>';
+}
+
+// ── 托盘查询 ──
+async function loadPalletList() {
+  const params = new URLSearchParams();
+  const d = _cval('cp-f-date'); if (d) params.set('planned_outbound_date', d);
+  const c = _cval('cp-f-customer'); if (c) params.set('customer_name', c);
+  const s = _cval('cp-f-status'); if (s) params.set('status', s);
+  const code = _cval('cp-f-code'); if (code) params.set('code', code);
+  const el = document.getElementById('cp-list');
+  document.getElementById('cp-detail').innerHTML = '';
+  el.innerHTML = '<p class="loading">加载中…</p>';
+  try {
+    const pallets = await api('GET', '/containers/pallets?' + params.toString());
+    if (!pallets.length) { el.innerHTML = '<p class="loading">无托盘</p>'; return; }
+    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>托盘码</th><th>客户</th><th>出库日</th><th>状态</th><th>库位</th><th>货物</th><th></th></tr></thead><tbody>'
+      + pallets.map(p => {
+        const kinds = p.items.length, total = p.items.reduce((a, i) => a + i.quantity, 0);
+        return `<tr>
+          <td><code style="font-size:11px">${esc(p.code)}</code></td>
+          <td>${esc(p.customer_name || '—')}</td>
+          <td>${p.planned_outbound_date || '—'}</td>
+          <td><span class="pallet-badge">${_palletStatusLabel(p.status)}</span></td>
+          <td>${p.shelf_location ? '<code style="font-size:11px">' + esc(p.shelf_location) + '</code>' : '—'}</td>
+          <td>${kinds} 种 / ${total} 件</td>
+          <td><button class="btn btn-ghost btn-sm" onclick="viewPalletDetail(${p.id})">查看</button></td>
+        </tr>`;
+      }).join('') + '</tbody></table></div>';
+  } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+async function viewPalletDetail(id) {
+  const el = document.getElementById('cp-detail');
+  el.innerHTML = '<p class="loading">加载中…</p>';
+  try {
+    const p = await api('GET', '/containers/pallets/' + id);
+    el.innerHTML = `<div class="card">${_renderPalletInfo(p)}
+      <div style="margin-top:10px">${_renderItemsStatic(p)}</div>
+      <div style="margin-top:10px"><button class="btn btn-primary btn-sm" onclick="goToAdd('${esc(p.code)}')">去加货</button></div>
+    </div>`;
+  } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+
+// ── 建空托盘 ──
+async function loadCreateCustomers() {
+  const d = _cval('cc-date');
+  const sel = document.getElementById('cc-customer');
+  if (!d) { sel.innerHTML = '<option value="">请先选日期</option>'; return; }
+  sel.innerHTML = '<option value="">加载中…</option>';
+  try {
+    const cs = await api('GET', '/containers/customers?planned_outbound_date=' + d);
+    if (!cs.length) { sel.innerHTML = '<option value="">该日期无预留客户</option>'; return; }
+    sel.innerHTML = cs.map(c => `<option value="${esc(c.customer_name)}">${esc(c.customer_name)}（预留${c.reserved_count} / 等待${c.waiting_count}）</option>`).join('');
+  } catch (e) { sel.innerHTML = '<option value="">加载失败</option>'; toast(e.message, 'err'); }
+}
+async function submitCreatePallet() {
+  const code = _cval('cc-code'), date = _cval('cc-date');
+  const customer = document.getElementById('cc-customer').value;
+  const rel = document.getElementById('cc-result');
+  if (!date) { toast('请选择计划出库日期', 'err'); return; }
+  if (!customer) { toast('请选择客户', 'err'); return; }
+  if (!code) { toast('请扫描或输入托盘码', 'err'); return; }
+  try {
+    const p = await api('POST', '/containers/pallets', { code, planned_outbound_date: date, customer_name: customer });
+    rel.innerHTML = resultCard('ok', `托盘「${esc(p.code)}」已建立（客户 ${esc(p.customer_name)} / ${p.planned_outbound_date}）`);
+    toast('托盘已建立', 'ok');
+    document.getElementById('cc-code').value = '';
+  } catch (e) { rel.innerHTML = resultCard('err', e.message); }
+}
+
+// ── 加货 ──
+async function loadAddPallet() {
+  const code = _cval('ca-code');
+  if (!code) { toast('请扫描或输入托盘码', 'err'); return; }
+  try {
+    const p = await api('GET', '/containers/pallets/by-code/' + encodeURIComponent(code));
+    _addPalletId = p.id;
+    document.getElementById('ca-body').style.display = 'block';
+    await refreshAddScreen();
+  } catch (e) { document.getElementById('ca-body').style.display = 'none'; toast(e.message, 'err'); }
+}
+async function refreshAddScreen() {
+  if (!_addPalletId) return;
+  const [p, cands] = await Promise.all([
+    api('GET', '/containers/pallets/' + _addPalletId),
+    api('GET', '/containers/pallets/' + _addPalletId + '/candidates'),
+  ]);
+  document.getElementById('ca-info').innerHTML = _renderPalletInfo(p);
+  document.getElementById('ca-candidates').innerHTML = _renderCandidates(cands);
+  document.getElementById('ca-items').innerHTML = _renderEditableItems(p);
+}
+function _renderCandidates(cands) {
+  if (!cands.length) return '<p class="loading">该托盘（客户/日期）下无 reserved / waiting 预留</p>';
+  return '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品</th><th>预留</th><th>状态</th><th>WMS在库</th><th>已装</th><th>加入</th></tr></thead><tbody>'
+    + cands.map(c => {
+      const remaining = Math.max(0, c.reserved_quantity - c.on_pallet_quantity);
+      const chip = `<span class="cand-chip ${c.status}">${c.status === 'reserved' ? '已调转' : '待WMS同步'}</span>`;
+      return `<tr>
+        <td><code style="font-size:11px">${c.jan_code}</code></td>
+        <td>${esc(c.product_name || '—')}</td>
+        <td>${c.reserved_quantity}</td>
+        <td>${chip}</td>
+        <td>${c.current_stock == null ? '—' : c.current_stock}</td>
+        <td>${c.on_pallet_quantity}</td>
+        <td style="white-space:nowrap">
+          <input type="number" min="1" value="${remaining || 1}" id="cand-qty-${c.jan_code}" style="width:62px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+          <button class="btn btn-primary btn-sm" onclick="addCandidate('${c.jan_code}')">加入</button>
+        </td>
+      </tr>`;
+    }).join('') + '</tbody></table></div>';
+}
+function _renderEditableItems(p) {
+  if (!p.items.length) return '<p class="loading">托盘暂无货物</p>';
+  return '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品</th><th>数量</th><th></th></tr></thead><tbody>'
+    + p.items.map(it => `<tr>
+        <td><code style="font-size:11px">${it.jan_code}</code></td>
+        <td>${esc(it.product_name || '—')}</td>
+        <td><input type="number" min="0" value="${it.quantity}" id="pit-${it.jan_code}" style="width:70px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+          <button class="btn btn-ghost btn-sm" onclick="setItemQty('${it.jan_code}')">改</button></td>
+        <td><button class="btn btn-ghost btn-sm" onclick="setPalletItem('${it.jan_code}', 0)">移除</button></td>
+      </tr>`).join('') + '</tbody></table></div>';
+}
+async function _addItemsAndRefresh(items) {
+  try { await api('POST', '/containers/pallets/' + _addPalletId + '/items', { items }); toast('已加入', 'ok'); await refreshAddScreen(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function addCandidate(jan) {
+  const q = +document.getElementById('cand-qty-' + jan).value;
+  if (!q || q < 1) { toast('数量须 ≥ 1', 'err'); return; }
+  await _addItemsAndRefresh([{ jan_code: jan, quantity: q }]);
+}
+async function addManualItem() {
+  const jan = _cval('ca-manual-jan');
+  const q = +document.getElementById('ca-manual-qty').value;
+  if (!jan) { toast('请输入 / 扫描 JAN', 'err'); return; }
+  if (!q || q < 1) { toast('数量须 ≥ 1', 'err'); return; }
+  await _addItemsAndRefresh([{ jan_code: jan, quantity: q }]);
+  document.getElementById('ca-manual-jan').value = '';
+}
+async function setItemQty(jan) { await setPalletItem(jan, +document.getElementById('pit-' + jan).value); }
+async function setPalletItem(jan, qty) {
+  try {
+    await api('PATCH', '/containers/pallets/' + _addPalletId + '/items/' + encodeURIComponent(jan), { quantity: qty });
+    toast('已更新', 'ok'); await refreshAddScreen();
+  } catch (e) { toast(e.message, 'err'); }
+}
+function goToAdd(code) {
+  const btn = document.querySelector('.nav-item[data-section="container-add"]');
+  if (btn) nav(btn);
+  document.getElementById('ca-code').value = code;
+  loadAddPallet();
+}
+
+// ── 库位绑定 ──
+async function submitPlacePallet() {
+  const code = _cval('pl-code');
+  const loc = _cval('pl-loc').toUpperCase();
+  const rel = document.getElementById('pl-result');
+  if (!code) { toast('请扫描 / 输入托盘码', 'err'); return; }
+  if (!/^[A-Z]-\d{2}-\d{2}$/.test(loc)) { toast('库位格式应为 区-排-层，如 A-12-03', 'err'); return; }
+  try {
+    const p = await api('POST', '/containers/pallets/place', { pallet_code: code, location_code: loc });
+    rel.innerHTML = resultCard('ok', `托盘「${esc(p.code)}」已放到库位 ${esc(p.shelf_location)}`);
+    toast('库位已绑定', 'ok');
+    document.getElementById('pl-code').value = ''; document.getElementById('pl-loc').value = '';
+  } catch (e) { rel.innerHTML = resultCard('err', e.message); }
 }
 </script>
 </body>
