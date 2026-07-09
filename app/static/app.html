@@ -1420,7 +1420,12 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row" style="margin:0"><label>状态</label>
           <select id="cp-f-status"><option value="">全部</option><option value="staging">备货中</option><option value="empty">空</option><option value="loaded">已装柜</option></select>
         </div>
-        <div class="form-row" style="margin:0"><label>托盘码</label><input type="text" id="cp-f-code" placeholder="托盘码" onkeydown="if(event.key==='Enter')loadPalletList()"></div>
+        <div class="form-row" style="margin:0"><label>托盘码</label>
+          <div class="input-scan">
+            <input type="text" id="cp-f-code" placeholder="托盘码" onkeydown="if(event.key==='Enter')loadPalletList()">
+            <button type="button" class="scan-btn" title="扫码" onclick="scanPalletQuery()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+          </div>
+        </div>
         <button class="btn btn-primary" style="margin-bottom:0" onclick="loadPalletList()">查询</button>
       </div>
       <div id="cp-list" style="margin-top:12px"></div>
@@ -3264,7 +3269,7 @@ function editProductRow(jan, nameJp, nameZh, upc, outerJan) {
     <td><input type="text" value="${nameJp}" id="pedit-jp-${jan}" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td><input type="text" value="${nameZh}" id="pedit-zh-${jan}" placeholder="中文名（可选）" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td><input type="number" value="${upc}" id="pedit-upc-${jan}" min="1" placeholder="—" style="width:70px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
-    <td><input type="text" value="${outerJan}" id="pedit-outer-${jan}" placeholder="外箱JAN（可选）" maxlength="13" style="width:110px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+    <td><input type="text" value="${outerJan}" id="pedit-outer-${jan}" placeholder="外箱JAN（14位ITF可选）" maxlength="14" style="width:120px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td style="white-space:nowrap">
       <button class="btn btn-primary btn-sm" onclick="saveProductRow('${jan}')">保存</button>
       <button class="btn btn-ghost btn-sm" onclick="searchProducts()">取消</button>
@@ -4144,6 +4149,12 @@ function _renderItemsStatic(p) {
 }
 
 // ── 托盘查询 ──
+function scanPalletQuery() {
+  openScanner((code) => {
+    document.getElementById('cp-f-code').value = String(code || '').trim();
+    loadPalletList();
+  });
+}
 async function loadPalletList() {
   const params = new URLSearchParams();
   const d = _cval('cp-f-date'); if (d) params.set('planned_outbound_date', d);
