@@ -52,5 +52,7 @@ class StockTransaction(TimestampMixin, Base):
     reference_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     transaction_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    supplier: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    customer: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     inventory_record: Mapped[InventoryRecord] = relationship(back_populates="transactions")

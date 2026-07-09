@@ -1,7 +1,7 @@
 import csv
 from collections import defaultdict
 from io import StringIO
-from uuid import uuid4
+from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,9 +10,12 @@ from app.models.customer import Customer
 from app.models.inventory_record import InventoryRecord
 from app.models.product import Product
 from app.models.rakuten_shipment_draft import RakutenShipmentDraft
+from app.models.stock_transaction import StockTransaction
 from app.models.warehouse import Warehouse
 from app.schemas.inventory import (
+    NonJanLine,
     ProductRead,
+    RakutenDraftPreview,
     RakutenShipmentDraftDocument,
     RakutenShipmentImportResult,
     RakutenShipmentIssue,
@@ -29,65 +32,84 @@ from app.services.inventory import (
     search_inventory_items,
     stock_out_item,
 )
+from app.common.jan_resolver import resolve_jan_quantities
 from app.tools.convert_rakuten_csv_encoding import decode_csv_bytes
 
 
 DEFAULT_RAKUTEN_WAREHOUSE = "乐天仓库"
 DEFAULT_RAKUTEN_CUSTOMER = "乐天"
 RAKUTEN_SOURCE = "rakuten_csv"
-IGNORABLE_RAKUTEN_ISSUE_TYPES = {
-    "product_not_found",
-    "inventory_record_not_found",
-    "insufficient_stock",
-}
 
 
-def parse_rakuten_shipment_csv(content: bytes) -> list[RakutenShipmentLine]:
+class _ValidationResult(NamedTuple):
+    blocking_issues: list[RakutenShipmentIssue]
+    needs_decision: list[RakutenShipmentIssue]  # no record or insufficient stock
+    resolved: list[tuple[int, str, int, InventoryRecord]]
+    auto_skipped_count: int  # product_not_found lines silently dropped
+
+
+def parse_rakuten_shipment_csv(content: bytes) -> tuple[list[RakutenShipmentLine], list[NonJanLine]]:
     text, _ = decode_csv_bytes(content)
     reader = csv.DictReader(StringIO(text))
     lines: list[RakutenShipmentLine] = []
+    non_jan: list[NonJanLine] = []
     for row in reader:
         raw_product_number = _clean_text(row.get("商品番号"))
         if not raw_product_number:
             continue
-        parsed = parse_rakuten_product_number(
-            raw_product_number=raw_product_number,
+        sku_number = _clean_text(row.get("システム連携用SKU番号"))
+        order_number = _clean_text(row.get("注文番号")) or None
+        product_name = _clean_text(row.get("商品名")) or None
+        new_lines, err = _parse_rakuten_row(
+            product_number=raw_product_number,
+            sku_number=sku_number,
             order_count_value=row.get("個数"),
+            order_number=order_number,
+            product_name=product_name,
         )
-        if parsed is None:
-            continue
-        jan_code, quantity = parsed
-        lines.append(
-            RakutenShipmentLine(
-                jan_code=jan_code,
-                quantity=quantity,
-                order_number=_clean_text(row.get("注文番号")) or None,
-                product_name=_clean_text(row.get("商品名")) or None,
-                raw_product_number=raw_product_number,
-            )
-        )
-    return lines
+        lines.extend(new_lines)
+        if err is not None:
+            non_jan.append(err)
+    return lines, non_jan
 
 
-def parse_rakuten_product_number(raw_product_number: str, order_count_value: object) -> tuple[str, int] | None:
-    product_number = _clean_text(raw_product_number)
-    if not product_number:
-        return None
-    if "decorte-sf-new" in product_number.lower():
-        return None
+def _parse_rakuten_row(
+    product_number: str,
+    sku_number: str,
+    order_count_value: object,
+    order_number: str | None,
+    product_name: str | None,
+) -> tuple[list[RakutenShipmentLine], NonJanLine | None]:
+    """Implements JAN_QUANTITY_SPEC.md resolution logic via the shared `jan_resolver`.
 
+    Returns (shipment_lines, non_jan_err). Exactly one side is non-empty.
+    Bundle products (套装) expand into multiple lines, one per JAN.
+    """
     order_count = _parse_positive_int(order_count_value, default=1)
-    if "-" in product_number:
-        jan_code, raw_set_count = product_number.rsplit("-", 1)
-        set_count = _parse_positive_int(raw_set_count, default=1)
-    else:
-        jan_code = product_number
-        set_count = 1
 
-    jan_code = "".join(ch for ch in jan_code if ch.isdigit())
-    if not jan_code:
-        return None
-    return jan_code, set_count * order_count
+    resolved = resolve_jan_quantities(product_number, sku_number, order_count)
+    if resolved:
+        return [
+            RakutenShipmentLine(
+                jan_code=jan,
+                quantity=qty,
+                order_number=order_number,
+                product_name=product_name,
+                raw_product_number=product_number,
+            )
+            for jan, qty in resolved
+        ], None
+
+    # --- All failed: report to operator for manual handling ---
+    try:
+        qty = int(float(order_count_value or 1))
+    except (ValueError, TypeError):
+        qty = 1
+    return [], NonJanLine(
+        order_number=order_number,
+        product_number=product_number,
+        quantity=max(1, qty),
+    )
 
 
 async def import_rakuten_shipment_csv(
@@ -96,7 +118,7 @@ async def import_rakuten_shipment_csv(
     warehouse_name: str = DEFAULT_RAKUTEN_WAREHOUSE,
     customer_name: str = DEFAULT_RAKUTEN_CUSTOMER,
 ) -> RakutenShipmentImportResult:
-    lines = parse_rakuten_shipment_csv(content)
+    lines, _non_jan = parse_rakuten_shipment_csv(content)
     merged_lines = _merge_shipment_lines(lines)
     result = await apply_rakuten_shipment_lines(
         session=session,
@@ -117,11 +139,13 @@ async def create_rakuten_shipment_draft(
     customer_name: str = DEFAULT_RAKUTEN_CUSTOMER,
     telegram_user_id: int | None = None,
 ) -> RakutenShipmentDraft:
-    lines = _merge_shipment_lines(parse_rakuten_shipment_csv(content))
+    raw_lines, non_jan_lines = parse_rakuten_shipment_csv(content)
+    lines = _merge_shipment_lines(raw_lines)
     document = RakutenShipmentDraftDocument(
         warehouse_name=warehouse_name,
         customer_name=customer_name,
         lines=lines,
+        non_jan_lines=non_jan_lines,
     )
     draft = RakutenShipmentDraft(
         telegram_user_id=telegram_user_id,
@@ -152,21 +176,29 @@ async def get_rakuten_shipment_draft(
 async def preview_rakuten_shipment_draft(
     session: AsyncSession,
     draft: RakutenShipmentDraft,
-) -> RakutenShipmentImportResult:
+) -> RakutenDraftPreview:
     document = RakutenShipmentDraftDocument.model_validate(draft.document)
-    issues, _ = await _validate_rakuten_shipment_lines(
+    vr = await _validate_rakuten_shipment_lines(
         session=session,
         lines=document.lines,
         warehouse_name=document.warehouse_name,
         customer_name=document.customer_name,
     )
-    return RakutenShipmentImportResult(applied=False, total_lines=len(document.lines), issues=issues)
+    return RakutenDraftPreview(
+        draft_id=draft.id,
+        total_lines=len(document.lines),
+        ok_count=len(vr.resolved),
+        auto_skipped_count=vr.auto_skipped_count,
+        needs_decision=vr.needs_decision,
+        blocking_issues=vr.blocking_issues,
+        non_jan_lines=document.non_jan_lines,
+    )
 
 
 async def apply_rakuten_shipment_draft(
     session: AsyncSession,
     draft: RakutenShipmentDraft,
-    ignore_missing: bool = False,
+    force_negative_jans: set[str] | None = None,
     user_id: int | None = None,
 ) -> RakutenShipmentImportResult:
     document = RakutenShipmentDraftDocument.model_validate(draft.document)
@@ -175,11 +207,12 @@ async def apply_rakuten_shipment_draft(
         lines=document.lines,
         warehouse_name=document.warehouse_name,
         customer_name=document.customer_name,
-        ignore_missing=ignore_missing,
+        force_negative_jans=force_negative_jans,
         user_id=user_id,
     )
     if result.applied:
-        draft.status = "applied_with_skips" if result.issues else "applied"
+        has_skips = bool(result.auto_skipped_count or result.skipped_duplicates)
+        draft.status = "applied_with_skips" if has_skips else "applied"
         await session.commit()
         await session.refresh(draft)
     return result
@@ -190,33 +223,44 @@ async def apply_rakuten_shipment_lines(
     lines: list[RakutenShipmentLine],
     warehouse_name: str = DEFAULT_RAKUTEN_WAREHOUSE,
     customer_name: str = DEFAULT_RAKUTEN_CUSTOMER,
-    ignore_missing: bool = False,
+    force_negative_jans: set[str] | None = None,
     user_id: int | None = None,
 ) -> RakutenShipmentImportResult:
     names_synced = await _sync_product_names_from_rakuten_lines(session=session, lines=lines)
-    issues, resolved = await _validate_rakuten_shipment_lines(
+    vr = await _validate_rakuten_shipment_lines(
         session=session,
         lines=lines,
         warehouse_name=warehouse_name,
         customer_name=customer_name,
     )
-    ignored_issues: list[RakutenShipmentIssue] = []
-    if ignore_missing:
-        ignored_issues = [
-            issue for issue in issues if issue.issue_type in IGNORABLE_RAKUTEN_ISSUE_TYPES
-        ]
-        issues = [
-            issue for issue in issues if issue.issue_type not in IGNORABLE_RAKUTEN_ISSUE_TYPES
-        ]
 
-    if issues:
-        return RakutenShipmentImportResult(applied=False, total_lines=len(lines), issues=issues, names_synced=names_synced)
+    if vr.blocking_issues:
+        return RakutenShipmentImportResult(
+            applied=False,
+            total_lines=len(lines),
+            issues=vr.blocking_issues,
+            names_synced=names_synced,
+            auto_skipped_count=vr.auto_skipped_count,
+        )
 
-    # All deductions run without individual commits so they succeed or fail as a unit.
-    # The caller (apply_rakuten_shipment_draft) commits after this returns.
+    force_negative_jans = force_negative_jans or set()
+    line_map = {i: lines[i] for i in range(len(lines))}
     mutations: list[RakutenShipmentMutation] = []
-    reference_id = f"rakuten_csv:{uuid4().hex}"
-    for _, jan_code, quantity, record in resolved:
+    skipped_duplicates = 0
+
+    # Apply normal (sufficient-stock) lines
+    for line_index, jan_code, quantity, record in vr.resolved:
+        order_no = line_map[line_index].order_number or "noorder"
+        reference_id = f"rakuten:{order_no}:{jan_code}"
+        existing = await session.scalar(
+            select(StockTransaction.id).where(
+                StockTransaction.source == RAKUTEN_SOURCE,
+                StockTransaction.reference_id == reference_id,
+            ).limit(1)
+        )
+        if existing:
+            skipped_duplicates += 1
+            continue
         try:
             result = await stock_out_item(
                 session=session,
@@ -245,12 +289,64 @@ async def apply_rakuten_shipment_lines(
             )
         )
 
+    # Apply force-negative lines (user explicitly chose to record as negative stock)
+    force_negated_count = 0
+    warehouse = await resolve_warehouse(session, warehouse_name)
+    customer = await resolve_customer(session, customer_name)
+    for issue in vr.needs_decision:
+        if issue.jan_code not in force_negative_jans:
+            continue  # user chose silent skip (direct shipment from partner)
+        quantity = issue.quantity_needed
+        if quantity is None or warehouse is None:
+            continue
+        original_line = line_map.get(issue.line_index)
+        order_no = (original_line.order_number if original_line else None) or "noorder"
+        reference_id = f"rakuten:{order_no}:{issue.jan_code}"
+        existing = await session.scalar(
+            select(StockTransaction.id).where(
+                StockTransaction.source == RAKUTEN_SOURCE,
+                StockTransaction.reference_id == reference_id,
+            ).limit(1)
+        )
+        if existing:
+            skipped_duplicates += 1
+            continue
+        try:
+            result = await stock_out_item(
+                session=session,
+                payload=StockOutCreate(
+                    sku=issue.jan_code,
+                    warehouse_id=warehouse.id,
+                    customer_id=customer.id if customer else None,
+                    quantity=quantity,
+                    source=RAKUTEN_SOURCE,
+                    reference_id=reference_id,
+                    note="rakuten shipment csv (负库存确认)",
+                ),
+                commit=False,
+                user_id=user_id,
+                force_negative=True,
+            )
+        except (InsufficientStockError, InventoryRecordNotFoundError) as exc:
+            raise RuntimeError(f"Rakuten force-negative apply failed: {exc}") from exc
+        mutations.append(
+            RakutenShipmentMutation(
+                jan_code=issue.jan_code,
+                quantity=quantity,
+                transaction=StockTransactionRead.model_validate(result.transaction),
+                low_stock_alert=result.low_stock_alert,
+            )
+        )
+        force_negated_count += 1
+
     return RakutenShipmentImportResult(
         applied=True,
         total_lines=len(lines),
         mutations=mutations,
-        issues=ignored_issues,
         names_synced=names_synced,
+        skipped_duplicates=skipped_duplicates,
+        auto_skipped_count=vr.auto_skipped_count,
+        force_negated_count=force_negated_count,
     )
 
 
@@ -259,96 +355,72 @@ async def _validate_rakuten_shipment_lines(
     lines: list[RakutenShipmentLine],
     warehouse_name: str,
     customer_name: str,
-) -> tuple[list[RakutenShipmentIssue], list[tuple[int, str, int, InventoryRecord]]]:
+) -> _ValidationResult:
     warehouse = await resolve_warehouse(session, warehouse_name)
     customer = await resolve_customer(session, customer_name)
-    issues: list[RakutenShipmentIssue] = []
+    blocking_issues: list[RakutenShipmentIssue] = []
+    needs_decision: list[RakutenShipmentIssue] = []
+    resolved: list[tuple[int, str, int, InventoryRecord]] = []
+    auto_skipped_count = 0
 
     if not lines:
-        issues.append(
-            RakutenShipmentIssue(
-                line_index=-1,
-                jan_code="",
-                issue_type="empty_csv",
-                message="No valid Rakuten shipment lines were parsed from this CSV.",
-            )
-        )
-
+        blocking_issues.append(RakutenShipmentIssue(
+            line_index=-1, jan_code="", issue_type="empty_csv",
+            message="No valid Rakuten shipment lines were parsed from this CSV.",
+        ))
     if warehouse is None:
-        issues.append(
-            RakutenShipmentIssue(
-                line_index=-1,
-                jan_code="",
-                issue_type="warehouse_not_found",
-                message=f"Warehouse not found: {warehouse_name}",
-            )
-        )
-    if customer is None:
-        issues.append(
-            RakutenShipmentIssue(
-                line_index=-1,
-                jan_code="",
-                issue_type="customer_not_found",
-                message=f"Customer not found: {customer_name}",
-            )
-        )
-
-    resolved: list[tuple[int, str, int, InventoryRecord]] = []
+        blocking_issues.append(RakutenShipmentIssue(
+            line_index=-1, jan_code="", issue_type="warehouse_not_found",
+            message=f"Warehouse not found: {warehouse_name}",
+        ))
     for index, line in enumerate(lines):
         products = await search_inventory_items(session=session, keyword=line.jan_code, limit=6)
         if not products:
-            issues.append(
-                RakutenShipmentIssue(
-                    line_index=index,
-                    jan_code=line.jan_code,
-                    issue_type="product_not_found",
-                    message=f"Product not found: {line.jan_code}",
-                )
-            )
+            # Product not in DB at all — likely direct-ship from partner, silently skip
+            auto_skipped_count += 1
             continue
         if len(products) > 1:
-            issues.append(
-                RakutenShipmentIssue(
-                    line_index=index,
-                    jan_code=line.jan_code,
-                    issue_type="ambiguous_product",
-                    message="Multiple products matched. Confirm with full JAN before applying.",
-                    candidates=[ProductRead.model_validate(product) for product in products],
-                )
-            )
+            blocking_issues.append(RakutenShipmentIssue(
+                line_index=index,
+                jan_code=line.jan_code,
+                issue_type="ambiguous_product",
+                message="Multiple products matched. Confirm with full JAN before applying.",
+                candidates=[ProductRead.model_validate(p) for p in products],
+            ))
             continue
-        if warehouse is None or customer is None:
+        if warehouse is None:
             continue
 
+        jan_code = products[0].jan_code
         record = await _resolve_first_inventory_record(
             session=session,
-            jan_code=products[0].jan_code,
+            jan_code=jan_code,
             warehouse_id=warehouse.id,
-            customer_id=customer.id,
         )
         if record is None:
-            issues.append(
-                RakutenShipmentIssue(
-                    line_index=index,
-                    jan_code=line.jan_code,
-                    issue_type="inventory_record_not_found",
-                    message=f"No stock record found for {products[0].jan_code}.",
-                )
-            )
+            # Product exists in DB but no stock record in this warehouse
+            needs_decision.append(RakutenShipmentIssue(
+                line_index=index,
+                jan_code=jan_code,
+                issue_type="inventory_record_not_found",
+                message=f"乐天仓库无 {jan_code} 库存记录（商品已知但未入库）",
+                current_stock=None,
+                quantity_needed=line.quantity,
+            ))
             continue
         if record.quantity < line.quantity:
-            issues.append(
-                RakutenShipmentIssue(
-                    line_index=index,
-                    jan_code=line.jan_code,
-                    issue_type="insufficient_stock",
-                    message=f"Insufficient stock for {products[0].jan_code}: have {record.quantity}, need {line.quantity}.",
-                )
-            )
+            needs_decision.append(RakutenShipmentIssue(
+                line_index=index,
+                jan_code=jan_code,
+                issue_type="insufficient_stock",
+                message=f"库存不足：{jan_code} 现有 {record.quantity}，出库需 {line.quantity}",
+                current_stock=record.quantity,
+                quantity_needed=line.quantity,
+            ))
             continue
-        resolved.append((index, products[0].jan_code, line.quantity, record))
+        resolved.append((index, jan_code, line.quantity, record))
 
-    return issues, resolved
+    return _ValidationResult(blocking_issues, needs_decision, resolved, auto_skipped_count)
 
 
 def _merge_shipment_lines(lines: list[RakutenShipmentLine]) -> list[RakutenShipmentLine]:
@@ -412,14 +484,12 @@ async def _resolve_first_inventory_record(
     session: AsyncSession,
     jan_code: str,
     warehouse_id: int,
-    customer_id: int | None,
 ) -> InventoryRecord | None:
     return await session.scalar(
         select(InventoryRecord)
         .where(
             InventoryRecord.product_jan == jan_code,
             InventoryRecord.warehouse_id == warehouse_id,
-            InventoryRecord.customer_id == customer_id,
         )
         .order_by(InventoryRecord.id.asc())
         .limit(1)

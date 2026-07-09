@@ -1,15 +1,16 @@
+import json
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 
 from app.api.deps import require_auth
 from app.core.config import settings
 from app.db.session import get_db_session
+from app.models.qinsi_scrape_cache import QinsiScrapeCache
 from app.models.stock_transaction import StockTransaction
 from app.models.warehouse import Warehouse
 from app.scrapers.qinsi_scraper import (
@@ -50,12 +51,10 @@ async def upload_qinsi_session(
     由 tools/refresh_qinsi_session.py 调用，解决 NAS 无法打开浏览器的问题。
     """
     from app.scrapers.qinsi_scraper import SESSION_FILE, _check_auth
-    import json
 
     if not payload.cookies:
         return {"ok": False, "message": "cookies 为空"}
 
-    # 验证 cookies 有效
     flat = {c["name"]: c["value"] for c in payload.cookies if "name" in c}
     try:
         async with httpx.AsyncClient(cookies=flat, follow_redirects=True, timeout=10) as client:
@@ -90,6 +89,7 @@ async def qinsi_auth_status() -> AuthStatus:
 class ScrapeRequest(BaseModel):
     from_date: date
     to_date: date
+    use_cache: bool = False
 
 
 class ApplyRequest(BaseModel):
@@ -105,19 +105,86 @@ class ApplyResult(BaseModel):
     errors: list[str]
 
 
+class CacheStatusResponse(BaseModel):
+    has_cache: bool
+    cached_at: datetime | None
+    record_count: int
+
+
+@router.get("/cache-status", response_model=CacheStatusResponse)
+async def get_cache_status(
+    from_date: date,
+    to_date: date,
+    session: AsyncSession = Depends(get_db_session),
+) -> CacheStatusResponse:
+    """Return whether a cached scrape result exists for the given date range."""
+    cached = await session.scalar(
+        select(QinsiScrapeCache).where(
+            QinsiScrapeCache.from_date == from_date,
+            QinsiScrapeCache.to_date == to_date,
+        )
+    )
+    if cached is None:
+        return CacheStatusResponse(has_cache=False, cached_at=None, record_count=0)
+    records = json.loads(cached.records_json)
+    return CacheStatusResponse(
+        has_cache=True,
+        cached_at=cached.updated_at,
+        record_count=len(records),
+    )
+
+
 @router.post("/scrape", response_model=ScrapeResult)
 async def trigger_scrape(
     payload: ScrapeRequest,
+    session: AsyncSession = Depends(get_db_session),
     current_user: CurrentUser = Depends(require_auth),
 ) -> ScrapeResult:
     """
-    触发秦丝生意通爬虫，返回指定日期范围内的出入库记录供用户审核。
-    结果不写数据库，由前端展示后用户勾选再调用 /apply。
+    爬取秦丝生意通的出入库记录。
+    use_cache=True 时若该日期范围有缓存直接返回，否则重新爬取并更新缓存。
     """
+    if payload.use_cache:
+        cached = await session.scalar(
+            select(QinsiScrapeCache).where(
+                QinsiScrapeCache.from_date == payload.from_date,
+                QinsiScrapeCache.to_date == payload.to_date,
+            )
+        )
+        if cached is not None:
+            records = [ScrapedRecord(**r) for r in json.loads(cached.records_json)]
+            return ScrapeResult(
+                success=True,
+                records=records,
+                from_date=str(payload.from_date),
+                to_date=str(payload.to_date),
+            )
+
     result = await scrape_stock_records(
         from_date=payload.from_date,
         to_date=payload.to_date,
     )
+
+    if result.success and result.records:
+        records_data = [r.model_dump(mode="json") for r in result.records]
+        records_json = json.dumps(records_data, ensure_ascii=False, default=str)
+
+        existing = await session.scalar(
+            select(QinsiScrapeCache).where(
+                QinsiScrapeCache.from_date == payload.from_date,
+                QinsiScrapeCache.to_date == payload.to_date,
+            )
+        )
+        if existing is None:
+            session.add(QinsiScrapeCache(
+                from_date=payload.from_date,
+                to_date=payload.to_date,
+                records_json=records_json,
+            ))
+        else:
+            existing.records_json = records_json
+        await session.commit()
+
     return result
 
 
@@ -131,6 +198,8 @@ async def apply_scraped_records(
     将用户勾选的爬取记录写入 WMS。
     每条记录写一个 StockTransaction（source="qinsi_scrape"）。
     reference_id = "qinsi:{order_no}:{jan_code}" 保证幂等——重复提交同一订单行自动跳过。
+    IN 方向：customer_name → supplier 字段
+    OUT 方向：customer_name → customer 字段
     """
     applied = 0
     skipped = 0
@@ -141,10 +210,8 @@ async def apply_scraped_records(
     wh_rows = await session.scalars(select(Warehouse))
     wh_by_name: dict[str, int] = {w.name: w.id for w in wh_rows.all()}
 
-    # qinsi_name → wms_name mapping from config
     qinsi_wh_map: dict[str, str] = settings.qinsi_warehouse_map
 
-    # 批量预查已导入的 reference_id，避免 N+1
     ref_ids = [
         f"qinsi:{rec.order_no}:{rec.jan_code}"
         for rec in payload.records
@@ -171,7 +238,6 @@ async def apply_scraped_records(
             duplicate += 1
             continue
 
-        # Resolve warehouse: map Qinsi name → WMS name → WMS id
         qinsi_name = rec.warehouse_name or ""
         wms_name = qinsi_wh_map.get(qinsi_name, "")
         resolved_wh_id = wh_by_name.get(wms_name) or payload.warehouse_id
@@ -188,7 +254,12 @@ async def apply_scraped_records(
             txn_date = date.fromisoformat(rec.record_date) if rec.record_date else None
         except ValueError:
             pass
+
         note = f" 备注:{rec.note}" if rec.note else ""
+
+        # IN direction: customer_name is the supplier; OUT direction: it's the customer
+        counterparty = rec.customer_name or None
+
         try:
             if rec.direction == "IN":
                 await stock_in_item(
@@ -203,6 +274,7 @@ async def apply_scraped_records(
                         reference_id=ref_id,
                         note=note or None,
                         transaction_date=txn_date,
+                        supplier=counterparty,
                     ),
                     commit=False,
                     user_id=current_user.id,
@@ -219,6 +291,7 @@ async def apply_scraped_records(
                         reference_id=ref_id,
                         note=note or None,
                         transaction_date=txn_date,
+                        customer=counterparty,
                     ),
                     commit=False,
                     user_id=current_user.id,

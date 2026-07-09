@@ -75,24 +75,65 @@ async def search(message: Message) -> None:
     if not keyword:
         await message.answer("用法: /search JAN或商品名")
         return
+    await _do_search(message, keyword)
+
+
+@telegram_router.message(lambda message: bool(message.text) and not message.text.startswith("/"))
+async def default_search(message: Message) -> None:
+    """未带任何指令的纯文本消息，默认按 /search 处理。"""
+    if not await _require_query_permission(message):
+        return
+    keyword = (message.text or "").strip()
+    if not keyword:
+        return
+    await _do_search(message, keyword)
+
+
+async def _do_search(message: Message, keyword: str) -> None:
+    from app.services.customer_allocations import ALLOCATION_WAREHOUSE_NAME
+
+    lines: list[str] = []
     async with AsyncSessionLocal() as session:
         items = await search_inventory_items(session=session, keyword=keyword, limit=10)
-    if not items:
-        await message.answer(f"未找到商品: {keyword}")
-        return
-    lines: list[str] = []
-    for product in items:
-        lines.append(f"{product.jan_code} | {product.name_jp} | {product.name_zh or '-'}")
-        if not product.inventory_records:
-            lines.append("  无库存记录")
-            continue
-        for record in product.inventory_records:
-            customer = record.customer.name if record.customer else "-"
-            lines.append(
-                f"  {record.warehouse.name} | 数量: {record.quantity} | "
-                f"库位: {record.location_code} | 客户: {customer}"
-            )
+        if not items:
+            await message.answer(f"未找到商品: {keyword}")
+            return
+        for product in items:
+            lines.append(f"{product.jan_code} | {product.name_jp} | {product.name_zh or '-'}")
+            if not product.inventory_records:
+                lines.append("  无库存记录")
+                continue
+            for record in product.inventory_records:
+                customer = record.customer.name if record.customer else "-"
+                lines.append(
+                    f"  {record.warehouse.name} | 数量: {record.quantity} | "
+                    f"库位: {record.location_code} | 客户: {customer}"
+                )
+                if record.warehouse.name == ALLOCATION_WAREHOUSE_NAME:
+                    alloc_line = await _format_allocation_line(session, product.jan_code, record.quantity)
+                    if alloc_line:
+                        lines.append(alloc_line)
     await _answer_long(message, "\n".join(lines))
+
+
+async def _format_allocation_line(session, jan_code: str, normal_stock: int) -> str | None:
+    """普通仓库客户预留情况的一行摘要，无预留记录时返回 None（不输出，避免刷屏）。"""
+    from app.services.customer_allocations import get_allocation_status
+
+    allocs = await get_allocation_status(session, jan_code=jan_code)
+    active = [a for a in allocs if a.status in ("waiting", "reserved")]
+    if not active:
+        return None
+
+    reserved = [a for a in active if a.status == "reserved"]
+    waiting = [a for a in active if a.status == "waiting"]
+    reserved_total = sum(a.quantity for a in reserved)
+    unallocated = normal_stock - reserved_total
+
+    parts = [f"默认{unallocated}"]
+    parts += [f"{a.customer_name}{a.quantity}✓" for a in reserved]
+    parts += [f"{a.customer_name}{a.quantity}⏳" for a in waiting]
+    return "  预留: " + " | ".join(parts)
 
 
 @telegram_router.message(Command("search_sku", "search_SKU"))
@@ -127,23 +168,24 @@ def _command_args(text: str | None) -> str:
 
 
 async def _require_query_permission(message: Message) -> bool:
-    from app.core.config import settings
+    from app.models.telegram_allowed_user import TelegramAllowedUser
+
     user = message.from_user
     if user is None:
         await message.answer("Cannot identify user.")
         return False
-    allowed_ids: set[int] = set()
-    for id_list in [
-        settings.telegram_query_user_ids,
-        settings.telegram_operator_user_ids,
-        settings.telegram_admin_user_ids,
-    ]:
-        for id_str in id_list.split(","):
-            id_str = id_str.strip()
-            if id_str.isdigit():
-                allowed_ids.add(int(id_str))
-    if user.id not in allowed_ids:
-        await message.answer("Access denied. Contact admin to get query access.")
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy import select
+        allowed = await session.scalar(
+            select(TelegramAllowedUser).where(
+                TelegramAllowedUser.telegram_user_id == user.id
+            )
+        )
+    if allowed is None:
+        await message.answer(
+            "⛔ 无访问权限。\n"
+            f"请联系管理员将你的 ID（{user.id}）添加到授权列表。"
+        )
         return False
     return True
 

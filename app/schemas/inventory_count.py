@@ -37,6 +37,7 @@ class CountDraftLine(BaseModel):
     adjust_delta: int           # target_quantity - current_quantity
     has_wms_record: bool        # whether an InventoryRecord exists in this warehouse
     known_product: bool = True  # whether the JAN exists in the products catalog
+    implicit_zero: bool = False # True = not in count sheet, treated as count_qty=0
 
 
 class InventoryCountDocument(BaseModel):

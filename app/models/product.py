@@ -22,6 +22,7 @@ class Product(TimestampMixin, Base):
     name_jp: Mapped[str] = mapped_column(String(255), nullable=False)
     name_zh: Mapped[str | None] = mapped_column(String(255), nullable=True)
     units_per_case: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    outer_jan: Mapped[str | None] = mapped_column(String(13), nullable=True)
     low_stock_alert_sent: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

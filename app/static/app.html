@@ -76,6 +76,19 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); font
 .nav-item:hover { background: var(--border); color: var(--text); }
 .nav-item.active { background: var(--accent-bg); color: var(--accent); }
 .nav-item .icon { font-size: 15px; width: 18px; text-align: center; }
+/* ── Workspace switch (工作区切换) ── */
+.ws-switch { display: flex; gap: 4px; padding: 0 8px 12px; }
+.ws-switch button {
+  flex: 1; padding: 7px 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--muted);
+  transition: all .12s;
+}
+.ws-switch button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+/* 集装箱工作区：移动/扫码优先，候选表状态芯片 */
+.cand-chip { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+.cand-chip.reserved { background: var(--success-bg); color: var(--success); }
+.cand-chip.waiting { background: var(--warn-bg); color: var(--warn); }
+.pallet-badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; background:var(--border); color:var(--text); }
 .sidebar-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
 .user-chip {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
@@ -156,6 +169,34 @@ textarea { resize: vertical; min-height: 100px; }
 .sp-jan { font-size: 11px; color: var(--accent); font-family: monospace; }
 .sp-name { font-weight: 600; }
 
+/* ── Scan (barcode camera) ── */
+.input-scan { display: flex; gap: 6px; align-items: stretch; }
+.input-scan > input { flex: 1; min-width: 0; }
+.scan-btn {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 42px; padding: 0; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; cursor: pointer; color: var(--muted); transition: all .12s;
+}
+.scan-btn:hover { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+.scan-btn svg { width: 20px; height: 20px; }
+.scan-overlay {
+  display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.85);
+  align-items: center; justify-content: center; padding: 20px;
+}
+.scan-box { width: 100%; max-width: 460px; text-align: center; }
+.scan-video-wrap {
+  position: relative; width: 100%; aspect-ratio: 4/3; background: #000;
+  border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,.15);
+}
+.scan-video-wrap video { width: 100%; height: 100%; object-fit: cover; }
+.scan-frame {
+  position: absolute; left: 12%; right: 12%; top: 30%; bottom: 30%;
+  border: 2px solid rgba(255,255,255,.85); border-radius: 8px;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.28); pointer-events: none;
+}
+.scan-status { color: #fff; font-size: 13px; margin-top: 14px; min-height: 18px; }
+.scan-actions { margin-top: 14px; display: flex; gap: 10px; justify-content: center; }
+
 /* ── Tables ── */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; padding: 8px 12px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--border); }
@@ -186,6 +227,58 @@ tr:hover td { background: var(--accent-bg); }
 .table-wrap { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; overflow-x: auto; }
 .result-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-top: 16px; white-space: pre-wrap; font-size: 13px; line-height: 1.7; }
 .loading { color: var(--muted); font-style: italic; }
+
+/* ── Inline button spinner ── */
+.btn-spinner { display: inline-block; width: 14px; height: 14px; margin-left: 8px; vertical-align: middle; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: btn-spin 0.7s linear infinite; }
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
+/* ── Mobile topbar (hidden on desktop) ── */
+#mobile-topbar { display: none; }
+
+/* ── Mobile layout ── */
+@media (max-width: 768px) {
+  #mobile-topbar {
+    display: flex; align-items: center; gap: 12px;
+    position: fixed; top: 0; left: 0; right: 0; height: 52px; z-index: 30;
+    background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 12px;
+  }
+  #mobile-topbar .brand { padding: 0; }
+  .menu-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-size: 18px; cursor: pointer;
+  }
+
+  #app-shell { display: block !important; height: auto; min-height: 100vh; overflow: visible; }
+  body { overflow: visible; height: auto; min-height: 100vh; }
+
+  #sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 50; width: 240px;
+    transform: translateX(-100%); transition: transform .2s ease;
+    box-shadow: 2px 0 16px rgba(0,0,0,.2);
+  }
+  #sidebar.open { transform: translateX(0); }
+
+  #sidebar-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 40;
+  }
+  #sidebar-backdrop.show { display: block; }
+
+  #main { width: 100%; height: auto; overflow: visible; padding-top: 52px; }
+  .section { padding: 16px; max-width: 100%; }
+  .stat-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+
+  /* Prevent iOS auto-zoom on focus by ensuring 16px inputs */
+  input[type=text], input[type=password], input[type=number], select, textarea, .btn {
+    font-size: 16px;
+  }
+
+  #toast-container { left: 12px; right: 12px; bottom: 12px; }
+  .toast { max-width: none; }
+
+  /* Stack form rows that use inline flex layouts */
+  .form-row > div[style*="display:flex"] { flex-wrap: wrap; }
+}
 </style>
 </head>
 <body>
@@ -211,18 +304,30 @@ tr:hover td { background: var(--accent-bg); }
 <!-- App Shell -->
 <div id="app-shell" style="display:none;width:100%;height:100%;overflow:hidden;display:flex">
 
+  <!-- Mobile top bar -->
+  <div id="mobile-topbar">
+    <button class="menu-btn" onclick="toggleSidebar()" aria-label="菜单">☰</button>
+    <div class="brand">WMS</div>
+  </div>
+  <div id="sidebar-backdrop" onclick="closeSidebar()"></div>
+
   <!-- Sidebar -->
   <nav id="sidebar">
     <div class="brand">WMS</div>
 
-    <div class="nav-group">
+    <div class="ws-switch">
+      <button type="button" data-ws="ops" class="active" onclick="switchWorkspace('ops')">仓库作业</button>
+      <button type="button" data-ws="container" onclick="switchWorkspace('container')">集装箱装柜</button>
+    </div>
+
+    <div class="nav-group" data-workspace="ops">
       <div class="nav-label">总览</div>
       <button class="nav-item active" data-section="dashboard" onclick="nav(this)">
         <span class="icon">◈</span> 仪表盘
       </button>
     </div>
 
-    <div class="nav-group">
+    <div class="nav-group" data-workspace="ops">
       <div class="nav-label">库存操作</div>
       <button class="nav-item" data-section="stock-in" onclick="nav(this)">
         <span class="icon">↑</span> 入库
@@ -233,18 +338,30 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="stock-adjust" onclick="nav(this)">
         <span class="icon">⇌</span> 调整
       </button>
+      <button class="nav-item" data-section="stock-transfer" onclick="nav(this)">
+        <span class="icon">⇄</span> 调库
+      </button>
       <button class="nav-item" data-section="search" onclick="nav(this)">
         <span class="icon">○</span> 查询
       </button>
     </div>
 
-    <div class="nav-group">
+    <div class="nav-group" data-workspace="ops">
       <div class="nav-label">批量导入</div>
-      <button class="nav-item" data-section="chat-report" onclick="nav(this)">
+      <button class="nav-item" data-section="chat-report" onclick="nav(this)" style="display:none">
         <span class="icon">✦</span> 微信报库
       </button>
+      <button class="nav-item" data-section="oa" onclick="nav(this)">
+        <span class="icon">📦</span> 乐天采购
+      </button>
       <button class="nav-item" data-section="rakuten" onclick="nav(this)">
-        <span class="icon">▤</span> 乐天 CSV
+        <span class="icon">▤</span> 乐天出库
+      </button>
+      <button class="nav-item" data-section="trade-shipment" onclick="nav(this)">
+        <span class="icon">⇄</span> 贸易出库
+      </button>
+      <button class="nav-item" data-section="alloc" onclick="nav(this)">
+        <span class="icon">◈</span> 客户预留
       </button>
       <button class="nav-item" data-section="count-import" onclick="nav(this)">
         <span class="icon">≡</span> 盘点导入
@@ -254,13 +371,45 @@ tr:hover td { background: var(--accent-bg); }
       </button>
     </div>
 
-    <div class="nav-group">
+    <div class="nav-group" data-workspace="ops">
+      <div class="nav-label">历史查询</div>
+      <button class="nav-item" data-section="supplier-history" onclick="nav(this)">
+        <span class="icon">↑</span> 供应商记录
+      </button>
+      <button class="nav-item" data-section="customer-history" onclick="nav(this)">
+        <span class="icon">↓</span> 客户记录
+      </button>
+      <button class="nav-item" data-section="product-history" onclick="nav(this)">
+        <span class="icon">○</span> 商品进出库
+      </button>
+      <button class="nav-item" data-section="system-log" onclick="nav(this)">
+        <span class="icon">⚠</span> 日志查看
+      </button>
+    </div>
+
+    <div class="nav-group" data-workspace="ops">
       <div class="nav-label">管理</div>
       <button class="nav-item" data-section="products" onclick="nav(this)">
         <span class="icon">□</span> 商品管理
       </button>
       <button class="nav-item" data-section="settings" onclick="nav(this)">
         <span class="icon">◎</span> 设置
+      </button>
+    </div>
+
+    <div class="nav-group" data-workspace="container" style="display:none">
+      <div class="nav-label">集装箱装柜</div>
+      <button class="nav-item" data-section="container-pallets" onclick="nav(this)">
+        <span class="icon">▦</span> 托盘查询
+      </button>
+      <button class="nav-item" data-section="container-create" onclick="nav(this)">
+        <span class="icon">＋</span> 建空托盘
+      </button>
+      <button class="nav-item" data-section="container-add" onclick="nav(this)">
+        <span class="icon">⊕</span> 加货
+      </button>
+      <button class="nav-item" data-section="container-place" onclick="nav(this)">
+        <span class="icon">⚲</span> 库位绑定
       </button>
     </div>
 
@@ -291,7 +440,10 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row">
           <label>搜索商品 (JAN / 商品名)</label>
           <div class="search-widget">
-            <input type="text" id="si-search" placeholder="扫描或输入…" oninput="debounceSearch('si')">
+            <div class="input-scan">
+              <input type="text" id="si-search" placeholder="扫描或输入…" oninput="debounceSearch('si')">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoWidget('si')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
             <div class="search-results" id="si-results" style="display:none"></div>
           </div>
           <div class="selected-product" id="si-selected">
@@ -317,6 +469,10 @@ tr:hover td { background: var(--accent-bg); }
           <input type="text" id="si-location" value="A-00-00" placeholder="A-01-02">
         </div>
         <div class="form-row">
+          <label>供应商 (可选)</label>
+          <input type="text" id="si-supplier" placeholder="供应商名称…">
+        </div>
+        <div class="form-row">
           <label>备注 (可选)</label>
           <input type="text" id="si-note" placeholder="来源备注…">
         </div>
@@ -337,7 +493,10 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row">
           <label>搜索商品 (JAN / 商品名)</label>
           <div class="search-widget">
-            <input type="text" id="so-search" placeholder="扫描或输入…" oninput="debounceSearch('so')">
+            <div class="input-scan">
+              <input type="text" id="so-search" placeholder="扫描或输入…" oninput="debounceSearch('so')">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoWidget('so')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
             <div class="search-results" id="so-results" style="display:none"></div>
           </div>
           <div class="selected-product" id="so-selected">
@@ -357,6 +516,10 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row">
           <label>数量</label>
           <input type="number" id="so-qty" min="1" value="1" placeholder="1">
+        </div>
+        <div class="form-row">
+          <label>客户 (可选)</label>
+          <input type="text" id="so-customer-name" placeholder="客户名称…">
         </div>
         <div class="form-row">
           <label>备注 (可选)</label>
@@ -379,7 +542,10 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row">
           <label>搜索商品 (JAN / 商品名)</label>
           <div class="search-widget">
-            <input type="text" id="sa-search" placeholder="扫描或输入…" oninput="debounceSearch('sa')">
+            <div class="input-scan">
+              <input type="text" id="sa-search" placeholder="扫描或输入…" oninput="debounceSearch('sa')">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoWidget('sa')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
             <div class="search-results" id="sa-results" style="display:none"></div>
           </div>
           <div class="selected-product" id="sa-selected">
@@ -409,6 +575,53 @@ tr:hover td { background: var(--accent-bg); }
       <div id="sa-result"></div>
     </div>
 
+    <!-- Stock Transfer -->
+    <div class="section" id="section-stock-transfer">
+      <div class="section-title">调库</div>
+      <div class="section-sub">将商品从一个仓库移至另一个仓库（自动写入出库+入库两笔记录）</div>
+      <div class="card">
+        <div class="form-row">
+          <label>搜索商品 (JAN / 商品名)</label>
+          <div class="search-widget">
+            <div class="input-scan">
+              <input type="text" id="st-search" placeholder="扫描或输入…" oninput="debounceSearch('st')">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoWidget('st')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
+            <div class="search-results" id="st-results" style="display:none"></div>
+          </div>
+          <div class="selected-product" id="st-selected">
+            <div class="sri-jan" id="st-jan-display"></div>
+            <div class="sp-name" id="st-name-display"></div>
+          </div>
+          <input type="hidden" id="st-jan">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>调出仓库</label>
+            <select id="st-from-warehouse"></select>
+          </div>
+          <div class="form-row">
+            <label>调入仓库</label>
+            <select id="st-to-warehouse"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>数量</label>
+          <input type="number" id="st-qty" min="1" value="1" placeholder="1">
+        </div>
+        <div class="form-row">
+          <label>交易日期 (默认今天)</label>
+          <input type="date" id="st-txn-date">
+        </div>
+        <div class="form-row">
+          <label>备注 (选填)</label>
+          <input type="text" id="st-note" placeholder="调库原因…">
+        </div>
+        <button class="btn btn-primary" onclick="submitTransfer()">确认调库</button>
+      </div>
+      <div id="st-result"></div>
+    </div>
+
     <!-- Search -->
     <div class="section" id="section-search">
       <div class="section-title">库存查询</div>
@@ -416,15 +629,18 @@ tr:hover td { background: var(--accent-bg); }
       <div class="card" style="display:flex;gap:8px;align-items:flex-end">
         <div class="form-row" style="flex:1;margin:0">
           <label>关键词</label>
-          <input type="text" id="search-kw" placeholder="JAN、后6位、商品名…" onkeydown="if(event.key==='Enter')doSearch()">
+          <div class="input-scan">
+            <input type="text" id="search-kw" placeholder="JAN、后6位、商品名…" onkeydown="if(event.key==='Enter')doSearch()">
+            <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoInventorySearch()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+          </div>
         </div>
         <button class="btn btn-primary" onclick="doSearch()" style="margin-bottom:0">搜索</button>
       </div>
       <div id="search-result" style="margin-top:16px"></div>
     </div>
 
-    <!-- Chat Report -->
-    <div class="section" id="section-chat-report">
+    <!-- Chat Report (hidden) -->
+    <div class="section" id="section-chat-report" style="display:none">
       <div class="section-title">微信报库解析</div>
       <div class="section-sub">用 AI 解析微信聊天报库记录，生成草稿后确认导入</div>
       <div class="card" id="chat-form-card">
@@ -466,10 +682,58 @@ tr:hover td { background: var(--accent-bg); }
       </div>
     </div>
 
+    <!-- Rakuten 乐天采购 -->
+    <div class="section" id="section-oa">
+      <div class="section-title">乐天采购</div>
+      <div class="section-sub">上传一号店/二号店订单明细（CSV 或 XLSX），汇总采购需求并对比乐天仓库库存</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div class="form-row">
+            <label>一号店订单文件</label>
+            <input type="file" id="oa-file1" accept=".csv,.xlsx,.xls" style="padding:6px 0;border:none;background:none">
+          </div>
+          <div class="form-row">
+            <label>二号店订单文件（可选）</label>
+            <input type="file" id="oa-file2" accept=".csv,.xlsx,.xls" style="padding:6px 0;border:none;background:none">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="runOrderAnalysis()">分析出货需求</button>
+      </div>
+
+      <div id="oa-result" style="display:none;margin-top:16px">
+        <div id="oa-summary" style="margin-bottom:12px"></div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-sm btn-ghost" onclick="filterOA('all')">全部</button>
+          <button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:1px solid #dc2626" onclick="filterOA('problem')">⚠ 有问题</button>
+          <button class="btn btn-sm" style="background:#fffbeb;color:#d97706;border:1px solid #d97706" onclick="filterOA('insufficient')">库存不足</button>
+          <button class="btn btn-sm" style="background:#f5f3ff;color:#7c3aed;border:1px solid #7c3aed" onclick="filterOA('no_record')">无库存记录</button>
+          <button class="btn btn-sm" style="background:#fef2f2;color:#dc2626;border:1px solid #dc2626" onclick="filterOA('unknown')">商品未知</button>
+          <button class="btn btn-sm" style="background:#f0fdf4;color:#16a34a;border:1px solid #16a34a" onclick="filterOA('ok')">库存充足</button>
+          <span style="flex:1"></span>
+          <button class="btn btn-primary" id="oa-apply-btn" onclick="applyOrderAnalysis()" style="display:none">确认出库（充足项）</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="table" id="oa-table">
+            <thead><tr>
+              <th>状态</th>
+              <th>JAN</th>
+              <th>商品名</th>
+              <th>出货需求</th>
+              <th>乐天库存</th>
+              <th>缺少量</th>
+            </tr></thead>
+            <tbody id="oa-tbody"></tbody>
+          </table>
+        </div>
+        <div id="oa-unresolved" style="display:none;margin-top:14px"></div>
+      </div>
+      <div id="oa-apply-result" style="display:none;margin-top:16px"></div>
+    </div>
+
     <!-- Rakuten CSV -->
     <div class="section" id="section-rakuten">
-      <div class="section-title">乐天 CSV 导入</div>
-      <div class="section-sub">上传乐天 RMS 出货 CSV，直接写入出库记录</div>
+      <div class="section-title">乐天出库</div>
+      <div class="section-sub">上传乐天 RMS 出货 CSV，预览后确认写入出库记录</div>
       <div class="card">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="form-row">
@@ -485,8 +749,28 @@ tr:hover td { background: var(--accent-bg); }
           <label>CSV 文件</label>
           <input type="file" id="rak-file" accept=".csv" style="padding:6px 0;border:none;background:none">
         </div>
-        <button class="btn btn-primary" onclick="uploadRakutenCSV()">上传导入</button>
+        <button class="btn btn-primary" onclick="uploadRakutenCSV()">上传预览</button>
       </div>
+
+      <!-- Preview / Confirm area -->
+      <div id="rak-preview-area" style="display:none">
+        <hr class="divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <strong id="rak-preview-title"></strong>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('rak-preview-area').style.display='none';_rakDraftId=null">取消</button>
+        </div>
+        <div id="rak-issues" style="margin-bottom:12px"></div>
+        <div id="rak-needs-decision-wrap" style="display:none;margin-bottom:14px;border:1px solid var(--warn);border-radius:8px;padding:12px">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--warn)">
+            ⚠ <span id="rak-needs-decision-count"></span> 条商品库存不足或无记录，请逐条决策：
+          </div>
+          <div id="rak-needs-decision-list"></div>
+        </div>
+        <div id="rak-ignore-row" style="display:none"></div>
+        <button class="btn btn-primary" id="rak-confirm-btn" onclick="applyRakutenDraft()">确认导入</button>
+      </div>
+
+      <!-- Result area (after apply) -->
       <div id="rak-result-area" style="display:none">
         <hr class="divider">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -501,7 +785,193 @@ tr:hover td { background: var(--accent-bg); }
             </table>
           </div>
         </div>
-        <div id="rak-issues" style="margin-top:8px"></div>
+        <div id="rak-result-issues" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <!-- Trade Shipment (贸易出库) -->
+    <div class="section" id="section-trade-shipment">
+      <div class="section-title">贸易出库</div>
+      <div class="section-sub">拍照识别或上传 Excel 货单，预览核对后确认批量出库</div>
+      <div class="card">
+        <div class="form-row">
+          <label>仓库</label>
+          <select id="trade-warehouse"></select>
+        </div>
+        <div class="form-row">
+          <label>拍照识别（可多选）</label>
+          <input type="file" id="trade-image-files" accept="image/*" multiple style="padding:6px 0;border:none;background:none">
+          <button class="btn btn-primary" id="trade-image-btn" style="margin-top:8px" onclick="uploadTradeImages()">识别图片<span id="trade-image-spinner" class="btn-spinner" style="display:none"></span></button>
+        </div>
+        <div class="form-row">
+          <label>上传 Excel（每个客户一个 sheet，列：jan/品名/箱数/箱入）</label>
+          <input type="file" id="trade-excel-file" accept=".xlsx" style="padding:6px 0;border:none;background:none">
+          <button class="btn btn-primary" id="trade-excel-btn" style="margin-top:8px" onclick="uploadTradeExcel()">上传预览<span id="trade-excel-spinner" class="btn-spinner" style="display:none"></span></button>
+        </div>
+      </div>
+
+      <!-- Preview / Confirm area -->
+      <div id="trade-preview-area" style="display:none">
+        <hr class="divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <strong id="trade-preview-title"></strong>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('trade-preview-area').style.display='none';_tradeDraftId=null">取消</button>
+        </div>
+        <div id="trade-issues" style="margin-bottom:12px"></div>
+        <div id="trade-needs-decision-wrap" style="display:none;margin-bottom:14px;border:1px solid var(--warn);border-radius:8px;padding:12px">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--warn)">
+            ⚠ <span id="trade-needs-decision-count"></span> 条需要处理：
+          </div>
+          <div id="trade-needs-decision-list"></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>客户</th><th>JAN</th><th>品名</th><th>箱数</th><th>箱入</th><th>数量</th><th></th></tr></thead>
+            <tbody id="trade-lines-body"></tbody>
+          </table>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-ghost" id="trade-revalidate-btn" onclick="revalidateTradeDraft()">保存修改并重新校验</button>
+          <button class="btn btn-primary" id="trade-confirm-btn" onclick="applyTradeDraft()">确认出库</button>
+        </div>
+      </div>
+
+      <!-- Result area (after apply) -->
+      <div id="trade-result-area" style="display:none">
+        <hr class="divider">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <strong id="trade-result-title"></strong>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('trade-result-area').style.display='none'">收起</button>
+        </div>
+        <div id="trade-mutations-wrap" style="display:none">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>客户</th><th>JAN</th><th>数量</th></tr></thead>
+              <tbody id="trade-mutations"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="trade-result-issues" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <!-- 客户预留 Customer Allocations -->
+    <div class="section" id="section-alloc">
+      <div class="section-title">客户预留</div>
+      <div class="section-sub">上传客户需求 Excel（每 sheet = 客户代码），系统自动预留普通仓库库存，并在入库后自动调转</div>
+
+      <!-- 上传区 -->
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div class="form-row">
+            <label>需求 Excel（每 sheet 为客户代码）</label>
+            <input type="file" id="alloc-file" accept=".xlsx,.xls" style="padding:6px 0;border:none;background:none">
+          </div>
+          <div class="form-row">
+            <label>计划出库日期（文件名含日期时可不填）</label>
+            <input type="date" id="alloc-date">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="uploadAllocation()">上传并预留</button>
+        <div id="alloc-upload-result" style="margin-top:12px"></div>
+      </div>
+
+      <!-- 装柜前检查：某天所有客户预留一览 -->
+      <div class="card" style="margin-top:16px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+          <div class="form-row" style="margin:0;flex:1;min-width:140px">
+            <label>计划出库日期</label>
+            <input type="date" id="alloc-overview-date">
+          </div>
+          <div class="form-row" style="margin:0">
+            <label>只看状态</label>
+            <select id="alloc-overview-status" onchange="renderDailyOverview()">
+              <option value="">全部</option>
+              <option value="waiting">等待中</option>
+              <option value="reserved">已调转</option>
+              <option value="shipped">已出库</option>
+              <option value="cancelled">已取消</option>
+            </select>
+          </div>
+          <button class="btn btn-ghost" onclick="loadDailyOverview()" style="margin-bottom:0">查看当天所有客户预留情况</button>
+        </div>
+        <div class="section-sub" style="margin:0 0 10px">装柜前一次性检查：该日期下所有客户的预留齐货情况，按客户分组，等待中（缺货）的商品高亮显示。筛选状态时，已没有匹配商品的客户不再显示。</div>
+        <div id="alloc-overview-result"></div>
+      </div>
+
+      <!-- 查询区 -->
+      <div class="card" style="margin-top:16px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+          <div class="form-row" style="margin:0;flex:1;min-width:140px">
+            <label>客户代码</label>
+            <input type="text" id="alloc-filter-customer" placeholder="mm / kk / cp…">
+          </div>
+          <div class="form-row" style="margin:0;flex:1;min-width:140px">
+            <label>出库日期</label>
+            <input type="date" id="alloc-filter-date">
+          </div>
+          <div class="form-row" style="margin:0">
+            <label>状态</label>
+            <select id="alloc-filter-status">
+              <option value="">全部</option>
+              <option value="waiting">等待中</option>
+              <option value="reserved">已调转</option>
+              <option value="shipped">已出库</option>
+              <option value="cancelled">已取消</option>
+            </select>
+          </div>
+          <button class="btn btn-ghost" onclick="loadAllocations()" style="margin-bottom:0">查询</button>
+          <button class="btn btn-ghost" style="margin-bottom:0;color:var(--accent)" onclick="bulkShipAllocations()">一键标记出库（按客户+日期）</button>
+          <button class="btn btn-ghost" style="margin-bottom:0;color:var(--danger)" onclick="bulkCancelAllocations()">一键取消（按客户+日期）</button>
+          <div class="form-row" style="margin:0;min-width:140px">
+            <label>改到新日期</label>
+            <input type="date" id="alloc-reschedule-date">
+          </div>
+          <button class="btn btn-ghost" style="margin-bottom:0;color:var(--accent)" onclick="rescheduleAllocations()">改期（按客户+原日期）</button>
+        </div>
+        <div id="alloc-summary" style="margin-bottom:8px"></div>
+        <div style="overflow-x:auto">
+          <table class="table" id="alloc-table">
+            <thead><tr>
+              <th>出库日期</th>
+              <th>客户</th>
+              <th>JAN</th>
+              <th>商品名</th>
+              <th>需求量</th>
+              <th>当前库存</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr></thead>
+            <tbody id="alloc-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 预留冲突日志 -->
+      <div class="card" style="margin-top:16px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <strong style="font-size:14px;color:var(--warn)">⚠ 预留冲突日志</strong>
+          <button class="btn btn-ghost btn-sm" onclick="loadConflictLogs()">刷新</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="clearConflictLogs()">清空日志</button>
+        </div>
+        <div class="section-sub" style="margin:0 0 10px">
+          某客户已调转（reserved）的预留，因库存被预留系统之外的出库/调整消耗而被迫退回等待中时，记录在此。
+        </div>
+        <div style="overflow-x:auto">
+          <table class="table" id="alloc-conflict-table">
+            <thead><tr>
+              <th>时间</th>
+              <th>JAN</th>
+              <th>商品名</th>
+              <th>客户</th>
+              <th>计划出库日期</th>
+              <th>受影响数量</th>
+              <th>当时库存</th>
+              <th>触发原因</th>
+            </tr></thead>
+            <tbody id="alloc-conflict-tbody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -534,7 +1004,13 @@ tr:hover td { background: var(--accent-bg); }
           <label>盘点批次（文件包含多条记录）</label>
           <select id="ci-session-index"></select>
         </div>
-        <button class="btn btn-primary" onclick="uploadCountFile()">解析预览</button>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+          <input type="checkbox" id="ci-cover-uncovered" checked style="width:16px;height:16px;cursor:pointer">
+          <label for="ci-cover-uncovered" style="cursor:pointer;font-size:13px;color:var(--text-secondary)">
+            将仓库中未出现在盘点单的商品视为盘点数量=0（全仓覆盖）
+          </label>
+        </div>
+        <button class="btn btn-primary" onclick="uploadCountFile()" style="margin-top:12px">解析预览</button>
       </div>
       <div id="ci-draft-area" style="display:none">
         <hr class="divider">
@@ -575,6 +1051,7 @@ tr:hover td { background: var(--accent-bg); }
           <button class="btn btn-ghost btn-sm" onclick="filterCount('all')">全部</button>
           <button class="btn btn-ghost btn-sm" onclick="filterCount('diff')">有差异</button>
           <button class="btn btn-ghost btn-sm" onclick="filterCount('new')">新增SKU</button>
+          <button class="btn btn-ghost btn-sm" onclick="filterCount('implicit')" style="color:#f59e0b">未盘(按0计)</button>
         </div>
         <div class="table-wrap">
           <table>
@@ -629,14 +1106,18 @@ tr:hover td { background: var(--accent-bg); }
             </select>
           </div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <button class="btn btn-primary" id="qs-scrape-btn" onclick="triggerQinsiScrape()">爬取记录</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-primary" id="qs-scrape-btn" onclick="triggerQinsiScrape(false)">重新爬取</button>
+          <button class="btn btn-ghost" id="qs-cache-btn" onclick="triggerQinsiScrape(true)">使用缓存</button>
+          <span id="qs-cache-hint" style="font-size:12px;color:var(--muted)"></span>
           <span id="qs-scrape-status" style="font-size:12px;color:var(--muted)"></span>
         </div>
       </div>
 
       <div id="qs-result-area" style="display:none">
         <hr class="divider">
+        <!-- Warehouse filter tabs -->
+        <div id="qs-wh-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <div>
             共 <strong id="qs-total"></strong> 笔单据
@@ -689,6 +1170,142 @@ tr:hover td { background: var(--accent-bg); }
       </div>
     </div>
 
+    <!-- Supplier History -->
+    <div class="section" id="section-supplier-history">
+      <div class="section-title">供应商入库记录</div>
+      <div class="section-sub">按供应商名称和日期范围查询入库历史</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>供应商名称</label>
+            <input type="text" id="sh-supplier" placeholder="输入名称关键词…" list="sh-supplier-list">
+            <datalist id="sh-supplier-list"></datalist>
+          </div>
+          <div class="form-row">
+            <label>开始日期</label>
+            <input type="date" id="sh-from">
+          </div>
+          <div class="form-row">
+            <label>结束日期</label>
+            <input type="date" id="sh-to">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="querySupplierHistory()">查询</button>
+      </div>
+      <div id="sh-result" style="margin-top:12px"></div>
+    </div>
+
+    <!-- Customer History -->
+    <div class="section" id="section-customer-history">
+      <div class="section-title">客户出库记录</div>
+      <div class="section-sub">按客户名称和日期范围查询出库历史</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>客户名称</label>
+            <input type="text" id="ch-customer" placeholder="输入名称关键词…" list="ch-customer-list">
+            <datalist id="ch-customer-list"></datalist>
+          </div>
+          <div class="form-row">
+            <label>开始日期</label>
+            <input type="date" id="ch-from">
+          </div>
+          <div class="form-row">
+            <label>结束日期</label>
+            <input type="date" id="ch-to">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="queryCustomerHistory()">查询</button>
+      </div>
+      <div id="ch-result" style="margin-top:12px"></div>
+    </div>
+
+    <!-- Product History -->
+    <div class="section" id="section-product-history">
+      <div class="section-title">商品进出库情况</div>
+      <div class="section-sub">按商品 JAN 码查询所有入库、出库、调整记录</div>
+      <div class="card">
+        <div class="form-row">
+          <label>搜索商品 (JAN / 商品名)</label>
+          <div class="search-widget">
+            <div class="input-scan">
+              <input type="text" id="ph-search" placeholder="扫描或输入…" oninput="debounceSearch('ph')">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoWidget('ph')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
+            <div class="search-results" id="ph-results" style="display:none"></div>
+          </div>
+          <div class="selected-product" id="ph-selected">
+            <div class="sri-jan" id="ph-jan-display"></div>
+            <div class="sp-name" id="ph-name-display"></div>
+          </div>
+          <input type="hidden" id="ph-jan">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>开始日期</label>
+            <input type="date" id="ph-from">
+          </div>
+          <div class="form-row">
+            <label>结束日期</label>
+            <input type="date" id="ph-to">
+          </div>
+          <div class="form-row">
+            <label>类型筛选</label>
+            <select id="ph-type">
+              <option value="">全部</option>
+              <option value="IN">入库</option>
+              <option value="OUT">出库</option>
+              <option value="ADJUST">调整</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="queryProductHistory()">查询</button>
+      </div>
+      <div id="ph-result" style="margin-top:12px"></div>
+    </div>
+
+    <!-- System Log -->
+    <div class="section" id="section-system-log">
+      <div class="section-title">日志查看</div>
+      <div class="section-sub">系统异常事件统一日志：出库/调整后出现负库存、客户预留冲突等，按时间倒序</div>
+      <div class="card">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+          <div class="form-row" style="margin:0">
+            <label>分类</label>
+            <select id="sl-filter-category">
+              <option value="">全部</option>
+              <option value="negative_stock">负库存</option>
+              <option value="allocation_conflict">预留冲突</option>
+            </select>
+          </div>
+          <div class="form-row" style="margin:0">
+            <label>级别</label>
+            <select id="sl-filter-level">
+              <option value="">全部</option>
+              <option value="warning">警告</option>
+              <option value="error">错误</option>
+              <option value="info">信息</option>
+            </select>
+          </div>
+          <button class="btn btn-ghost" onclick="loadSystemLogs()" style="margin-bottom:0">查询</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="table" id="system-log-table">
+            <thead><tr>
+              <th>时间</th>
+              <th>分类</th>
+              <th>级别</th>
+              <th>JAN</th>
+              <th>商品名</th>
+              <th>仓库</th>
+              <th>说明</th>
+            </tr></thead>
+            <tbody id="system-log-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- Products -->
     <div class="section" id="section-products">
       <div class="section-title">商品管理</div>
@@ -704,9 +1321,37 @@ tr:hover td { background: var(--accent-bg); }
       </div>
       <hr class="divider">
       <div class="card">
+        <div class="card-title">新增商品</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-row">
+            <label>JAN 码</label>
+            <div class="input-scan">
+              <input type="text" id="np-jan" placeholder="13位条码" maxlength="13">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoRawJan('np-jan')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
+          </div>
+          <div class="form-row">
+            <label>箱入数（选填）</label>
+            <input type="number" id="np-upc" min="1" placeholder="—">
+          </div>
+          <div class="form-row">
+            <label>商品名（日文）</label>
+            <input type="text" id="np-name-jp" placeholder="商品名">
+          </div>
+          <div class="form-row">
+            <label>商品名（中文，选填）</label>
+            <input type="text" id="np-name-zh" placeholder="中文名">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="createProduct()">新增商品</button>
+        <div id="np-result" style="margin-top:12px"></div>
+      </div>
+      <hr class="divider">
+      <div class="card">
         <div class="card-title">商品搜索</div>
         <div style="display:flex;gap:8px">
           <input type="text" id="prod-search-kw" placeholder="JAN 或商品名…" style="flex:1" onkeydown="if(event.key==='Enter')searchProducts()">
+          <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoProductSearch()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
           <button class="btn btn-ghost" onclick="searchProducts()">搜索</button>
         </div>
         <div id="prod-search-result" style="margin-top:12px"></div>
@@ -748,12 +1393,128 @@ tr:hover td { background: var(--accent-bg); }
         </div>
         <div id="customer-list"></div>
       </div>
+      <hr class="divider">
+      <div class="card">
+        <div class="card-title">Telegram 查询授权用户</div>
+        <p style="font-size:13px;color:var(--muted);margin:0 0 12px">
+          添加用户后立即生效，无需重启 Bot。用户可在 Bot 中发 <code>/whoami</code> 查看自己的 ID。
+        </p>
+        <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          <input type="number" id="tg-user-id" placeholder="Telegram 用户 ID" style="width:180px">
+          <input type="text" id="tg-username" placeholder="@handle（可选）" style="width:150px">
+          <input type="text" id="tg-note" placeholder="备注（可选）" style="width:150px">
+          <button class="btn btn-primary btn-sm" onclick="addTelegramUser()">添加</button>
+        </div>
+        <div id="tg-user-list" style="margin-top:10px"></div>
+      </div>
+    </div>
+
+    <!-- ══ 集装箱装柜工作区 ══ -->
+    <!-- 托盘查询 -->
+    <div class="section" id="section-container-pallets">
+      <div class="section-title">托盘查询</div>
+      <div class="section-sub">按日期 / 客户 / 状态 / 托盘码查询托盘及其货物</div>
+      <div class="card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div class="form-row" style="margin:0"><label>计划出库日期</label><input type="date" id="cp-f-date"></div>
+        <div class="form-row" style="margin:0"><label>客户</label><input type="text" id="cp-f-customer" placeholder="客户代码"></div>
+        <div class="form-row" style="margin:0"><label>状态</label>
+          <select id="cp-f-status"><option value="">全部</option><option value="staging">备货中</option><option value="empty">空</option><option value="loaded">已装柜</option></select>
+        </div>
+        <div class="form-row" style="margin:0"><label>托盘码</label><input type="text" id="cp-f-code" placeholder="托盘码" onkeydown="if(event.key==='Enter')loadPalletList()"></div>
+        <button class="btn btn-primary" style="margin-bottom:0" onclick="loadPalletList()">查询</button>
+      </div>
+      <div id="cp-list" style="margin-top:12px"></div>
+      <div id="cp-detail" style="margin-top:12px"></div>
+    </div>
+
+    <!-- 建空托盘 -->
+    <div class="section" id="section-container-create">
+      <div class="section-title">建空托盘</div>
+      <div class="section-sub">绑定计划出库日期 + 客户；客户只能从当天预留中选择（不可手输）</div>
+      <div class="card">
+        <div class="form-row"><label>计划出库日期</label><input type="date" id="cc-date" onchange="loadCreateCustomers()"></div>
+        <div class="form-row"><label>客户（从当天预留中选）</label><select id="cc-customer"><option value="">请先选日期</option></select></div>
+        <div class="form-row"><label>托盘码（扫码或输入）</label>
+          <div class="input-scan">
+            <input type="text" id="cc-code" placeholder="扫托盘条码或手输…">
+            <button type="button" class="scan-btn" title="扫码" onclick="scanIntoText('cc-code')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="submitCreatePallet()">建托盘</button>
+        <div id="cc-result" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- 加货 -->
+    <div class="section" id="section-container-add">
+      <div class="section-title">加货</div>
+      <div class="section-sub">选托盘 → 从预留候选选货（或手动加 JAN）→ 手动填数量。只改托盘，不动库存/预留</div>
+      <div class="card">
+        <div class="form-row"><label>托盘码（扫码或输入）</label>
+          <div class="input-scan">
+            <input type="text" id="ca-code" placeholder="扫托盘条码或手输…" onkeydown="if(event.key==='Enter')loadAddPallet()">
+            <button type="button" class="scan-btn" title="扫码" onclick="scanIntoText('ca-code')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+          </div>
+        </div>
+        <button class="btn btn-ghost" onclick="loadAddPallet()">加载托盘</button>
+      </div>
+      <div id="ca-body" style="margin-top:12px;display:none">
+        <div class="card" id="ca-info"></div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">预留候选（reserved + waiting，两者都可装）</div>
+          <div id="ca-candidates"></div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">手动加 JAN（不在预留中的货）</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+            <div class="form-row" style="margin:0;flex:1;min-width:160px"><label>JAN（扫商品/外箱码或输入）</label>
+              <div class="input-scan"><input type="text" id="ca-manual-jan" placeholder="JAN…"><button type="button" class="scan-btn" title="扫码" onclick="scanIntoText('ca-manual-jan')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button></div>
+            </div>
+            <div class="form-row" style="margin:0;width:90px"><label>数量</label><input type="number" id="ca-manual-qty" min="1" value="1"></div>
+            <button class="btn btn-primary" style="margin-bottom:0" onclick="addManualItem()">加入</button>
+          </div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">托盘当前内容</div>
+          <div id="ca-items"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 库位绑定 -->
+    <div class="section" id="section-container-place">
+      <div class="section-title">库位绑定</div>
+      <div class="section-sub">扫托盘码 + 扫库位码 → 确定，把托盘放到该库位（仅记录位置，不动库存）</div>
+      <div class="card">
+        <div class="form-row"><label>托盘码</label>
+          <div class="input-scan"><input type="text" id="pl-code" placeholder="扫托盘条码…"><button type="button" class="scan-btn" title="扫码" onclick="scanIntoText('pl-code')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button></div>
+        </div>
+        <div class="form-row"><label>库位码（区-排-层，如 A-12-03；建议 1D 条码）</label>
+          <div class="input-scan"><input type="text" id="pl-loc" placeholder="A-12-03" maxlength="32"><button type="button" class="scan-btn" title="扫码" onclick="scanIntoText('pl-loc')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button></div>
+        </div>
+        <button class="btn btn-primary" onclick="submitPlacePallet()">确定放置</button>
+        <div id="pl-result" style="margin-top:12px"></div>
+      </div>
     </div>
 
   </div><!-- /main -->
 </div><!-- /app-shell -->
 
 <div id="toast-container"></div>
+
+<!-- Barcode scanner overlay -->
+<div id="scan-overlay" class="scan-overlay">
+  <div class="scan-box">
+    <div class="scan-video-wrap">
+      <video id="scan-video" playsinline muted></video>
+      <div class="scan-frame"></div>
+    </div>
+    <div id="scan-status" class="scan-status"></div>
+    <div class="scan-actions">
+      <button type="button" class="btn btn-ghost" onclick="closeScanner()">取消</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
@@ -787,6 +1548,7 @@ function showApp() {
   document.getElementById('sidebar-username').textContent = _username;
   loadGlobals();
   loadDashboard();
+  initWorkspace();
 }
 
 // ── API helper ─────────────────────────────────────────────────────────────
@@ -860,6 +1622,23 @@ function nav(btn) {
   if (btn.dataset.section === 'dashboard') loadDashboard();
   if (btn.dataset.section === 'settings') loadSettingsLists();
   if (btn.dataset.section === 'qinsi') checkQinsiAuth();
+  if (btn.dataset.section === 'alloc') loadConflictLogs();
+  if (btn.dataset.section === 'system-log') loadSystemLogs();
+  if (btn.dataset.section === 'container-pallets') loadPalletList();
+  if (['supplier-history','customer-history'].includes(btn.dataset.section)) loadCounterpartyLists();
+  closeSidebar();
+  document.getElementById('main').scrollTo({ top: 0 });
+  window.scrollTo({ top: 0 });
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-backdrop').classList.toggle('show');
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('show');
 }
 
 // ── Globals (warehouses & customers) ──────────────────────────────────────
@@ -870,11 +1649,12 @@ async function loadGlobals() {
       api('GET', '/customers'),
     ]);
     populateSelects();
+    loadCounterpartyLists();   // populate supplier/customer datalists (non-blocking)
   } catch (e) { toast('加载仓库/客户失败: ' + e.message, 'err'); }
 }
 
 function populateSelects() {
-  const wSelects = ['si-warehouse','so-warehouse','sa-warehouse','cr-warehouse','rak-warehouse','ci-warehouse'];
+  const wSelects = ['si-warehouse','so-warehouse','sa-warehouse','cr-warehouse','rak-warehouse','trade-warehouse','ci-warehouse','st-from-warehouse','st-to-warehouse'];
   const cSelects = ['si-customer','so-customer','sa-customer','cr-customer','rak-customer'];
 
   wSelects.forEach(id => {
@@ -900,6 +1680,7 @@ function populateSelects() {
   setSelect('rak-customer', '乐天');
   setSelect('cr-warehouse', '普通仓库');
   setSelect('cr-customer', '店铺');
+  setSelect('trade-warehouse', '普通仓库');
 }
 function setSelect(id, name) {
   const el = document.getElementById(id);
@@ -946,13 +1727,27 @@ async function loadDashboard() {
           </div>
         </div>
         <div class="neg-list" style="display:none;margin-top:10px"></div>
-        <div style="font-size:12px;color:var(--muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
+        <div style="font-size:12px;color:var(--muted);margin-top:6px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
           ${r.last_csv_apply_at ? `<span>最后 CSV 导入: ${fmtDate(r.last_csv_apply_at)}</span>` : ''}
           ${r.last_physical_count_at ? `<span>最后盘点: ${fmtDate(r.last_physical_count_at)}</span>` : ''}
+          <span style="margin-left:auto;display:flex;gap:4px">
+            <button class="btn btn-ghost btn-sm" onclick="exportInventory(${r.warehouse_id},'xlsx')">导出库存 Excel</button>
+            <button class="btn btn-ghost btn-sm" onclick="exportInventory(${r.warehouse_id},'csv')">CSV</button>
+          </span>
         </div>
       </div>`;
     }).join('');
   } catch (e) { el.innerHTML = `<p style="color:var(--danger)">${e.message}</p>`; }
+}
+
+function exportInventory(warehouseId, fmt) {
+  const url = `/api/v1/inventory/export?warehouse_id=${warehouseId}&format=${fmt}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 // ── Product search widget ──────────────────────────────────────────────────
@@ -968,8 +1763,12 @@ async function runProductSearch(prefix) {
   try {
     const items = await api('GET', `/inventory/search?keyword=${encodeURIComponent(kw)}`);
     if (!items.length) { resultsEl.innerHTML = '<div class="search-result-item" style="color:var(--muted)">无结果</div>'; resultsEl.style.display = 'block'; return; }
+    resultsEl.dataset.prefix = prefix;
     resultsEl.innerHTML = items.map(p => `
-      <div class="search-result-item" onclick="selectProduct('${prefix}','${p.jan_code}','${esc(p.name_jp)}','${esc(p.name_zh||'')}')">
+      <div class="search-result-item"
+           data-jan="${esc(p.jan_code)}"
+           data-namejp="${esc(p.name_jp)}"
+           data-namezh="${esc(p.name_zh||'')}">
         <div class="sri-jan">${p.jan_code}</div>
         <div class="sri-name">${p.name_jp}${p.name_zh ? ' / ' + p.name_zh : ''}</div>
       </div>`).join('');
@@ -985,6 +1784,14 @@ function selectProduct(prefix, jan, nameJp, nameZh) {
   document.getElementById(`${prefix}-search`).value = nameJp;
 }
 document.addEventListener('click', e => {
+  const item = e.target.closest('.search-result-item');
+  if (item) {
+    const container = item.closest('.search-results');
+    if (container && container.dataset.prefix) {
+      selectProduct(container.dataset.prefix, item.dataset.jan, item.dataset.namejp, item.dataset.namezh);
+      return;
+    }
+  }
   if (!e.target.closest('.search-widget')) {
     document.querySelectorAll('.search-results').forEach(r => r.style.display = 'none');
   }
@@ -994,18 +1801,18 @@ document.addEventListener('click', e => {
 async function submitStockIn() {
   const jan = document.getElementById('si-jan').value;
   const wId = +document.getElementById('si-warehouse').value;
-  const cRaw = document.getElementById('si-customer').value;
   const qty = +document.getElementById('si-qty').value;
   const loc = document.getElementById('si-location').value.trim() || 'A-00-00';
   const note = document.getElementById('si-note').value;
+  const supplier = document.getElementById('si-supplier').value.trim() || null;
   if (!jan) { toast('请先选择商品', 'err'); return; }
   if (!qty || qty < 1) { toast('数量必须大于 0', 'err'); return; }
   try {
     const txnDate = document.getElementById('si-txn-date').value || null;
     const res = await api('POST', '/inventory/stock-in', {
-      sku: jan, warehouse_id: wId, customer_id: cRaw ? +cRaw : null,
+      sku: jan, warehouse_id: wId,
       quantity: qty, source: 'web_ui', note: note || null, location_code: loc,
-      transaction_date: txnDate,
+      transaction_date: txnDate, supplier,
     });
     document.getElementById('si-result').innerHTML = resultCard('ok', `入库成功 ✓  ${jan} +${qty}，当前库存: ${res.record.quantity}`);
     toast('入库成功', 'ok');
@@ -1017,17 +1824,17 @@ async function submitStockIn() {
 async function submitStockOut() {
   const jan = document.getElementById('so-jan').value;
   const wId = +document.getElementById('so-warehouse').value;
-  const cRaw = document.getElementById('so-customer').value;
   const qty = +document.getElementById('so-qty').value;
   const note = document.getElementById('so-note').value;
+  const customer = document.getElementById('so-customer-name').value.trim() || null;
   if (!jan) { toast('请先选择商品', 'err'); return; }
   if (!qty || qty < 1) { toast('数量必须大于 0', 'err'); return; }
   try {
     const txnDate = document.getElementById('so-txn-date').value || null;
     const res = await api('POST', '/inventory/stock-out', {
-      sku: jan, warehouse_id: wId, customer_id: cRaw ? +cRaw : null,
+      sku: jan, warehouse_id: wId,
       quantity: qty, source: 'web_ui', note: note || null,
-      transaction_date: txnDate,
+      transaction_date: txnDate, customer,
     });
     document.getElementById('so-result').innerHTML = resultCard('ok', `出库成功 ✓  ${jan} -${qty}，当前库存: ${res.record.quantity}`);
     toast('出库成功', 'ok');
@@ -1055,6 +1862,29 @@ async function submitAdjust() {
   } catch (e) { document.getElementById('sa-result').innerHTML = resultCard('err', e.message); }
 }
 
+// ── Stock Transfer ─────────────────────────────────────────────────────────
+async function submitTransfer() {
+  const jan = document.getElementById('st-jan').value;
+  const fromId = +document.getElementById('st-from-warehouse').value;
+  const toId = +document.getElementById('st-to-warehouse').value;
+  const qty = +document.getElementById('st-qty').value;
+  const note = document.getElementById('st-note').value.trim() || null;
+  const txnDate = document.getElementById('st-txn-date').value || null;
+  if (!jan) { toast('请先选择商品', 'err'); return; }
+  if (!qty || qty < 1) { toast('请输入有效数量', 'err'); return; }
+  if (fromId === toId) { toast('调出和调入仓库不能相同', 'err'); return; }
+  try {
+    const res = await api('POST', '/inventory/stock-transfer', {
+      sku: jan, from_warehouse_id: fromId, to_warehouse_id: toId,
+      quantity: qty, note, transaction_date: txnDate,
+    });
+    document.getElementById('st-result').innerHTML = resultCard('ok',
+      `${res.message}  调出后库存: ${res.from_quantity_after}，调入后库存: ${res.to_quantity_after}`);
+    toast('调库成功', 'ok');
+    resetForm('st');
+  } catch (e) { document.getElementById('st-result').innerHTML = resultCard('err', e.message); }
+}
+
 // ── Search ─────────────────────────────────────────────────────────────────
 async function doSearch() {
   const kw = document.getElementById('search-kw').value.trim();
@@ -1064,20 +1894,76 @@ async function doSearch() {
   try {
     const items = await api('GET', `/inventory/search?keyword=${encodeURIComponent(kw)}`);
     if (!items.length) { el.innerHTML = '<p class="loading">无结果</p>'; return; }
-    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品名</th><th>仓库</th><th>客户</th><th>库位</th><th>数量</th></tr></thead><tbody>' + items.map(p => {
+    el.innerHTML = items.map(p => {
       const records = p.inventory_records || [];
-      return records.length
-        ? records.map(r => `<tr>
+      const upc = p.units_per_case ? `${p.units_per_case}入` : '—';
+      const editBtn = `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="jumpToProductEdit('${esc(p.jan_code)}')">编辑</button>`;
+      const warning = p.outer_jan_warning
+        ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#92400e">${esc(p.outer_jan_warning)}</div>`
+        : '';
+      const rows = records.length
+        ? records.map((r, i) => `<tr>
             <td><code style="font-size:11px">${p.jan_code}</code></td>
-            <td>${p.name_jp}<br><small style="color:var(--muted)">${p.name_zh||''}</small></td>
+            <td>${esc(p.name_jp)}<br><small style="color:var(--muted)">${esc(p.name_zh||'')}</small></td>
             <td>${r.warehouse?.name||'—'}</td>
             <td>${r.customer?.name||'—'}</td>
             <td>${r.location_code}</td>
             <td><strong style="color:${r.quantity < 0 ? 'var(--danger)' : 'inherit'}">${r.quantity}</strong></td>
+            <td>${upc}</td>
+            <td>${i === 0 ? editBtn : ''}</td>
           </tr>`).join('')
-        : `<tr><td colspan="6" style="color:var(--muted)"><code style="font-size:11px">${p.jan_code}</code> ${p.name_jp} — 无库存记录</td></tr>`;
-    }).join('') + '</tbody></table></div>';
+        : `<tr>
+            <td><code style="font-size:11px">${p.jan_code}</code></td>
+            <td>${esc(p.name_jp)}<br><small style="color:var(--muted)">${esc(p.name_zh||'')}</small></td>
+            <td colspan="4" style="color:var(--muted)">无库存记录</td>
+            <td>${upc}</td>
+            <td>${editBtn}</td>
+          </tr>`;
+      return warning + '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品名</th><th>仓库</th><th>客户</th><th>库位</th><th>数量</th><th>入数</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+        + `<div id="search-alloc-${esc(p.jan_code)}" style="margin:4px 0 4px 2px"></div>`;
+    }).join('<hr style="margin:12px 0;border-color:var(--border)">');
+    items.forEach(p => {
+      const normalStock = (p.inventory_records || [])
+        .filter(r => r.warehouse?.name === '普通仓库')
+        .reduce((sum, r) => sum + r.quantity, 0);
+      loadSearchAllocInfo(p.jan_code, normalStock);
+    });
   } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+
+async function loadSearchAllocInfo(janCode, normalStock) {
+  const el = document.getElementById(`search-alloc-${janCode}`);
+  if (!el) return;
+  try {
+    const allocs = await api('GET', `/trade/allocations?jan_code=${encodeURIComponent(janCode)}`);
+    const active = allocs.filter(a => a.status === 'waiting' || a.status === 'reserved');
+    if (!active.length) return;
+    const s = ALLOC_STATUS;
+    const reserved = active.filter(a => a.status === 'reserved');
+    const waiting = active.filter(a => a.status === 'waiting');
+    const reservedTotal = reserved.reduce((sum, a) => sum + a.quantity, 0);
+    const unallocated = normalStock - reservedTotal;
+
+    const parts = [];
+    parts.push(`<span style="margin-right:8px"><strong>默认（未预留）</strong> <span style="color:${unallocated < 0 ? 'var(--danger)' : 'inherit'}">${unallocated}</span>件</span>`);
+    reserved.forEach(a => {
+      parts.push(`<span style="margin-right:8px"><strong>${esc(a.customer_name)}</strong> ${a.quantity}件 <span style="color:${s.reserved.color}">(已调转)</span></span>`);
+    });
+    waiting.forEach(a => {
+      parts.push(`<span style="margin-right:8px;color:var(--muted)"><strong>${esc(a.customer_name)}</strong> ${a.quantity}件 <span style="color:${s.waiting.color}">(等待中，库存不足)</span></span>`);
+    });
+
+    el.innerHTML = `<div style="font-size:12px;color:var(--muted);padding:4px 8px;background:var(--accent-bg);border-radius:6px">
+      普通仓库 ${normalStock} 件　${parts.join('')}
+    </div>`;
+  } catch { /* allocation lookup is best-effort, ignore errors */ }
+}
+
+function jumpToProductEdit(janCode) {
+  const btn = document.querySelector('.nav-item[data-section="products"]');
+  if (btn) nav(btn);
+  document.getElementById('prod-search-kw').value = janCode;
+  searchProducts();
 }
 
 // ── Chat Report ────────────────────────────────────────────────────────────
@@ -1144,6 +2030,152 @@ function resetChatReport() {
 }
 
 // ── Rakuten CSV ────────────────────────────────────────────────────────────
+// ── 乐天出荷分析 ──────────────────────────────────────────────────────────────
+
+let _oaItems = [];
+let _oaDraftId = null;
+
+async function runOrderAnalysis() {
+  const f1 = document.getElementById('oa-file1').files[0];
+  if (!f1) { toast('请选择一号店订单文件', 'err'); return; }
+  const fd = new FormData();
+  fd.append('file1', f1);
+  const f2 = document.getElementById('oa-file2').files[0];
+  if (f2) fd.append('file2', f2);
+  toast('解析中…', 'info');
+  try {
+    const res = await api('POST', '/rakuten/order-analysis', fd, true);
+    _oaItems = res.items || [];
+    _oaDraftId = res.draft_id || null;
+    document.getElementById('oa-result').style.display = 'block';
+    document.getElementById('oa-apply-result').style.display = 'none';
+    const okCount = _oaItems.filter(i => i.status === 'ok').length;
+    const problems = _oaItems.filter(i => i.status !== 'ok').length;
+    const parts = [
+      `一号店 ${res.store1_lines} 行`,
+      res.store2_lines ? `二号店 ${res.store2_lines} 行` : null,
+      res.unresolved_count ? `<span style="color:var(--danger)">${res.unresolved_count} 条无法解析JAN（需人工登记）</span>` : null,
+      res.unknown_jan_count ? `<span style="color:var(--danger)">${res.unknown_jan_count} 条未知JAN</span>` : null,
+      problems ? `<span style="color:var(--warn)">${problems} 条需关注</span>` : `<span style="color:var(--success)">库存全部充足</span>`,
+    ].filter(Boolean);
+    document.getElementById('oa-summary').innerHTML = `<div class="card" style="padding:10px 14px;font-size:14px">${parts.join('　|　')}</div>`;
+    renderOATable(_oaItems);
+    // show apply button only when there are ok items and draft was created
+    const applyBtn = document.getElementById('oa-apply-btn');
+    applyBtn.style.display = (okCount > 0 && _oaDraftId) ? '' : 'none';
+    applyBtn.disabled = false;
+    applyBtn.textContent = `确认出库（${okCount} 项充足）`;
+    // render unresolved section
+    const unresolvedEl = document.getElementById('oa-unresolved');
+    const unresolved = res.unresolved || [];
+    if (unresolved.length > 0) {
+      unresolvedEl.style.display = '';
+      unresolvedEl.innerHTML = `<div class="card" style="border-left:3px solid #dc2626;padding:10px 14px">
+        <div style="font-weight:600;margin-bottom:8px;color:#dc2626">无法解析JAN — 需人工登记新SKU（${unresolved.length} 条）</div>
+        <table class="table"><thead><tr><th>商品番号</th><th>SKU番号</th><th>数量</th></tr></thead>
+        <tbody>${unresolved.map(u => `<tr>
+          <td><code style="font-size:12px">${esc(u.product_number)}</code></td>
+          <td><code style="font-size:12px">${esc(u.sku_number || '—')}</code></td>
+          <td style="text-align:center">${u.quantity}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+    } else {
+      unresolvedEl.style.display = 'none';
+    }
+    toast('分析完成', 'ok');
+  } catch (e) { toast('分析失败: ' + e.message, 'err'); }
+}
+
+function filterOA(mode) {
+  if (mode === 'all') return renderOATable(_oaItems);
+  if (mode === 'problem') return renderOATable(_oaItems.filter(i => i.status !== 'ok'));
+  return renderOATable(_oaItems.filter(i => i.status === mode));
+}
+
+function renderOATable(items) {
+  const STATUS = {
+    ok:          { label: '充足',       color: '#16a34a', bg: '#f0fdf4' },
+    insufficient: { label: '库存不足',   color: '#d97706', bg: '#fffbeb' },
+    no_record:   { label: '无库存记录', color: '#7c3aed', bg: '#f5f3ff' },
+    unknown:     { label: '未知JAN',    color: '#dc2626', bg: '#fef2f2' },
+  };
+  document.getElementById('oa-tbody').innerHTML = items.map(item => {
+    const s = STATUS[item.status] || STATUS.unknown;
+    const stockDisplay = item.current_stock === null
+      ? (item.status === 'unknown' ? '—' : '<span style="color:#7c3aed">无记录</span>')
+      : item.current_stock;
+    const shortageDisplay = item.shortage > 0
+      ? `<span style="color:${s.color};font-weight:700">-${item.shortage}</span>` : '—';
+    return `<tr style="background:${item.status !== 'ok' ? s.bg : ''}">
+      <td><span style="font-size:12px;padding:2px 6px;border-radius:4px;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span></td>
+      <td><code style="font-size:12px">${esc(item.jan_code)}</code></td>
+      <td style="font-size:13px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.product_name||'')}">${esc(item.product_name || '—')}</td>
+      <td style="text-align:center">${item.ordered_qty}</td>
+      <td style="text-align:center">${stockDisplay}</td>
+      <td style="text-align:center">${shortageDisplay}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--muted)">暂无数据</td></tr>';
+}
+
+async function applyOrderAnalysis() {
+  if (!_oaDraftId) { toast('草稿 ID 丢失，请重新分析', 'err'); return; }
+  const btn = document.getElementById('oa-apply-btn');
+  btn.disabled = true;
+  btn.textContent = '确认中…';
+  toast('出库中…', 'info');
+  try {
+    const res = await api('POST', `/rakuten/order-analysis/${_oaDraftId}/apply`);
+    renderOAApplyResult(res);
+    toast(`出库完成：${res.mutations.length} 条成功`, 'ok');
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '确认出库（充足项）';
+    toast('出库失败: ' + e.message, 'err');
+  }
+}
+
+function renderOAApplyResult(res) {
+  const el = document.getElementById('oa-apply-result');
+  el.style.display = '';
+  let html = `<div class="card" style="border-left:3px solid #16a34a;padding:10px 14px;margin-bottom:12px">
+    <div style="font-weight:600;margin-bottom:8px">出库结果：${res.mutations.length} 条成功${res.skipped_duplicates ? `，${res.skipped_duplicates} 条已跳过（重复）` : ''}</div>`;
+  if (res.mutations.length) {
+    html += `<table class="table"><thead><tr><th>JAN</th><th>数量</th></tr></thead><tbody>
+      ${res.mutations.map(m => `<tr><td><code style="font-size:12px">${esc(m.jan_code)}</code></td><td style="text-align:center">${m.quantity}</td></tr>`).join('')}
+    </tbody></table>`;
+  }
+  html += '</div>';
+  if (res.shortage_items && res.shortage_items.length) {
+    html += `<div class="card" style="border-left:3px solid #d97706;padding:10px 14px;margin-bottom:12px">
+      <div style="font-weight:600;color:#d97706;margin-bottom:8px">需调货 / 无库存记录（${res.shortage_items.length} 条）</div>
+      <table class="table"><thead><tr><th>状态</th><th>JAN</th><th>商品名</th><th>缺口</th></tr></thead><tbody>
+      ${res.shortage_items.map(i => `<tr>
+        <td><span style="font-size:12px;padding:2px 6px;border-radius:4px;background:#fffbeb;color:#d97706;border:1px solid #d97706">${esc(i.status)}</span></td>
+        <td><code style="font-size:12px">${esc(i.jan_code)}</code></td>
+        <td style="font-size:13px">${esc(i.product_name || '—')}</td>
+        <td style="text-align:center;color:#d97706;font-weight:700">${i.shortage}</td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+  }
+  if (res.unresolved && res.unresolved.length) {
+    html += `<div class="card" style="border-left:3px solid #dc2626;padding:10px 14px">
+      <div style="font-weight:600;color:#dc2626;margin-bottom:8px">无法解析JAN — 需人工登记（${res.unresolved.length} 条）</div>
+      <table class="table"><thead><tr><th>商品番号</th><th>SKU番号</th><th>数量</th></tr></thead><tbody>
+      ${res.unresolved.map(u => `<tr>
+        <td><code style="font-size:12px">${esc(u.product_number)}</code></td>
+        <td><code style="font-size:12px">${esc(u.sku_number || '—')}</code></td>
+        <td style="text-align:center">${u.quantity}</td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+  }
+  el.innerHTML = html;
+  // hide apply button to prevent re-apply
+  document.getElementById('oa-apply-btn').style.display = 'none';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+let _rakDraftId = null;
+
 async function uploadRakutenCSV() {
   const file = document.getElementById('rak-file').files[0];
   if (!file) { toast('请选择 CSV 文件', 'err'); return; }
@@ -1152,25 +2184,137 @@ async function uploadRakutenCSV() {
   fd.append('file', file);
   toast('上传中…', 'info');
   try {
-    const url = `/api/v1/inventory/imports/rakuten-shipment?warehouse_name=${encodeURIComponent(wOpt.text)}&customer_name=%E4%B9%90%E5%A4%A9`;
+    const url = `/api/v1/inventory/imports/rakuten-shipment/draft?warehouse_name=${encodeURIComponent(wOpt.text)}&customer_name=%E4%B9%90%E5%A4%A9`;
     const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${_token}` }, body: fd });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
     }
     const data = await res.json();
-    renderRakutenResult(data);
-    document.getElementById('rak-result-area').style.display = 'block';
-    if (data.applied) toast(`导入成功：${data.mutations?.length || 0} 条出库`, 'ok');
-    else toast(`导入遇到问题，共 ${data.issues?.length || 0} 个错误`, 'err');
+    _rakDraftId = data.draft_id;
+    renderRakutenPreview(data);
+    document.getElementById('rak-preview-area').style.display = 'block';
+    document.getElementById('rak-result-area').style.display = 'none';
+    if (data.issues.length === 0) toast(`解析完成：${data.total_lines} 条，无问题`, 'ok');
+    else toast(`解析完成，发现 ${data.issues.length} 个问题`, 'warn');
   } catch (e) { toast('上传失败: ' + e.message, 'err'); }
 }
+
+function renderRakutenPreview(data) {
+  const blocking = data.blocking_issues || [];
+  const needs = data.needs_decision || [];
+  const skipped = data.auto_skipped_count || 0;
+  let titleParts = [`共 ${data.total_lines} 条，正常出库 ${data.ok_count} 条`];
+  if (skipped) titleParts.push(`${skipped} 条无商品记录自动忽略`);
+  document.getElementById('rak-preview-title').innerHTML = `预览 — ` + titleParts.join('，') +
+    (blocking.length ? `，<span style="color:var(--danger)">${blocking.length} 个阻断问题</span>` : '');
+
+  // Blocking issues
+  document.getElementById('rak-issues').innerHTML = blocking.map(i =>
+    `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">
+      ✗ <code style="font-size:11px">${esc(i.jan_code)}</code> ${esc(i.message)}
+    </div>`
+  ).join('');
+
+  // Needs-decision section
+  const ndWrap = document.getElementById('rak-needs-decision-wrap');
+  if (needs.length) {
+    ndWrap.style.display = 'block';
+    document.getElementById('rak-needs-decision-count').textContent = needs.length;
+    document.getElementById('rak-needs-decision-list').innerHTML = needs.map(i => {
+      const stockInfo = i.issue_type === 'insufficient_stock'
+        ? `（现有 ${i.current_stock}，出库需 ${i.quantity_needed}）`
+        : `（商品已知但乐天仓库无入库记录，出库需 ${i.quantity_needed}）`;
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px">
+        <input type="checkbox" class="rak-force-neg-chk" data-jan="${esc(i.jan_code)}"
+               style="margin-top:3px;flex-shrink:0" title="勾选则录入负库存">
+        <div>
+          <code style="font-size:11px">${esc(i.jan_code)}</code>
+          <span style="color:var(--warn);font-size:12px"> ⚠ ${esc(i.message)}</span>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${stockInfo}
+            — <b>勾选</b>：录入负库存（忘记录入库）　<b>不勾选</b>：静默忽略（合作方直发）
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } else {
+    ndWrap.style.display = 'none';
+  }
+
+  // Hide ignore-missing row (replaced by per-item decision above)
+  const ignoreRow = document.getElementById('rak-ignore-row');
+  if (ignoreRow) ignoreRow.style.display = 'none';
+
+  // Non-JAN lines — must be handled manually
+  const nonJan = data.non_jan_lines || [];
+  let njWrap = document.getElementById('rak-non-jan-wrap');
+  if (!njWrap) {
+    njWrap = document.createElement('div');
+    njWrap.id = 'rak-non-jan-wrap';
+    document.getElementById('rak-needs-decision-wrap').insertAdjacentElement('afterend', njWrap);
+  }
+  if (nonJan.length) {
+    njWrap.style.cssText = 'margin-bottom:14px;border:1px solid var(--danger);border-radius:8px;padding:12px';
+    njWrap.innerHTML = `
+      <div style="font-weight:600;color:var(--danger);margin-bottom:8px">
+        ✗ ${nonJan.length} 条商品番号非标准 JAN，请手动出库：
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>订单番号</th><th>商品番号（原始）</th><th>个数</th></tr></thead>
+        <tbody>${nonJan.map(r => `<tr>
+          <td><code style="font-size:11px">${esc(r.order_number || '—')}</code></td>
+          <td><code style="font-size:12px;color:var(--danger)">${esc(r.product_number)}</code></td>
+          <td>${r.quantity}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+  } else {
+    njWrap.innerHTML = '';
+    njWrap.style.cssText = '';
+  }
+
+  // Disable confirm if there are blocking issues
+  document.getElementById('rak-confirm-btn').disabled = blocking.length > 0;
+}
+
+async function applyRakutenDraft() {
+  if (!_rakDraftId) return;
+  const forceNegJans = [...document.querySelectorAll('.rak-force-neg-chk:checked')]
+    .map(el => el.dataset.jan).filter(Boolean);
+  const btn = document.getElementById('rak-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = '导入中…';
+  try {
+    const url = `/api/v1/inventory/imports/rakuten-shipment/draft/${_rakDraftId}/apply`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force_negative_jans: forceNegJans }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    document.getElementById('rak-preview-area').style.display = 'none';
+    _rakDraftId = null;
+    renderRakutenResult(data);
+    document.getElementById('rak-result-area').style.display = 'block';
+    if (data.applied) toast(`出库成功：${data.mutations?.length || 0} 条${data.force_negated_count ? `（其中 ${data.force_negated_count} 条负库存）` : ''}`, 'ok');
+    else toast(`导入失败，共 ${data.issues?.length || 0} 个错误`, 'err');
+  } catch (e) { toast('导入失败: ' + e.message, 'err'); }
+  finally { btn.disabled = false; btn.textContent = '确认导入'; }
+}
+
 function renderRakutenResult(data) {
   const mutations = data.mutations || [];
   const issues = data.issues || [];
   const titleEl = document.getElementById('rak-result-title');
   if (data.applied) {
-    titleEl.innerHTML = `<span style="color:var(--success)">✓ 出库成功 ${mutations.length} 条</span>`;
+    const parts = [`✓ 出库成功 ${mutations.length} 条`];
+    if (data.force_negated_count) parts.push(`其中 ${data.force_negated_count} 条录为负库存`);
+    if (data.auto_skipped_count) parts.push(`自动忽略无商品记录 ${data.auto_skipped_count} 条`);
+    if (data.skipped_duplicates) parts.push(`跳过重复 ${data.skipped_duplicates} 条`);
+    titleEl.innerHTML = `<span style="color:var(--success)">${parts.join('，')}</span>`;
   } else {
     titleEl.innerHTML = `<span style="color:var(--danger)">✗ 导入失败 — ${issues.length} 个问题</span>`;
   }
@@ -1183,9 +2327,593 @@ function renderRakutenResult(data) {
       <td>${m.quantity}</td>
     </tr>`).join('');
   } else { mutWrap.style.display = 'none'; }
-  document.getElementById('rak-issues').innerHTML = issues.map(i =>
-    `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">⚠ <code style="font-size:11px">${i.jan_code}</code> ${i.message}</div>`
+  document.getElementById('rak-result-issues').innerHTML = issues.map(i =>
+    `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">⚠ <code style="font-size:11px">${esc(i.jan_code)}</code> ${esc(i.message)}</div>`
   ).join('');
+}
+
+// ── Trade Shipment (贸易出库) ──────────────────────────────────────────────
+
+let _tradeDraftId = null;
+
+// 压缩图片：限制最长边并转为 JPEG，减小上传体积 / Gemini token 消耗
+function _compressImageFile(file, maxDim = 1600, quality = 0.85) {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('image/')) { resolve(file); return; }
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (e) => { img.src = e.target.result; };
+    reader.onerror = () => resolve(file);
+    img.onload = () => {
+      const { width, height } = img;
+      const scale = Math.min(1, maxDim / Math.max(width, height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        if (!blob) { resolve(file); return; }
+        const newName = file.name.replace(/\.\w+$/, '') + '.jpg';
+        resolve(new File([blob], newName, { type: 'image/jpeg' }));
+      }, 'image/jpeg', quality);
+    };
+    img.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadTradeImages() {
+  const files = document.getElementById('trade-image-files').files;
+  if (!files.length) { toast('请选择图片', 'err'); return; }
+  const wOpt = document.getElementById('trade-warehouse').selectedOptions[0];
+  const fd = new FormData();
+  for (const f of files) {
+    const compressed = await _compressImageFile(f);
+    fd.append('files', compressed, compressed.name);
+  }
+  const btn = document.getElementById('trade-image-btn');
+  const spinner = document.getElementById('trade-image-spinner');
+  btn.disabled = true;
+  spinner.style.display = 'inline-block';
+  toast('识别中，请稍候…', 'info');
+  try {
+    const url = `/api/v1/inventory/imports/trade-shipment/draft/image?warehouse_name=${encodeURIComponent(wOpt.text)}`;
+    const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${_token}` }, body: fd });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    _tradeDraftId = data.draft_id;
+    renderTradePreview(data);
+    document.getElementById('trade-preview-area').style.display = 'block';
+    document.getElementById('trade-result-area').style.display = 'none';
+    toast(`识别完成：${data.total_lines} 条`, 'ok');
+  } catch (e) { toast('识别失败: ' + e.message, 'err'); }
+  finally { btn.disabled = false; spinner.style.display = 'none'; }
+}
+
+async function uploadTradeExcel() {
+  const file = document.getElementById('trade-excel-file').files[0];
+  if (!file) { toast('请选择 Excel 文件', 'err'); return; }
+  const wOpt = document.getElementById('trade-warehouse').selectedOptions[0];
+  const fd = new FormData();
+  fd.append('file', file);
+  const btn = document.getElementById('trade-excel-btn');
+  const spinner = document.getElementById('trade-excel-spinner');
+  btn.disabled = true;
+  spinner.style.display = 'inline-block';
+  toast('上传中…', 'info');
+  try {
+    const url = `/api/v1/inventory/imports/trade-shipment/draft/excel?warehouse_name=${encodeURIComponent(wOpt.text)}`;
+    const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${_token}` }, body: fd });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    _tradeDraftId = data.draft_id;
+    renderTradePreview(data);
+    document.getElementById('trade-preview-area').style.display = 'block';
+    document.getElementById('trade-result-area').style.display = 'none';
+    toast(`解析完成：${data.total_lines} 条`, 'ok');
+  } catch (e) { toast('上传失败: ' + e.message, 'err'); }
+  finally { btn.disabled = false; spinner.style.display = 'none'; }
+}
+
+function renderTradePreview(data) {
+  const blocking = data.blocking_issues || [];
+  const needs = data.needs_decision || [];
+  const lines = (data.document && data.document.lines) || [];
+
+  document.getElementById('trade-preview-title').innerHTML = `预览 — 共 ${data.total_lines} 条，正常出库 ${data.ok_count} 条` +
+    (blocking.length ? `，<span style="color:var(--danger)">${blocking.length} 个阻断问题</span>` : '');
+
+  document.getElementById('trade-issues').innerHTML = blocking.map(i =>
+    `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">
+      ✗ <code style="font-size:11px">${esc(i.jan_code)}</code> ${esc(i.message)}
+    </div>`
+  ).join('');
+
+  const ndWrap = document.getElementById('trade-needs-decision-wrap');
+  const negNeeds = needs.filter(i => i.issue_type === 'insufficient_stock' || i.issue_type === 'inventory_record_not_found');
+  const fixNeeds = needs.filter(i => i.issue_type === 'product_not_found');
+  if (needs.length) {
+    ndWrap.style.display = 'block';
+    document.getElementById('trade-needs-decision-count').textContent = needs.length;
+    let html = '';
+    html += fixNeeds.map(i => `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+        <code style="font-size:11px">${esc(i.jan_code)}</code>
+        <span style="color:var(--danger);font-size:12px"> ✗ ${esc(i.message)}</span>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">请在下方表格中修正该行 JAN 码后点击"保存修改并重新校验"</div>
+      </div>`).join('');
+    html += negNeeds.map(i => {
+      const stockInfo = i.issue_type === 'insufficient_stock'
+        ? `（现有 ${i.current_stock}，出库需 ${i.quantity_needed}）`
+        : `（商品已知但该仓库无库存记录，出库需 ${i.quantity_needed}）`;
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:10px">
+        <input type="checkbox" class="trade-force-neg-chk" data-jan="${esc(i.jan_code)}"
+               style="margin-top:3px;flex-shrink:0" title="勾选则录入负库存">
+        <div>
+          <code style="font-size:11px">${esc(i.jan_code)}</code>
+          <span style="color:var(--warn);font-size:12px"> ⚠ ${esc(i.message)}</span>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${stockInfo}
+            — <b>勾选</b>：录入负库存　<b>不勾选</b>：跳过该行
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    document.getElementById('trade-needs-decision-list').innerHTML = html;
+  } else {
+    ndWrap.style.display = 'none';
+  }
+
+  document.getElementById('trade-lines-body').innerHTML = lines.map((line, idx) => `<tr data-line="${idx}">
+    <td><input type="text" data-field="customer_name" value="${esc(line.customer_name)}" style="width:70px"></td>
+    <td><input type="text" data-field="jan_code" value="${esc(line.jan_code)}" style="width:140px;font-family:monospace"></td>
+    <td><input type="text" data-field="product_name" value="${esc(line.product_name || '')}" style="width:160px"></td>
+    <td><input type="number" data-field="box_count" min="1" value="${line.box_count}" style="width:60px"></td>
+    <td><input type="number" data-field="units_per_box" min="1" value="${line.units_per_box}" style="width:60px"></td>
+    <td><span data-field="quantity-display">${line.quantity}</span></td>
+    <td><button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('tr').remove()" title="删除此行">✕</button></td>
+  </tr>`).join('');
+
+  document.getElementById('trade-confirm-btn').disabled = blocking.length > 0;
+}
+
+// Recompute quantity display when 箱数/箱入 are edited
+document.addEventListener('input', (e) => {
+  const field = e.target.dataset && e.target.dataset.field;
+  if (field !== 'box_count' && field !== 'units_per_box') return;
+  const row = e.target.closest('tr[data-line]');
+  if (!row || !row.closest('#trade-lines-body')) return;
+  const boxCount = +row.querySelector('[data-field="box_count"]').value || 0;
+  const unitsPerBox = +row.querySelector('[data-field="units_per_box"]').value || 0;
+  row.querySelector('[data-field="quantity-display"]').textContent = boxCount * unitsPerBox;
+});
+
+function collectTradeLines() {
+  return [...document.querySelectorAll('#trade-lines-body tr[data-line]')].map(row => {
+    const boxCount = +row.querySelector('[data-field="box_count"]').value || 0;
+    const unitsPerBox = +row.querySelector('[data-field="units_per_box"]').value || 0;
+    return {
+      customer_name: row.querySelector('[data-field="customer_name"]').value.trim(),
+      jan_code: row.querySelector('[data-field="jan_code"]').value.trim(),
+      product_name: row.querySelector('[data-field="product_name"]').value.trim() || null,
+      box_count: boxCount,
+      units_per_box: unitsPerBox,
+      quantity: boxCount * unitsPerBox,
+    };
+  });
+}
+
+async function _saveTradeDraftLines() {
+  const wOpt = document.getElementById('trade-warehouse').selectedOptions[0];
+  const lines = collectTradeLines();
+  const url = `/api/v1/inventory/imports/trade-shipment/draft/${_tradeDraftId}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${_token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ warehouse_name: wOpt.text, lines }),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+async function revalidateTradeDraft() {
+  if (!_tradeDraftId) return;
+  try {
+    const data = await _saveTradeDraftLines();
+    renderTradePreview(data);
+    toast('已重新校验', 'ok');
+  } catch (e) { toast('校验失败: ' + e.message, 'err'); }
+}
+
+async function applyTradeDraft() {
+  if (!_tradeDraftId) return;
+  const forceNegJans = [...document.querySelectorAll('.trade-force-neg-chk:checked')]
+    .map(el => el.dataset.jan).filter(Boolean);
+  const btn = document.getElementById('trade-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = '出库中…';
+  try {
+    // 先保存表格中的编辑（含删除行）到草稿，再应用，确保 apply 使用的是最新数据
+    const previewData = await _saveTradeDraftLines();
+    if (previewData.blocking_issues && previewData.blocking_issues.length) {
+      renderTradePreview(previewData);
+      toast('存在阻塞问题，请先处理', 'err');
+      return;
+    }
+    const url = `/api/v1/inventory/imports/trade-shipment/draft/${_tradeDraftId}/apply`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force_negative_jans: forceNegJans }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    document.getElementById('trade-preview-area').style.display = 'none';
+    _tradeDraftId = null;
+    renderTradeResult(data);
+    document.getElementById('trade-result-area').style.display = 'block';
+    if (data.applied) toast(`出库成功：${data.mutations?.length || 0} 条${data.force_negated_count ? `（其中 ${data.force_negated_count} 条负库存）` : ''}`, 'ok');
+    else toast(`出库失败，共 ${data.issues?.length || 0} 个问题`, 'err');
+  } catch (e) { toast('出库失败: ' + e.message, 'err'); }
+  finally { btn.disabled = false; btn.textContent = '确认出库'; }
+}
+
+function renderTradeResult(data) {
+  const mutations = data.mutations || [];
+  const issues = data.issues || [];
+  const titleEl = document.getElementById('trade-result-title');
+  if (data.applied) {
+    const parts = [`✓ 出库成功 ${mutations.length} 条`];
+    if (data.force_negated_count) parts.push(`其中 ${data.force_negated_count} 条录为负库存`);
+    if (data.skipped_duplicates) parts.push(`跳过重复 ${data.skipped_duplicates} 条`);
+    if (issues.length) parts.push(`${issues.length} 条未处理`);
+    titleEl.innerHTML = `<span style="color:var(--success)">${parts.join('，')}</span>`;
+  } else {
+    titleEl.innerHTML = `<span style="color:var(--danger)">✗ 出库失败 — ${issues.length} 个问题</span>`;
+  }
+  const mutWrap = document.getElementById('trade-mutations-wrap');
+  if (mutations.length) {
+    mutWrap.style.display = 'block';
+    document.getElementById('trade-mutations').innerHTML = mutations.map(m => `<tr>
+      <td>${esc(m.customer_name)}</td>
+      <td><code style="font-size:11px">${esc(m.jan_code)}</code></td>
+      <td>${m.quantity}</td>
+    </tr>`).join('');
+  } else { mutWrap.style.display = 'none'; }
+  document.getElementById('trade-result-issues').innerHTML = issues.map(i =>
+    `<div style="color:var(--danger);font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">⚠ <code style="font-size:11px">${esc(i.jan_code)}</code> ${esc(i.message)}</div>`
+  ).join('');
+}
+
+// ── 客户预留 Customer Allocations ─────────────────────────────────────────
+
+const ALLOC_STATUS = {
+  waiting:   { label: '等待中', color: 'var(--warn)', bg: 'var(--warn-bg)' },
+  reserved:  { label: '已调转', color: 'var(--success)', bg: 'var(--success-bg)' },
+  shipped:   { label: '已出库', color: 'var(--accent)', bg: 'var(--accent-bg)' },
+  cancelled: { label: '已取消', color: 'var(--muted)', bg: 'var(--border)' },
+};
+
+let _dailyOverviewCache = [];
+
+async function loadDailyOverview() {
+  const date = document.getElementById('alloc-overview-date').value;
+  const container = document.getElementById('alloc-overview-result');
+  if (!date) { toast('请选择计划出库日期', 'err'); return; }
+  container.innerHTML = '<div class="section-sub">加载中…</div>';
+  try {
+    _dailyOverviewCache = await api('GET', `/trade/allocations/daily-overview?planned_outbound_date=${encodeURIComponent(date)}`);
+    renderDailyOverview();
+  } catch (e) {
+    container.innerHTML = `<div class="section-sub" style="color:var(--danger)">${esc(e.message || '加载失败')}</div>`;
+  }
+}
+
+function renderDailyOverview() {
+  const container = document.getElementById('alloc-overview-result');
+  const statusFilter = document.getElementById('alloc-overview-status').value;
+  if (!_dailyOverviewCache.length) {
+    container.innerHTML = '<div class="section-sub">该日期暂无预留记录</div>';
+    return;
+  }
+  const blocks = _dailyOverviewCache.map(r => {
+    const items = statusFilter ? r.items.filter(i => i.status === statusFilter) : r.items;
+    if (statusFilter && !items.length) return '';
+    const rows = items.map(item => {
+      const s = ALLOC_STATUS[item.status] || ALLOC_STATUS.waiting;
+      const badge = `<span style="font-size:11px;padding:2px 6px;border-radius:4px;white-space:nowrap;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span>`;
+      const stockDisplay = item.current_stock === null ? '—' : `<strong style="color:${item.current_stock < item.quantity ? 'var(--warn)' : 'inherit'}">${item.current_stock}</strong>`;
+      const rowBg = item.status === 'waiting' ? 'var(--warn-bg)' : 'transparent';
+      return `<tr style="background:${rowBg}">
+        <td style="white-space:nowrap"><code style="font-size:11px">${esc(item.jan_code)}</code></td>
+        <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.product_name||'')}">${esc(item.product_name||'—')}</td>
+        <td style="text-align:center;white-space:nowrap">${item.quantity}</td>
+        <td style="text-align:center;white-space:nowrap">${stockDisplay}</td>
+        <td style="white-space:nowrap">${badge}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="card" style="margin-top:10px;padding:12px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+        <strong style="font-size:14px">${esc(r.customer_name)}</strong>
+        <span style="font-size:12px;color:var(--success)">已调转 ${r.ready_count}</span>
+        <span style="font-size:12px;color:var(--warn)">等待中 ${r.waiting_count}</span>
+        <span style="font-size:12px;color:var(--muted)">已出库 ${r.shipped_count}</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="table">
+          <thead><tr><th>JAN</th><th>商品名</th><th>需求量</th><th>当前库存</th><th>状态</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }).filter(Boolean);
+  container.innerHTML = blocks.length
+    ? blocks.join('')
+    : '<div class="section-sub">没有符合所选状态的记录</div>';
+}
+
+async function uploadAllocation() {
+  const file = document.getElementById('alloc-file').files[0];
+  if (!file) { toast('请选择需求 Excel 文件', 'err'); return; }
+  const dateVal = document.getElementById('alloc-date').value;
+  const fd = new FormData();
+  fd.append('file', file);
+  let url = '/trade/allocations/upload';
+  if (dateVal) url += `?planned_outbound_date=${encodeURIComponent(dateVal)}`;
+  toast('上传中…', 'info');
+  try {
+    const res = await api('POST', url, fd, true);
+    document.getElementById('alloc-upload-result').innerHTML = `<div class="card" style="border-left:3px solid var(--success);padding:10px 14px;font-size:13px">
+      <strong>${res.source_filename}</strong>（${res.planned_outbound_date}）<br>
+      共 ${res.total_rows} 行　|　已调转 <span style="color:var(--success);font-weight:700">${res.reserved}</span>　|　等待库存 <span style="color:var(--warn);font-weight:700">${res.waiting}</span>　|　更新 ${res.updated}　|　跳过 ${res.skipped}
+    </div>`;
+    toast('上传完成', 'ok');
+    loadAllocations();
+  } catch (e) { toast('上传失败: ' + e.message, 'err'); }
+}
+
+async function loadAllocations() {
+  const customer = document.getElementById('alloc-filter-customer').value.trim();
+  const date = document.getElementById('alloc-filter-date').value;
+  const status = document.getElementById('alloc-filter-status').value;
+  let url = '/trade/allocations?';
+  if (customer) url += `customer_name=${encodeURIComponent(customer)}&`;
+  if (date) url += `planned_outbound_date=${encodeURIComponent(date)}&`;
+  if (status) url += `status=${encodeURIComponent(status)}&`;
+  try {
+    const items = await api('GET', url);
+    renderAllocTable(items);
+    // summary
+    const ready = items.filter(i => i.status === 'reserved').length;
+    const waiting = items.filter(i => i.status === 'waiting').length;
+    document.getElementById('alloc-summary').innerHTML = items.length
+      ? `<span style="font-size:13px;color:var(--muted)">共 ${items.length} 条　已调转 <span style="color:var(--success);font-weight:600">${ready}</span>　等待 <span style="color:var(--warn);font-weight:600">${waiting}</span></span>`
+      : '';
+  } catch (e) { toast('查询失败: ' + e.message, 'err'); }
+}
+
+let _allocItemsCache = [];
+
+function renderAllocTable(items) {
+  _allocItemsCache = items;
+  document.getElementById('alloc-tbody').innerHTML = items.map(item => {
+    const s = ALLOC_STATUS[item.status] || ALLOC_STATUS.waiting;
+    const badge = `<span style="font-size:11px;padding:2px 6px;border-radius:4px;white-space:nowrap;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span>`;
+    const stockDisplay = item.current_stock === null ? '—' : `<strong style="color:${item.current_stock < item.quantity ? 'var(--warn)' : 'inherit'}">${item.current_stock}</strong>`;
+    const editable = item.status !== 'shipped' && item.status !== 'cancelled';
+    let ops = '';
+    if (item.status === 'waiting') {
+      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocReserve(${item.id})">调转</button> `;
+    }
+    if (editable) {
+      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:var(--accent)" onclick="allocShip(${item.id})">标记已出库</button> `;
+      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocEditQty(${item.id})">编辑数量</button> `;
+      ops += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;color:var(--muted)" onclick="allocCancel(${item.id})">取消</button>`;
+    }
+    const rowBg = item.status === 'waiting' && item.current_stock !== null && item.current_stock < item.quantity ? 'var(--warn-bg)' : '';
+    return `<tr data-alloc-id="${item.id}" style="background:${rowBg}">
+      <td style="font-size:12px;white-space:nowrap">${esc(item.planned_outbound_date)}</td>
+      <td style="white-space:nowrap"><strong>${esc(item.customer_name)}</strong></td>
+      <td style="white-space:nowrap"><code style="font-size:11px">${esc(item.jan_code)}</code></td>
+      <td style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.product_name||'')}">${esc(item.product_name||'—')}</td>
+      <td style="text-align:center;white-space:nowrap" class="alloc-qty-cell">${item.quantity}</td>
+      <td style="text-align:center;white-space:nowrap">${stockDisplay}</td>
+      <td style="white-space:nowrap">${badge}</td>
+      <td style="white-space:nowrap">${ops}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">暂无数据</td></tr>';
+}
+
+const ALLOC_CONFLICT_TRIGGER_LABELS = {
+  stock_out: '出库',
+  stock_adjust: '库存调整',
+  excel_upload: '上传补货需求',
+  stock_in: '入库',
+  manual_quantity_edit: '手动调整数量',
+  manual_reserve: '手动调转',
+  manual_revert: '手动撤销',
+  manual_cancel: '取消预留',
+  mark_shipped: '标记已出库',
+  bulk_cancel: '批量取消',
+  revalidate: '重新评估',
+};
+
+async function loadConflictLogs() {
+  try {
+    const logs = await api('GET', '/trade/allocation-conflicts?limit=200');
+    document.getElementById('alloc-conflict-tbody').innerHTML = logs.map(l => `<tr>
+      <td style="font-size:12px;white-space:nowrap">${esc(fmtDate(l.created_at))}</td>
+      <td style="white-space:nowrap"><code style="font-size:11px">${esc(l.jan_code)}</code></td>
+      <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.product_name||'')}">${esc(l.product_name||'—')}</td>
+      <td style="white-space:nowrap"><strong>${esc(l.customer_name)}</strong></td>
+      <td style="font-size:12px;white-space:nowrap">${esc(l.planned_outbound_date)}</td>
+      <td style="text-align:center;white-space:nowrap;color:var(--warn);font-weight:600">${l.quantity}</td>
+      <td style="text-align:center;white-space:nowrap">${l.current_stock}</td>
+      <td style="white-space:nowrap">${esc(ALLOC_CONFLICT_TRIGGER_LABELS[l.trigger] || l.trigger)}</td>
+    </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--muted)">暂无冲突记录</td></tr>';
+  } catch (e) { toast('查询冲突日志失败: ' + e.message, 'err'); }
+}
+
+async function clearConflictLogs() {
+  if (!confirm('确定清空全部预留冲突日志吗？此操作不可恢复（不影响预留本身的状态，只是清掉日志记录）。')) return;
+  try {
+    const result = await api('DELETE', '/trade/allocation-conflicts');
+    toast(`已清空 ${result.deleted} 条日志`, 'ok');
+    loadConflictLogs();
+  } catch (e) { toast('清空失败: ' + e.message, 'err'); }
+}
+
+const SYSTEM_LOG_CATEGORY_LABELS = {
+  negative_stock: '负库存',
+  allocation_conflict: '预留冲突',
+};
+const SYSTEM_LOG_LEVEL_STYLE = {
+  warning: { bg: 'var(--warn-bg)', color: 'var(--warn)' },
+  error: { bg: 'var(--danger-bg)', color: 'var(--danger)' },
+  info: { bg: 'var(--accent-bg)', color: 'var(--accent)' },
+};
+
+async function loadSystemLogs() {
+  const category = document.getElementById('sl-filter-category').value;
+  const level = document.getElementById('sl-filter-level').value;
+  let url = '/analytics/system-logs?limit=200';
+  if (category) url += `&category=${encodeURIComponent(category)}`;
+  if (level) url += `&level=${encodeURIComponent(level)}`;
+  try {
+    const logs = await api('GET', url);
+    document.getElementById('system-log-tbody').innerHTML = logs.map(l => {
+      const s = SYSTEM_LOG_LEVEL_STYLE[l.level] || SYSTEM_LOG_LEVEL_STYLE.info;
+      return `<tr>
+      <td style="font-size:12px;white-space:nowrap">${esc(fmtDate(l.created_at))}</td>
+      <td style="white-space:nowrap">${esc(SYSTEM_LOG_CATEGORY_LABELS[l.category] || l.category)}</td>
+      <td style="white-space:nowrap"><span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${esc(l.level)}</span></td>
+      <td style="white-space:nowrap"><code style="font-size:11px">${esc(l.jan_code||'—')}</code></td>
+      <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.product_name||'')}">${esc(l.product_name||'—')}</td>
+      <td style="font-size:12px;white-space:nowrap">${esc(l.warehouse_name||'—')}</td>
+      <td style="font-size:12px">${esc(l.message)}</td>
+    </tr>`;
+    }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--muted)">暂无日志</td></tr>';
+  } catch (e) { toast('查询系统日志失败: ' + e.message, 'err'); }
+}
+
+async function allocReserve(id) {
+  try {
+    await api('PATCH', `/trade/allocations/${id}/reserve`);
+    toast('调转成功', 'ok');
+    loadAllocations();
+  } catch (e) { toast('调转失败: ' + e.message, 'err'); }
+}
+
+async function allocRevert(id) {
+  try {
+    await api('PATCH', `/trade/allocations/${id}/revert`);
+    toast('撤销成功', 'ok');
+    loadAllocations();
+  } catch (e) { toast('撤销失败: ' + e.message, 'err'); }
+}
+
+async function allocCancel(id) {
+  if (!confirm('确认取消该预留？')) return;
+  try {
+    await api('PATCH', `/trade/allocations/${id}/cancel`);
+    toast('已取消', 'ok');
+    loadAllocations();
+  } catch (e) { toast('取消失败: ' + e.message, 'err'); }
+}
+
+async function allocShip(id) {
+  const item = _allocItemsCache.find(i => i.id === id);
+  const desc = item ? `「${item.customer_name}」${item.quantity}件 ${item.jan_code}` : '该预留';
+  if (!confirm(`确认 ${desc} 已经实际出库？\n（系统不会自动核对秦丝/贸易出库记录，请确保你已经在对应渠道完成了真实出库操作）`)) return;
+  try {
+    await api('PATCH', `/trade/allocations/${id}/ship`);
+    toast('已标记出库', 'ok');
+    loadAllocations();
+  } catch (e) { toast('标记失败: ' + e.message, 'err'); }
+}
+
+async function bulkCancelAllocations() {
+  const customer = document.getElementById('alloc-filter-customer').value.trim();
+  const date = document.getElementById('alloc-filter-date').value;
+  if (!customer || !date) {
+    toast('一键取消需要同时填写客户代码和出库日期，避免误删', 'err');
+    return;
+  }
+  if (!confirm(`确认取消「${customer}」在 ${date} 的所有预留记录？（已出库/已取消的不受影响）`)) return;
+  try {
+    const res = await api('POST', `/trade/allocations/bulk-cancel?customer_name=${encodeURIComponent(customer)}&planned_outbound_date=${encodeURIComponent(date)}`);
+    toast(`已取消 ${res.cancelled_count} 条`, 'ok');
+    loadAllocations();
+  } catch (e) { toast('一键取消失败: ' + e.message, 'err'); }
+}
+
+async function bulkShipAllocations() {
+  const customer = document.getElementById('alloc-filter-customer').value.trim();
+  const date = document.getElementById('alloc-filter-date').value;
+  if (!customer || !date) {
+    toast('一键标记出库需要同时填写客户代码和出库日期，避免误标', 'err');
+    return;
+  }
+  if (!confirm(`确认「${customer}」在 ${date} 的所有等待中/已调转预留都已实际出库？\n（系统不会自动核对秦丝/贸易出库记录，请确保你已经在对应渠道完成了真实出库操作）`)) return;
+  try {
+    const res = await api('POST', `/trade/allocations/bulk-ship?customer_name=${encodeURIComponent(customer)}&planned_outbound_date=${encodeURIComponent(date)}`);
+    toast(`已标记 ${res.shipped_count} 条为已出库`, 'ok');
+    loadAllocations();
+  } catch (e) { toast('一键标记出库失败: ' + e.message, 'err'); }
+}
+
+async function rescheduleAllocations() {
+  const customer = document.getElementById('alloc-filter-customer').value.trim();
+  const fromDate = document.getElementById('alloc-filter-date').value;
+  const toDate = document.getElementById('alloc-reschedule-date').value;
+  if (!customer || !fromDate) {
+    toast('改期需要填写客户代码和原出库日期（上方"出库日期"）', 'err');
+    return;
+  }
+  if (!toDate) { toast('请在"改到新日期"选择目标日期', 'err'); return; }
+  if (fromDate === toDate) { toast('原日期与目标日期相同', 'err'); return; }
+  if (!confirm(`确认把「${customer}」在 ${fromDate} 的所有等待中/已调转预留改到 ${toDate}？\n（已出库/已取消的不受影响）`)) return;
+  try {
+    const res = await api('POST', `/trade/allocations/bulk-reschedule?customer_name=${encodeURIComponent(customer)}&from_date=${encodeURIComponent(fromDate)}&to_date=${encodeURIComponent(toDate)}`);
+    const palletMsg = res.pallets_rescheduled_count ? `，同时改了 ${res.pallets_rescheduled_count} 个托盘` : '';
+    toast(`已把 ${res.rescheduled_count} 条预留改到 ${toDate}${palletMsg}`, 'ok');
+    document.getElementById('alloc-filter-date').value = toDate;
+    loadAllocations();
+  } catch (e) { toast('改期失败: ' + e.message, 'err'); }
+}
+
+function allocEditQty(id) {
+  const row = document.querySelector(`tr[data-alloc-id="${id}"]`);
+  if (!row) return;
+  const item = _allocItemsCache.find(i => i.id === id);
+  if (!item) return;
+  const cell = row.querySelector('.alloc-qty-cell');
+  cell.innerHTML = `<input type="number" id="alloc-qty-input-${id}" value="${item.quantity}" min="1" style="width:64px;text-align:center">`;
+  const opsCell = row.lastElementChild;
+  opsCell.innerHTML = `<button class="btn btn-primary btn-sm" style="padding:2px 8px;font-size:11px" onclick="allocSaveQty(${id})">保存</button> ` +
+    `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="loadAllocations()">取消</button>`;
+}
+
+async function allocSaveQty(id) {
+  const input = document.getElementById(`alloc-qty-input-${id}`);
+  const qty = parseInt(input.value, 10);
+  if (!qty || qty <= 0) { toast('请输入大于0的数量', 'err'); return; }
+  try {
+    await api('PATCH', `/trade/allocations/${id}/quantity?quantity=${qty}`);
+    toast('数量已调整', 'ok');
+    loadAllocations();
+  } catch (e) { toast('调整失败: ' + e.message, 'err'); }
 }
 
 // ── Count Import ───────────────────────────────────────────────────────────
@@ -1226,11 +2954,13 @@ async function uploadCountFile() {
   if (!dateVal) { toast('请选择盘点日期', 'err'); return; }
   if (!wOpt) { toast('请选择仓库', 'err'); return; }
   const sessionIdx = document.getElementById('ci-session-index').value || '0';
+  const coverUncovered = document.getElementById('ci-cover-uncovered').checked;
   const fd = new FormData();
   fd.append('file', file);
   fd.append('count_date', dateVal);
   fd.append('warehouse_name', wOpt.text);
   fd.append('session_index', sessionIdx);
+  fd.append('cover_uncovered', coverUncovered ? 'true' : 'false');
   if (cOpt) fd.append('customer_name', cOpt.text);
   toast('解析中…', 'info');
   try {
@@ -1311,22 +3041,35 @@ async function addUnknownProducts() {
 }
 function renderCountLines(lines) {
   const tbody = document.getElementById('ci-lines');
-  tbody.innerHTML = lines.map(l => `<tr${l.known_product === false ? ' style="background:var(--warn-bg)"' : ''}>
+  tbody.innerHTML = lines.map(l => {
+    const rowStyle = l.implicit_zero
+      ? ' style="background:var(--warn-bg)"'
+      : (l.known_product === false ? ' style="background:var(--warn-bg)"' : '');
+    const newBadge = l.known_product === false
+      ? '<span class="badge badge-warn" style="margin-right:4px;font-size:10px">新品</span>' : '';
+    const zeroBadge = l.implicit_zero
+      ? '<span class="badge" style="margin-right:4px;font-size:10px;background:#f59e0b;color:#fff">未盘</span>' : '';
+    const countCell = l.implicit_zero
+      ? '<span style="color:#f59e0b;font-style:italic">0（未盘）</span>'
+      : l.count_quantity;
+    return `<tr${rowStyle}>
     <td><code style="font-size:11px">${l.jan_code}</code></td>
     <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(l.product_name)}">
-      ${l.known_product === false ? '<span class="badge badge-warn" style="margin-right:4px;font-size:10px">新品</span>' : ''}${l.product_name}
+      ${newBadge}${zeroBadge}${esc(l.product_name)}
     </td>
-    <td>${l.count_quantity}</td>
+    <td>${countCell}</td>
     <td style="color:${l.delta_after_count>0?'var(--success)':l.delta_after_count<0?'var(--danger)':'var(--muted)'}">${l.delta_after_count >= 0 ? '+' : ''}${l.delta_after_count}</td>
     <td>${l.target_quantity}</td>
     <td>${l.current_quantity}</td>
     <td style="font-weight:700;color:${l.adjust_delta>0?'var(--success)':l.adjust_delta<0?'var(--danger)':'var(--muted)'}">${l.adjust_delta >= 0 ? '+' : ''}${l.adjust_delta}</td>
-  </tr>`).join('') || '<tr><td colspan="7" style="color:var(--muted)">无数据</td></tr>';
+  </tr>`;
+  }).join('') || '<tr><td colspan="7" style="color:var(--muted)">无数据</td></tr>';
 }
 function filterCount(mode) {
   let filtered = _countLines;
-  if (mode === 'diff') filtered = _countLines.filter(l => l.adjust_delta !== 0);
-  if (mode === 'new') filtered = _countLines.filter(l => l.known_product === false);
+  if (mode === 'diff')  filtered = _countLines.filter(l => l.adjust_delta !== 0);
+  if (mode === 'new')   filtered = _countLines.filter(l => l.known_product === false);
+  if (mode === 'implicit') filtered = _countLines.filter(l => l.implicit_zero);
   renderCountLines(filtered);
 }
 async function exportCountDraft() {
@@ -1338,18 +3081,27 @@ async function exportCountDraft() {
     URL.revokeObjectURL(url);
   } catch (e) { toast('导出失败: ' + e.message, 'err'); }
 }
-async function applyCountDraft() {
+async function applyCountDraft(force = false) {
   if (!_currentDraft.id) return;
   const btn = document.getElementById('ci-apply-btn');
   btn.disabled = true;
   try {
-    const res = await api('POST', `/inventory-count/${_currentDraft.id}/apply`);
+    const url = `/inventory-count/${_currentDraft.id}/apply` + (force ? '?force=true' : '');
+    const res = await api('POST', url);
     if (res.applied) {
       toast(`盘点应用成功：调整 ${res.adjusted_count}，新增 ${res.created_count}，无变化 ${res.no_change_count}`, 'ok');
       btn.textContent = '已应用';
     } else {
-      toast('应用失败: ' + (res.issues || []).join('; '), 'err');
-      btn.disabled = false;
+      const alreadyApplied = (res.issues || []).some(s => s.includes('已经被应用过'));
+      if (alreadyApplied && !force) {
+        toast('该草稿之前已应用，如需强制重新导入请点击「强制重新应用」', 'err');
+        btn.textContent = '强制重新应用';
+        btn.disabled = false;
+        btn.onclick = () => { btn.onclick = null; btn.textContent = '确认应用'; applyCountDraft(true); };
+      } else {
+        toast('应用失败: ' + (res.issues || []).join('; '), 'err');
+        btn.disabled = false;
+      }
     }
   } catch (e) { toast('应用失败: ' + e.message, 'err'); btn.disabled = false; }
 }
@@ -1368,6 +3120,30 @@ async function uploadProductCatalog() {
     toast('商品字典导入成功', 'ok');
   } catch (e) { document.getElementById('prod-result').innerHTML = resultCard('err', e.message); }
 }
+async function createProduct() {
+  const jan = document.getElementById('np-jan').value.trim();
+  const nameJp = document.getElementById('np-name-jp').value.trim();
+  const nameZh = document.getElementById('np-name-zh').value.trim();
+  const upcRaw = document.getElementById('np-upc').value;
+  const resultEl = document.getElementById('np-result');
+  if (!jan || !/^\d{5,13}$/.test(jan)) { toast('请输入有效的 JAN 码', 'err'); return; }
+  if (!nameJp) { toast('请输入商品名（日文）', 'err'); return; }
+  const body = { jan_code: jan, name_jp: nameJp };
+  if (nameZh) body.name_zh = nameZh;
+  if (upcRaw) body.units_per_case = +upcRaw;
+  try {
+    await api('POST', '/inventory/products', body);
+    toast('商品已新增', 'ok');
+    resultEl.innerHTML = '';
+    document.getElementById('np-jan').value = '';
+    document.getElementById('np-name-jp').value = '';
+    document.getElementById('np-name-zh').value = '';
+    document.getElementById('np-upc').value = '';
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
 async function searchProducts() {
   const kw = document.getElementById('prod-search-kw').value.trim();
   if (!kw) return;
@@ -1375,18 +3151,112 @@ async function searchProducts() {
     const items = await api('GET', `/inventory/search_sku?keyword=${encodeURIComponent(kw)}`);
     const el = document.getElementById('prod-search-result');
     if (!items.length) { el.innerHTML = '<p class="loading">无结果</p>'; return; }
-    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>日文名</th><th>中文名</th><th>箱入数</th><th></th></tr></thead><tbody>' +
+    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>日文名</th><th>中文名</th><th>箱入数</th><th>外箱JAN</th><th></th></tr></thead><tbody>' +
       items.map(p => `<tr id="prow-${p.jan_code}">
         <td><code style="font-size:11px">${p.jan_code}</code></td>
         <td>${esc(p.name_jp)}</td>
         <td>${esc(p.name_zh||'')}</td>
         <td>${p.units_per_case||'—'}</td>
-        <td><button class="btn btn-ghost btn-sm" onclick="editProductRow('${p.jan_code}','${esc(p.name_jp)}','${esc(p.name_zh||'')}','${p.units_per_case||''}')">编辑</button></td>
-      </tr>`).join('') + '</tbody></table></div>';
+        <td>${p.outer_jan ? `<code style="font-size:11px;color:var(--warn)">${p.outer_jan}</code>` : '—'}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" onclick="editProductRow('${p.jan_code}','${esc(p.name_jp)}','${esc(p.name_zh||'')}','${p.units_per_case||''}','${p.outer_jan||''}')">编辑</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleAliasPanel('${p.jan_code}')">别名</button>
+        </td>
+      </tr>
+      <tr id="prow-alias-${p.jan_code}" style="display:none"><td colspan="6"><div id="alias-panel-${p.jan_code}" class="section-sub"></div></td></tr>`).join('') + '</tbody></table></div>';
   } catch (e) { toast(e.message, 'err'); }
 }
 
-function editProductRow(jan, nameJp, nameZh, upc) {
+// ── JAN 别名（重复JAN指向同一商品）──────────────────────────────────────────
+async function toggleAliasPanel(jan) {
+  const row = document.getElementById(`prow-alias-${jan}`);
+  if (!row) return;
+  const showing = row.style.display !== 'none';
+  if (showing) { row.style.display = 'none'; return; }
+  row.style.display = '';
+  await loadAliasPanel(jan);
+}
+
+async function loadAliasPanel(jan) {
+  const panel = document.getElementById(`alias-panel-${jan}`);
+  if (!panel) return;
+  panel.innerHTML = '加载中…';
+  try {
+    const aliases = await api('GET', `/inventory/products/${jan}/aliases`);
+    const list = aliases.length
+      ? aliases.map(a => `
+        <div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+          <code style="font-size:11px">${esc(a.alias_jan)}</code>
+          <span style="color:var(--muted);font-size:12px">${esc(a.note||'')}</span>
+          <button class="btn btn-ghost btn-sm" onclick="removeAliasRow('${jan}','${a.alias_jan}')">移除映射</button>
+        </div>`).join('')
+      : '<div style="color:var(--muted);font-size:13px">暂无别名</div>';
+    panel.innerHTML = `
+      <div style="margin-bottom:8px"><strong>已绑定别名（指向主JAN ${esc(jan)}）：</strong></div>
+      ${list}
+      <div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="alias-input-${jan}" placeholder="新别名JAN" style="width:140px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+        <input type="text" id="alias-note-${jan}" placeholder="备注（可选）" style="width:160px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+        <button class="btn btn-secondary btn-sm" onclick="previewAliasMerge('${jan}')">预览合并</button>
+      </div>
+      <div id="alias-preview-${jan}" style="margin-top:8px"></div>`;
+  } catch (e) {
+    panel.innerHTML = `<div style="color:var(--danger)">${esc(e.message||'加载失败')}</div>`;
+  }
+}
+
+async function previewAliasMerge(jan) {
+  const aliasJan = document.getElementById(`alias-input-${jan}`)?.value.trim();
+  const previewEl = document.getElementById(`alias-preview-${jan}`);
+  if (!aliasJan) { toast('请输入别名JAN', 'err'); return; }
+  previewEl.innerHTML = '预览中…';
+  try {
+    const preview = await api('GET', `/inventory/products/${jan}/aliases/preview?alias_jan=${encodeURIComponent(aliasJan)}`);
+    const rows = preview.warehouses.length
+      ? preview.warehouses.map(w => `
+        <tr>
+          <td>${esc(w.warehouse_name)}</td>
+          <td>${w.canonical_quantity}</td>
+          <td>${w.alias_quantity}</td>
+          <td><strong>${w.merged_quantity}</strong></td>
+        </tr>`).join('')
+      : '<tr><td colspan="4" style="color:var(--muted)">两个JAN在所有仓库均无库存</td></tr>';
+    previewEl.innerHTML = `
+      <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:10px 12px">
+        <div style="margin-bottom:6px">将把 <code>${esc(aliasJan)}</code>（${esc(preview.alias_name)}）合并为
+          <code>${esc(jan)}</code>（${esc(preview.canonical_name)}）的别名：</div>
+        <table style="width:100%;font-size:13px"><thead><tr><th style="text-align:left">仓库</th><th>主JAN现有</th><th>别名JAN现有</th><th>合并后</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+        <div style="margin-top:8px;color:#92400e;font-weight:600">⚠ 此操作不可逆：两JAN的库存与历史流水将合并，今后扫到别名JAN会自动归并到主JAN。</div>
+        <div style="margin-top:8px">
+          <button class="btn btn-primary btn-sm" onclick="confirmAliasMerge('${jan}','${aliasJan}')">确认合并</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('alias-preview-${jan}').innerHTML=''">取消</button>
+        </div>
+      </div>`;
+  } catch (e) {
+    previewEl.innerHTML = `<div style="color:var(--danger)">${esc(e.message||'预览失败')}</div>`;
+  }
+}
+
+async function confirmAliasMerge(jan, aliasJan) {
+  const note = document.getElementById(`alias-note-${jan}`)?.value.trim();
+  try {
+    await api('POST', `/inventory/products/${jan}/aliases`, { alias_jan: aliasJan, note: note || null });
+    toast('别名已合并', 'ok');
+    await loadAliasPanel(jan);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function removeAliasRow(jan, aliasJan) {
+  if (!confirm(`移除别名映射 ${aliasJan}？（不会撤销已经合并的库存历史）`)) return;
+  try {
+    await api('DELETE', `/inventory/products/aliases/${aliasJan}`);
+    toast('已移除', 'ok');
+    await loadAliasPanel(jan);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function editProductRow(jan, nameJp, nameZh, upc, outerJan) {
   const row = document.getElementById(`prow-${jan}`);
   if (!row) return;
   row.innerHTML = `
@@ -1394,6 +3264,7 @@ function editProductRow(jan, nameJp, nameZh, upc) {
     <td><input type="text" value="${nameJp}" id="pedit-jp-${jan}" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td><input type="text" value="${nameZh}" id="pedit-zh-${jan}" placeholder="中文名（可选）" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td><input type="number" value="${upc}" id="pedit-upc-${jan}" min="1" placeholder="—" style="width:70px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+    <td><input type="text" value="${outerJan}" id="pedit-outer-${jan}" placeholder="外箱JAN（可选）" maxlength="13" style="width:110px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td style="white-space:nowrap">
       <button class="btn btn-primary btn-sm" onclick="saveProductRow('${jan}')">保存</button>
       <button class="btn btn-ghost btn-sm" onclick="searchProducts()">取消</button>
@@ -1404,10 +3275,12 @@ async function saveProductRow(jan) {
   const nameJp = document.getElementById(`pedit-jp-${jan}`)?.value.trim();
   const nameZh = document.getElementById(`pedit-zh-${jan}`)?.value.trim();
   const upcRaw = document.getElementById(`pedit-upc-${jan}`)?.value;
+  const outerJan = document.getElementById(`pedit-outer-${jan}`)?.value.trim();
   if (!nameJp) { toast('日文名不能为空', 'err'); return; }
   const body = { name_jp: nameJp };
   if (nameZh) body.name_zh = nameZh;
   if (upcRaw) body.units_per_case = +upcRaw;
+  body.outer_jan = outerJan || null;
   try {
     await api('PATCH', `/inventory/products/${jan}`, body);
     toast('已保存', 'ok');
@@ -1457,12 +3330,62 @@ async function loadSettingsLists() {
     _warehouses.map(w => `<tr>
       <td>${w.name}</td>
       <td>${w.allow_negative_stock ? '<span class="badge badge-warn">开启</span>' : '<span class="badge badge-neutral">关闭</span>'}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="toggleNegativeStock(${w.id},${!w.allow_negative_stock})">${w.allow_negative_stock ? '关闭' : '开启'}</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="toggleNegativeStock(${w.id},${!w.allow_negative_stock})">${w.allow_negative_stock ? '关闭' : '开启'}</button>
+        <button class="btn btn-ghost btn-sm" style="margin-left:4px" onclick="exportInventory(${w.id},'xlsx')">导出库存</button>
+      </td>
     </tr>`).join('') +
     '</tbody></table></div>';
   cEl.innerHTML = '<div class="table-wrap"><table><thead><tr><th>客户</th></tr></thead><tbody>' +
     _customers.map(c => `<tr><td>${c.name}</td></tr>`).join('') +
     '</tbody></table></div>';
+  await loadTelegramUsers();
+}
+
+async function loadTelegramUsers() {
+  const el = document.getElementById('tg-user-list');
+  if (!el) return;
+  try {
+    const users = await api('GET', '/telegram-users');
+    if (!users.length) {
+      el.innerHTML = '<p style="color:var(--muted);font-size:13px">暂无授权用户</p>';
+      return;
+    }
+    el.innerHTML = `<div class="table-wrap"><table>
+      <thead><tr><th>Telegram ID</th><th>@handle</th><th>备注</th><th></th></tr></thead>
+      <tbody>${users.map(u => `<tr>
+        <td><code style="font-size:12px">${u.telegram_user_id}</code></td>
+        <td>${esc(u.username ? '@' + u.username : '—')}</td>
+        <td style="font-size:13px;color:var(--muted)">${esc(u.note || '—')}</td>
+        <td><button class="btn btn-ghost btn-sm" style="color:var(--danger)"
+            onclick="removeTelegramUser(${u.telegram_user_id})">移除</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  } catch (e) { el.innerHTML = `<span style="color:var(--danger);font-size:13px">${esc(e.message)}</span>`; }
+}
+
+async function addTelegramUser() {
+  const tgId = parseInt(document.getElementById('tg-user-id').value, 10);
+  if (!tgId) { toast('请输入有效的 Telegram 用户 ID', 'err'); return; }
+  const username = document.getElementById('tg-username').value.replace(/^@/, '').trim() || null;
+  const note = document.getElementById('tg-note').value.trim() || null;
+  try {
+    await api('POST', '/telegram-users', { telegram_user_id: tgId, username, note });
+    document.getElementById('tg-user-id').value = '';
+    document.getElementById('tg-username').value = '';
+    document.getElementById('tg-note').value = '';
+    toast(`用户 ${tgId} 已添加，立即生效`, 'ok');
+    await loadTelegramUsers();
+  } catch (e) { toast('添加失败: ' + e.message, 'err'); }
+}
+
+async function removeTelegramUser(tgId) {
+  if (!confirm(`确认移除 Telegram 用户 ${tgId}？`)) return;
+  try {
+    await api('DELETE', `/telegram-users/${tgId}`);
+    toast(`用户 ${tgId} 已移除`, 'ok');
+    await loadTelegramUsers();
+  } catch (e) { toast('移除失败: ' + e.message, 'err'); }
 }
 
 async function toggleNegList(cell, warehouseId) {
@@ -1521,8 +3444,9 @@ function p(n) { return String(n).padStart(2,'0'); }
 function esc(s) { return String(s||'').replace(/'/g,"&#39;").replace(/"/g,'&quot;'); }
 
 // ── 秦丝生意通 爬虫 ─────────────────────────────────────────────────────────
-let _qsRecords = [];   // flat list from API
-let _qsOrders  = [];   // grouped by order_no
+let _qsRecords = [];        // flat list from API
+let _qsOrders  = [];        // grouped by order_no
+let _qsActiveWh = '__all__'; // current warehouse filter tab
 
 function _groupByOrder(records) {
   const map = new Map();
@@ -1579,37 +3503,96 @@ populateSelects = function() {
     _customers.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
 };
 
-async function triggerQinsiScrape() {
+async function triggerQinsiScrape(useCache = false) {
   const fromDate = document.getElementById('qs-from').value;
   const toDate = document.getElementById('qs-to').value;
   if (!fromDate || !toDate) { toast('请选择日期范围', 'err'); return; }
-  const btn = document.getElementById('qs-scrape-btn');
-  const status = document.getElementById('qs-scrape-status');
-  btn.disabled = true;
-  status.textContent = '登录并爬取中，请稍候…（约30-60秒）';
+  const scrapeBtn = document.getElementById('qs-scrape-btn');
+  const cacheBtn  = document.getElementById('qs-cache-btn');
+  const statusEl  = document.getElementById('qs-scrape-status');
+  const hintEl    = document.getElementById('qs-cache-hint');
+  scrapeBtn.disabled = true;
+  cacheBtn.disabled  = true;
+  statusEl.textContent = useCache ? '读取缓存中…' : '登录并爬取中，请稍候…（约30-60秒）';
   document.getElementById('qs-result-area').style.display = 'none';
   try {
-    const res = await api('POST', '/qinsi/scrape', { from_date: fromDate, to_date: toDate });
+    const res = await api('POST', '/qinsi/scrape', { from_date: fromDate, to_date: toDate, use_cache: useCache });
     if (!res.success) {
       toast('爬取失败: ' + res.error, 'err');
-      status.textContent = '失败: ' + res.error;
-      if (res.debug_screenshots?.length) {
-        status.textContent += `（截图已保存: ${res.debug_screenshots.join(', ')}）`;
-      }
+      statusEl.textContent = '失败: ' + res.error;
       return;
     }
     _qsRecords = res.records || [];
     _qsOrders  = _groupByOrder(_qsRecords);
+    _qsActiveWh = '__all__';
+    renderQinsiWarehouseTabs(_qsOrders);
     renderQinsiOrders(_qsOrders, fromDate, toDate);
-    renderQinsiUnknownPanel(_qsRecords);   // async, non-blocking
+    renderQinsiUnknownPanel(_qsRecords);
     document.getElementById('qs-result-area').style.display = 'block';
-    status.textContent = `爬取完成：${_qsOrders.length} 笔单据，共 ${_qsRecords.length} 条商品`;
-    toast(`爬取完成：${_qsOrders.length} 笔单据`, 'ok');
+    statusEl.textContent = `${useCache ? '（缓存）' : ''}${_qsOrders.length} 笔单据，共 ${_qsRecords.length} 条商品`;
+    toast(`${useCache ? '缓存' : '爬取'}完成：${_qsOrders.length} 笔单据`, 'ok');
+    // Update cache hint
+    try {
+      const cs = await fetch(`/api/v1/qinsi/cache-status?from_date=${fromDate}&to_date=${toDate}`);
+      const csData = await cs.json();
+      if (csData.has_cache) {
+        const t = new Date(csData.cached_at).toLocaleString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+        hintEl.textContent = `缓存时间: ${t}`;
+      } else {
+        hintEl.textContent = '';
+      }
+    } catch (_) {}
   } catch (e) {
     toast('请求失败: ' + e.message, 'err');
-    status.textContent = '失败';
-  } finally { btn.disabled = false; }
+    statusEl.textContent = '失败';
+  } finally {
+    scrapeBtn.disabled = false;
+    cacheBtn.disabled  = false;
+  }
 }
+
+function renderQinsiWarehouseTabs(orders) {
+  const whSet = new Set(orders.map(o => o.warehouse_name || '').filter(Boolean));
+  const tabs  = document.getElementById('qs-wh-tabs');
+  if (whSet.size <= 1) { tabs.innerHTML = ''; return; }
+  const all = ['__all__', ...whSet];
+  tabs.innerHTML = all.map(wh => {
+    const label = wh === '__all__' ? '全部' : wh;
+    const active = wh === _qsActiveWh ? 'btn-primary' : 'btn-ghost';
+    return `<button class="btn btn-sm ${active}" onclick="qsFilterByWarehouse('${esc(wh)}')">${esc(label)}</button>`;
+  }).join('');
+}
+
+function qsFilterByWarehouse(wh) {
+  _qsActiveWh = wh;
+  const filtered = wh === '__all__' ? _qsOrders : _qsOrders.filter(o => o.warehouse_name === wh);
+  renderQinsiWarehouseTabs(_qsOrders); // re-render tabs so active state updates
+  const fromDate = document.getElementById('qs-from').value;
+  const toDate   = document.getElementById('qs-to').value;
+  renderQinsiOrders(filtered, fromDate, toDate);
+}
+
+// Check cache status when date range changes
+async function qsCheckCacheHint() {
+  const from = document.getElementById('qs-from').value;
+  const to   = document.getElementById('qs-to').value;
+  const hintEl = document.getElementById('qs-cache-hint');
+  if (!from || !to || !hintEl) return;
+  try {
+    const cs = await fetch(`/api/v1/qinsi/cache-status?from_date=${from}&to_date=${to}`);
+    const data = await cs.json();
+    if (data.has_cache) {
+      const t = new Date(data.cached_at).toLocaleString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      hintEl.textContent = `有缓存 (${data.record_count} 条, ${t})`;
+    } else {
+      hintEl.textContent = '无缓存';
+    }
+  } catch (_) { hintEl.textContent = ''; }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('qs-from')?.addEventListener('change', qsCheckCacheHint);
+  document.getElementById('qs-to')?.addEventListener('change', qsCheckCacheHint);
+});
 
 async function renderQinsiUnknownPanel(records) {
   const panel = document.getElementById('qs-unknown-panel');
@@ -1683,6 +3666,7 @@ function renderQinsiOrders(orders, fromDate, toDate) {
     return;
   }
   tbody.innerHTML = orders.map((o, oi) => {
+    const realOi = _qsOrders.indexOf(o);  // index in full unfiltered array
     const dirClass = o.direction === 'IN' ? 'badge-ok' : 'badge-danger';
     const dirLabel = o.direction === 'IN' ? '入库' : '出库';
     const expandId = `qs-expand-${oi}`;
@@ -1700,7 +3684,7 @@ function renderQinsiOrders(orders, fromDate, toDate) {
         <td></td>
       </tr>`).join('');
     return `<tr>
-      <td><input type="checkbox" class="qs-check" data-oi="${oi}" checked></td>
+      <td><input type="checkbox" class="qs-check" data-oi="${realOi}" checked></td>
       <td>${o.record_date}</td>
       <td><span class="badge ${dirClass}">${dirLabel}</span></td>
       <td><code style="font-size:11px">${esc(o.order_no)}</code></td>
@@ -1786,6 +3770,542 @@ async function applyQinsiSelected() {
   } catch (e) {
     document.getElementById('qs-apply-result').innerHTML = resultCard('err', e.message);
   }
+}
+
+// ── 历史查询 公共渲染 ────────────────────────────────────────────────────────
+function _historyTable(rows, cols) {
+  if (!rows.length) return '<p style="color:var(--muted);padding:12px 0">无记录</p>';
+  const thead = '<thead><tr>' + cols.map(c => `<th>${c.label}</th>`).join('') + '</tr></thead>';
+  const tbody = '<tbody>' + rows.map(r => '<tr>' + cols.map(c => {
+    const v = typeof c.render === 'function' ? c.render(r) : (r[c.key] ?? '—');
+    return `<td>${v}</td>`;
+  }).join('') + '</tr>').join('') + '</tbody>';
+  return `<div class="table-wrap"><table>${thead}${tbody}</table></div>`;
+}
+
+function _dirBadge(t) {
+  if (t === 'IN')     return '<span class="badge badge-ok">入库</span>';
+  if (t === 'OUT')    return '<span class="badge badge-danger">出库</span>';
+  if (t === 'ADJUST') return '<span class="badge" style="background:var(--accent-bg);color:var(--accent)">调整</span>';
+  return t;
+}
+
+// ── 供应商历史 ───────────────────────────────────────────────────────────────
+async function querySupplierHistory() {
+  const supplier = document.getElementById('sh-supplier').value.trim();
+  if (!supplier) { toast('请输入供应商名称', 'err'); return; }
+  const from = document.getElementById('sh-from').value || null;
+  const to   = document.getElementById('sh-to').value || null;
+  const el   = document.getElementById('sh-result');
+  el.innerHTML = '<p class="loading">查询中…</p>';
+  try {
+    let url = `/analytics/supplier-history?supplier=${encodeURIComponent(supplier)}`;
+    if (from) url += `&from_date=${from}`;
+    if (to)   url += `&to_date=${to}`;
+    const rows = await api('GET', url);
+    const cols = [
+      { label: '日期', render: r => r.transaction_date || r.created_at?.slice(0,10) || '—' },
+      { label: '仓库', key: 'warehouse_name' },
+      { label: 'JAN',  render: r => `<code style="font-size:11px">${r.jan_code||'—'}</code>` },
+      { label: '商品名', key: 'product_name' },
+      { label: '数量', render: r => `+${r.quantity_change}` },
+      { label: '供应商', key: 'supplier' },
+      { label: '备注', render: r => r.note || '—' },
+    ];
+    const total = rows.reduce((s, r) => s + (r.quantity_change || 0), 0);
+    el.innerHTML = `<div style="font-size:13px;margin-bottom:8px;color:var(--muted)">共 ${rows.length} 条，合计入库 <strong>${total}</strong> 件</div>` + _historyTable(rows, cols);
+  } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+
+// ── 客户历史 ─────────────────────────────────────────────────────────────────
+async function queryCustomerHistory() {
+  const customer = document.getElementById('ch-customer').value.trim();
+  if (!customer) { toast('请输入客户名称', 'err'); return; }
+  const from = document.getElementById('ch-from').value || null;
+  const to   = document.getElementById('ch-to').value || null;
+  const el   = document.getElementById('ch-result');
+  el.innerHTML = '<p class="loading">查询中…</p>';
+  try {
+    let url = `/analytics/customer-history?customer=${encodeURIComponent(customer)}`;
+    if (from) url += `&from_date=${from}`;
+    if (to)   url += `&to_date=${to}`;
+    const rows = await api('GET', url);
+    const cols = [
+      { label: '日期', render: r => r.transaction_date || r.created_at?.slice(0,10) || '—' },
+      { label: '仓库', key: 'warehouse_name' },
+      { label: 'JAN',  render: r => `<code style="font-size:11px">${r.jan_code||'—'}</code>` },
+      { label: '商品名', key: 'product_name' },
+      { label: '数量', render: r => r.quantity_change },
+      { label: '客户', key: 'customer' },
+      { label: '备注', render: r => r.note || '—' },
+    ];
+    const total = rows.reduce((s, r) => s + Math.abs(r.quantity_change || 0), 0);
+    el.innerHTML = `<div style="font-size:13px;margin-bottom:8px;color:var(--muted)">共 ${rows.length} 条，合计出库 <strong>${total}</strong> 件</div>` + _historyTable(rows, cols);
+  } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+
+// ── 商品进出库 ───────────────────────────────────────────────────────────────
+async function queryProductHistory() {
+  const jan = document.getElementById('ph-jan').value;
+  if (!jan) { toast('请先选择商品', 'err'); return; }
+  const from = document.getElementById('ph-from').value || null;
+  const to   = document.getElementById('ph-to').value || null;
+  const type = document.getElementById('ph-type').value || null;
+  const el   = document.getElementById('ph-result');
+  el.innerHTML = '<p class="loading">查询中…</p>';
+  try {
+    let url = `/analytics/product-history?jan_code=${encodeURIComponent(jan)}`;
+    if (from) url += `&from_date=${from}`;
+    if (to)   url += `&to_date=${to}`;
+    if (type) url += `&transaction_type=${type}`;
+    const rows = await api('GET', url);
+    const cols = [
+      { label: '日期', render: r => r.transaction_date || r.created_at?.slice(0,10) || '—' },
+      { label: '类型', render: r => _dirBadge(r.transaction_type) },
+      { label: '仓库', key: 'warehouse_name' },
+      { label: '数量', render: r => (r.quantity_change > 0 ? '+' : '') + r.quantity_change },
+      { label: '供应商', render: r => r.supplier || '—' },
+      { label: '客户',   render: r => r.customer || '—' },
+      { label: '来源', key: 'source' },
+      { label: '备注', render: r => r.note || '—' },
+    ];
+    const inTotal  = rows.filter(r => r.transaction_type === 'IN').reduce((s,r)=>s+r.quantity_change,0);
+    const outTotal = rows.filter(r => r.transaction_type === 'OUT').reduce((s,r)=>s+Math.abs(r.quantity_change),0);
+    el.innerHTML = `<div style="font-size:13px;margin-bottom:8px;color:var(--muted)">共 ${rows.length} 条 | 入库 <strong>+${inTotal}</strong> | 出库 <strong>-${outTotal}</strong></div>` + _historyTable(rows, cols);
+  } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+
+// ── 加载供应商/客户自动补全列表 ──────────────────────────────────────────────
+async function loadCounterpartyLists() {
+  try {
+    const data = await api('GET', '/analytics/counterparties');
+    const sl = document.getElementById('sh-supplier-list');
+    const cl = document.getElementById('ch-customer-list');
+    if (sl) sl.innerHTML = (data.suppliers || []).map(s => `<option value="${esc(s)}">`).join('');
+    if (cl) cl.innerHTML = (data.customers  || []).map(c => `<option value="${esc(c)}">`).join('');
+  } catch (_) {}
+}
+
+// ── Product history search widget binding ────────────────────────────────────
+// Re-use the existing debounceSearch / selectProduct pattern for 'ph' prefix
+// selectProduct sets ph-jan, ph-jan-display, ph-name-display when user picks a product
+
+// ── Barcode scanning (camera) ────────────────────────────────────────────────
+// Reusable module: openScanner(onDetected) opens the camera overlay and calls
+// onDetected(code) with the first decoded barcode string, then closes itself.
+// Native BarcodeDetector is used when available (Android / desktop Chrome/Edge);
+// otherwise falls back to the locally-vendored ZXing library (iPhone / Safari).
+let _scanState = { active: false, stream: null, reader: null, raf: 0, onDetected: null };
+
+function _hasNativeDetector() { return typeof window.BarcodeDetector === 'function'; }
+
+function _stopScannerMedia() {
+  if (_scanState.raf) { cancelAnimationFrame(_scanState.raf); _scanState.raf = 0; }
+  if (_scanState.reader) { try { _scanState.reader.reset(); } catch {} _scanState.reader = null; }
+  if (_scanState.stream) { _scanState.stream.getTracks().forEach(t => { try { t.stop(); } catch {} }); _scanState.stream = null; }
+  const v = document.getElementById('scan-video');
+  if (v) { try { v.pause(); } catch {} v.srcObject = null; }
+}
+
+function closeScanner() {
+  _scanState.active = false;
+  _scanState.onDetected = null;
+  _stopScannerMedia();
+  document.getElementById('scan-overlay').style.display = 'none';
+}
+
+function handleScanResult(code) {
+  if (!_scanState.active || !code) return;
+  const cb = _scanState.onDetected;
+  closeScanner();
+  if (cb) { try { cb(String(code)); } catch (e) { console.error(e); } }
+}
+
+async function openScanner(onDetected) {
+  const overlay = document.getElementById('scan-overlay');
+  const video = document.getElementById('scan-video');
+  const statusEl = document.getElementById('scan-status');
+  _scanState.active = true;
+  _scanState.onDetected = onDetected;
+  overlay.style.display = 'flex';
+  statusEl.textContent = '正在启动摄像头…';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    statusEl.innerHTML = '当前环境无法访问摄像头。<br>摄像头需要 HTTPS（或 localhost）访问 —— 请改用 https 地址，或手动输入。';
+    return;
+  }
+  if (_hasNativeDetector()) {
+    try { await startNativeScan(video, statusEl); return; }
+    catch (e) { _stopScannerMedia(); if (!_scanState.active) return; }
+  }
+  try { await startZxingScan(video, statusEl); }
+  catch (e) {
+    if (!_scanState.active) return;
+    const msg = (e && e.name === 'NotAllowedError') ? '摄像头权限被拒绝，请在浏览器中允许摄像头访问。'
+      : '扫码启动失败：' + (e && e.message ? e.message : e);
+    statusEl.textContent = msg;
+  }
+}
+
+async function startNativeScan(video, statusEl) {
+  const wanted = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','codabar','qr_code'];
+  let supported = [];
+  try { supported = await window.BarcodeDetector.getSupportedFormats(); } catch {}
+  const formats = supported.length ? wanted.filter(f => supported.includes(f)) : wanted;
+  const detector = new window.BarcodeDetector(formats.length ? { formats } : undefined);
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+  _scanState.stream = stream;
+  video.srcObject = stream;
+  await video.play();
+  if (!_scanState.active) return;
+  statusEl.textContent = '将条码对准取景框…';
+  const tick = async () => {
+    if (!_scanState.active) return;
+    try {
+      const codes = await detector.detect(video);
+      if (codes && codes.length && codes[0].rawValue) { handleScanResult(codes[0].rawValue); return; }
+    } catch {}
+    _scanState.raf = requestAnimationFrame(tick);
+  };
+  _scanState.raf = requestAnimationFrame(tick);
+}
+
+let _zxingPromise = null;
+function loadZxing() {
+  if (window.ZXing && window.ZXing.BrowserMultiFormatReader) return Promise.resolve();
+  if (_zxingPromise) return _zxingPromise;
+  _zxingPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = '/static/vendor/zxing.min.js';
+    s.async = true;
+    s.onload = () => (window.ZXing && window.ZXing.BrowserMultiFormatReader) ? resolve() : reject(new Error('扫码库加载异常'));
+    s.onerror = () => { _zxingPromise = null; reject(new Error('扫码库加载失败')); };
+    document.head.appendChild(s);
+  });
+  return _zxingPromise;
+}
+
+async function startZxingScan(video, statusEl) {
+  statusEl.textContent = '加载扫码组件…';
+  await loadZxing();
+  if (!_scanState.active) return;
+  const reader = new ZXing.BrowserMultiFormatReader();
+  _scanState.reader = reader;
+  const onResult = (result) => {
+    if (result && _scanState.active) {
+      handleScanResult(typeof result.getText === 'function' ? result.getText() : result.text);
+    }
+  };
+  statusEl.textContent = '将条码对准取景框…';
+  if (typeof reader.decodeFromConstraints === 'function') {
+    await reader.decodeFromConstraints({ video: { facingMode: { ideal: 'environment' } } }, video, onResult);
+  } else {
+    await reader.decodeFromVideoDevice(undefined, video, onResult);
+  }
+}
+
+// Close overlay on backdrop click or Escape
+document.getElementById('scan-overlay').addEventListener('click', e => {
+  if (e.target.id === 'scan-overlay') closeScanner();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && _scanState.active) closeScanner(); });
+
+// ── Scan → JAN resolution (仅扫码路径用；后端搜索/手输逻辑一律不改) ──────────────
+// 扫码只吐原始码，这里按规则解析：先用完整码查（命中商品JAN/别名JAN的精确匹配）；
+// 仅当【码 ≥13 位】且完整码没命中时，才截取"最后6位的前5位"再查一次 —— 后端该 5 位
+// 分支同时匹配商品JAN与外箱JAN的对应位置，所以外箱码也在这一步被找到。短码(<13)不截取。
+async function resolveScan(code) {
+  const raw = String(code || '').trim();
+  try { const a = await api('GET', `/inventory/search?keyword=${encodeURIComponent(raw)}`); if (Array.isArray(a) && a.length) return { items: a, keyword: raw }; } catch {}
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length >= 13) {
+    const key5 = digits.slice(-6, -1);
+    try { const b = await api('GET', `/inventory/search?keyword=${encodeURIComponent(key5)}`); if (Array.isArray(b) && b.length) return { items: b, keyword: key5 }; } catch {}
+  }
+  return { items: [], keyword: raw };
+}
+
+async function resolveScanKeyword(code, endpoint) {
+  const raw = String(code || '').trim();
+  try { const a = await api('GET', `${endpoint}?keyword=${encodeURIComponent(raw)}`); if (Array.isArray(a) && a.length) return raw; } catch {}
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length >= 13) {
+    const key5 = digits.slice(-6, -1);
+    try { const b = await api('GET', `${endpoint}?keyword=${encodeURIComponent(key5)}`); if (Array.isArray(b) && b.length) return key5; } catch {}
+  }
+  return raw;
+}
+
+function _renderWidgetItems(prefix, items) {
+  const resultsEl = document.getElementById(`${prefix}-results`);
+  resultsEl.dataset.prefix = prefix;
+  resultsEl.innerHTML = items.map(p => `
+    <div class="search-result-item"
+         data-jan="${esc(p.jan_code)}"
+         data-namejp="${esc(p.name_jp)}"
+         data-namezh="${esc(p.name_zh||'')}">
+      <div class="sri-jan">${p.jan_code}</div>
+      <div class="sri-name">${p.name_jp}${p.name_zh ? ' / ' + p.name_zh : ''}</div>
+    </div>`).join('');
+  resultsEl.style.display = 'block';
+}
+
+// Scan into a product-search widget (si/so/sa/st/ph): auto-select a single hit,
+// list multiple candidates, or surface the raw code when nothing matches.
+function scanIntoWidget(prefix) {
+  openScanner(async (code) => {
+    const input = document.getElementById(`${prefix}-search`);
+    const { items, keyword } = await resolveScan(code);
+    if (!items.length) {
+      input.value = code;
+      document.getElementById(`${prefix}-results`).style.display = 'none';
+      toast(`未匹配到商品：${code}`, 'err');
+      return;
+    }
+    if (items.length === 1) {
+      const p = items[0];
+      selectProduct(prefix, p.jan_code, p.name_jp, p.name_zh || '');
+      toast('已识别并选中', 'ok');
+      return;
+    }
+    input.value = keyword;
+    _renderWidgetItems(prefix, items);
+    toast(`识别到 ${items.length} 个候选，请选择`, 'info');
+  });
+}
+
+// Scan into the 库存查询 keyword box → resolve → run search
+function scanIntoInventorySearch() {
+  openScanner(async (code) => {
+    document.getElementById('search-kw').value = await resolveScanKeyword(code, '/inventory/search');
+    doSearch();
+  });
+}
+
+// Scan into the 商品搜索 (商品管理) box → resolve → run product search
+function scanIntoProductSearch() {
+  openScanner(async (code) => {
+    document.getElementById('prod-search-kw').value = await resolveScanKeyword(code, '/inventory/search_sku');
+    searchProducts();
+  });
+}
+
+// Scan into a raw JAN field (新增商品): no matching — just fill the recognized code
+function scanIntoRawJan(inputId) {
+  openScanner((code) => {
+    const el = document.getElementById(inputId);
+    const digits = String(code || '').replace(/\D/g, '').slice(0, 13);
+    el.value = digits || String(code || '');
+    toast(`已识别：${el.value}`, 'ok');
+  });
+}
+
+// ══ 贸易集装箱工作区 (P1) ══════════════════════════════════════════════════
+let _workspace = 'ops';
+let _addPalletId = null;
+
+// 扫码填入原始文本（托盘码/库位码不是 JAN，不能剥成纯数字）
+function scanIntoText(inputId) {
+  openScanner((code) => {
+    const el = document.getElementById(inputId);
+    el.value = String(code || '').trim();
+    toast(`已识别：${el.value}`, 'ok');
+  });
+}
+
+function switchWorkspace(name) {
+  _workspace = name;
+  try { localStorage.setItem('wms_workspace', name); } catch {}
+  try { if (location.hash !== '#ws=' + name) history.replaceState(null, '', '#ws=' + name); } catch {}
+  document.querySelectorAll('.ws-switch [data-ws]').forEach(b => b.classList.toggle('active', b.dataset.ws === name));
+  document.querySelectorAll('.nav-group[data-workspace]').forEach(g => { g.style.display = (g.dataset.workspace === name) ? '' : 'none'; });
+  const first = document.querySelector('.nav-group[data-workspace="' + name + '"] .nav-item');
+  if (first) nav(first);
+}
+function initWorkspace() {
+  let saved = null;
+  try { saved = localStorage.getItem('wms_workspace'); } catch {}
+  if (location.hash.includes('ws=container') || saved === 'container') switchWorkspace('container');
+}
+
+function _palletStatusLabel(s) { return ({ empty: '空', staging: '备货中', loaded: '已装柜' })[s] || s; }
+function _cval(id) { const e = document.getElementById(id); return e ? e.value.trim() : ''; }
+
+function _renderPalletInfo(p) {
+  return `<div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center">
+    <div><strong style="font-size:15px">${esc(p.code)}</strong> <span class="pallet-badge">${_palletStatusLabel(p.status)}</span></div>
+    <div style="color:var(--muted);font-size:13px">客户 ${esc(p.customer_name || '—')} · 出库日 ${p.planned_outbound_date || '—'} · 库位 ${esc(p.shelf_location || '—')}</div>
+  </div>`;
+}
+function _renderItemsStatic(p) {
+  if (!p.items.length) return '<p class="loading" style="margin:0">托盘暂无货物</p>';
+  return '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品</th><th>数量</th></tr></thead><tbody>'
+    + p.items.map(it => `<tr><td><code style="font-size:11px">${it.jan_code}</code></td><td>${esc(it.product_name || '—')}</td><td>${it.quantity}</td></tr>`).join('')
+    + '</tbody></table></div>';
+}
+
+// ── 托盘查询 ──
+async function loadPalletList() {
+  const params = new URLSearchParams();
+  const d = _cval('cp-f-date'); if (d) params.set('planned_outbound_date', d);
+  const c = _cval('cp-f-customer'); if (c) params.set('customer_name', c);
+  const s = _cval('cp-f-status'); if (s) params.set('status', s);
+  const code = _cval('cp-f-code'); if (code) params.set('code', code);
+  const el = document.getElementById('cp-list');
+  document.getElementById('cp-detail').innerHTML = '';
+  el.innerHTML = '<p class="loading">加载中…</p>';
+  try {
+    const pallets = await api('GET', '/containers/pallets?' + params.toString());
+    if (!pallets.length) { el.innerHTML = '<p class="loading">无托盘</p>'; return; }
+    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>托盘码</th><th>客户</th><th>出库日</th><th>状态</th><th>库位</th><th>货物</th><th></th></tr></thead><tbody>'
+      + pallets.map(p => {
+        const kinds = p.items.length, total = p.items.reduce((a, i) => a + i.quantity, 0);
+        return `<tr>
+          <td><code style="font-size:11px">${esc(p.code)}</code></td>
+          <td>${esc(p.customer_name || '—')}</td>
+          <td>${p.planned_outbound_date || '—'}</td>
+          <td><span class="pallet-badge">${_palletStatusLabel(p.status)}</span></td>
+          <td>${p.shelf_location ? '<code style="font-size:11px">' + esc(p.shelf_location) + '</code>' : '—'}</td>
+          <td>${kinds} 种 / ${total} 件</td>
+          <td><button class="btn btn-ghost btn-sm" onclick="viewPalletDetail(${p.id})">查看</button></td>
+        </tr>`;
+      }).join('') + '</tbody></table></div>';
+  } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+async function viewPalletDetail(id) {
+  const el = document.getElementById('cp-detail');
+  el.innerHTML = '<p class="loading">加载中…</p>';
+  try {
+    const p = await api('GET', '/containers/pallets/' + id);
+    el.innerHTML = `<div class="card">${_renderPalletInfo(p)}
+      <div style="margin-top:10px">${_renderItemsStatic(p)}</div>
+      <div style="margin-top:10px"><button class="btn btn-primary btn-sm" onclick="goToAdd('${esc(p.code)}')">去加货</button></div>
+    </div>`;
+  } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+
+// ── 建空托盘 ──
+async function loadCreateCustomers() {
+  const d = _cval('cc-date');
+  const sel = document.getElementById('cc-customer');
+  if (!d) { sel.innerHTML = '<option value="">请先选日期</option>'; return; }
+  sel.innerHTML = '<option value="">加载中…</option>';
+  try {
+    const cs = await api('GET', '/containers/customers?planned_outbound_date=' + d);
+    if (!cs.length) { sel.innerHTML = '<option value="">该日期无预留客户</option>'; return; }
+    sel.innerHTML = cs.map(c => `<option value="${esc(c.customer_name)}">${esc(c.customer_name)}（预留${c.reserved_count} / 等待${c.waiting_count}）</option>`).join('');
+  } catch (e) { sel.innerHTML = '<option value="">加载失败</option>'; toast(e.message, 'err'); }
+}
+async function submitCreatePallet() {
+  const code = _cval('cc-code'), date = _cval('cc-date');
+  const customer = document.getElementById('cc-customer').value;
+  const rel = document.getElementById('cc-result');
+  if (!date) { toast('请选择计划出库日期', 'err'); return; }
+  if (!customer) { toast('请选择客户', 'err'); return; }
+  if (!code) { toast('请扫描或输入托盘码', 'err'); return; }
+  try {
+    const p = await api('POST', '/containers/pallets', { code, planned_outbound_date: date, customer_name: customer });
+    rel.innerHTML = resultCard('ok', `托盘「${esc(p.code)}」已建立（客户 ${esc(p.customer_name)} / ${p.planned_outbound_date}）`);
+    toast('托盘已建立', 'ok');
+    document.getElementById('cc-code').value = '';
+  } catch (e) { rel.innerHTML = resultCard('err', e.message); }
+}
+
+// ── 加货 ──
+async function loadAddPallet() {
+  const code = _cval('ca-code');
+  if (!code) { toast('请扫描或输入托盘码', 'err'); return; }
+  try {
+    const p = await api('GET', '/containers/pallets/by-code/' + encodeURIComponent(code));
+    _addPalletId = p.id;
+    document.getElementById('ca-body').style.display = 'block';
+    await refreshAddScreen();
+  } catch (e) { document.getElementById('ca-body').style.display = 'none'; toast(e.message, 'err'); }
+}
+async function refreshAddScreen() {
+  if (!_addPalletId) return;
+  const [p, cands] = await Promise.all([
+    api('GET', '/containers/pallets/' + _addPalletId),
+    api('GET', '/containers/pallets/' + _addPalletId + '/candidates'),
+  ]);
+  document.getElementById('ca-info').innerHTML = _renderPalletInfo(p);
+  document.getElementById('ca-candidates').innerHTML = _renderCandidates(cands);
+  document.getElementById('ca-items').innerHTML = _renderEditableItems(p);
+}
+function _renderCandidates(cands) {
+  if (!cands.length) return '<p class="loading">该托盘（客户/日期）下无 reserved / waiting 预留</p>';
+  return '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品</th><th>预留</th><th>状态</th><th>WMS在库</th><th>已装</th><th>加入</th></tr></thead><tbody>'
+    + cands.map(c => {
+      const remaining = Math.max(0, c.reserved_quantity - c.on_pallet_quantity);
+      const chip = `<span class="cand-chip ${c.status}">${c.status === 'reserved' ? '已调转' : '待WMS同步'}</span>`;
+      return `<tr>
+        <td><code style="font-size:11px">${c.jan_code}</code></td>
+        <td>${esc(c.product_name || '—')}</td>
+        <td>${c.reserved_quantity}</td>
+        <td>${chip}</td>
+        <td>${c.current_stock == null ? '—' : c.current_stock}</td>
+        <td>${c.on_pallet_quantity}</td>
+        <td style="white-space:nowrap">
+          <input type="number" min="1" value="${remaining || 1}" id="cand-qty-${c.jan_code}" style="width:62px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+          <button class="btn btn-primary btn-sm" onclick="addCandidate('${c.jan_code}')">加入</button>
+        </td>
+      </tr>`;
+    }).join('') + '</tbody></table></div>';
+}
+function _renderEditableItems(p) {
+  if (!p.items.length) return '<p class="loading">托盘暂无货物</p>';
+  return '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品</th><th>数量</th><th></th></tr></thead><tbody>'
+    + p.items.map(it => `<tr>
+        <td><code style="font-size:11px">${it.jan_code}</code></td>
+        <td>${esc(it.product_name || '—')}</td>
+        <td><input type="number" min="0" value="${it.quantity}" id="pit-${it.jan_code}" style="width:70px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+          <button class="btn btn-ghost btn-sm" onclick="setItemQty('${it.jan_code}')">改</button></td>
+        <td><button class="btn btn-ghost btn-sm" onclick="setPalletItem('${it.jan_code}', 0)">移除</button></td>
+      </tr>`).join('') + '</tbody></table></div>';
+}
+async function _addItemsAndRefresh(items) {
+  try { await api('POST', '/containers/pallets/' + _addPalletId + '/items', { items }); toast('已加入', 'ok'); await refreshAddScreen(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function addCandidate(jan) {
+  const q = +document.getElementById('cand-qty-' + jan).value;
+  if (!q || q < 1) { toast('数量须 ≥ 1', 'err'); return; }
+  await _addItemsAndRefresh([{ jan_code: jan, quantity: q }]);
+}
+async function addManualItem() {
+  const jan = _cval('ca-manual-jan');
+  const q = +document.getElementById('ca-manual-qty').value;
+  if (!jan) { toast('请输入 / 扫描 JAN', 'err'); return; }
+  if (!q || q < 1) { toast('数量须 ≥ 1', 'err'); return; }
+  await _addItemsAndRefresh([{ jan_code: jan, quantity: q }]);
+  document.getElementById('ca-manual-jan').value = '';
+}
+async function setItemQty(jan) { await setPalletItem(jan, +document.getElementById('pit-' + jan).value); }
+async function setPalletItem(jan, qty) {
+  try {
+    await api('PATCH', '/containers/pallets/' + _addPalletId + '/items/' + encodeURIComponent(jan), { quantity: qty });
+    toast('已更新', 'ok'); await refreshAddScreen();
+  } catch (e) { toast(e.message, 'err'); }
+}
+function goToAdd(code) {
+  const btn = document.querySelector('.nav-item[data-section="container-add"]');
+  if (btn) nav(btn);
+  document.getElementById('ca-code').value = code;
+  loadAddPallet();
+}
+
+// ── 库位绑定 ──
+async function submitPlacePallet() {
+  const code = _cval('pl-code');
+  const loc = _cval('pl-loc').toUpperCase();
+  const rel = document.getElementById('pl-result');
+  if (!code) { toast('请扫描 / 输入托盘码', 'err'); return; }
+  if (!/^[A-Z]-\d{2}-\d{2}$/.test(loc)) { toast('库位格式应为 区-排-层，如 A-12-03', 'err'); return; }
+  try {
+    const p = await api('POST', '/containers/pallets/place', { pallet_code: code, location_code: loc });
+    rel.innerHTML = resultCard('ok', `托盘「${esc(p.code)}」已放到库位 ${esc(p.shelf_location)}`);
+    toast('库位已绑定', 'ok');
+    document.getElementById('pl-code').value = ''; document.getElementById('pl-loc').value = '';
+  } catch (e) { rel.innerHTML = resultCard('err', e.message); }
 }
 </script>
 </body>

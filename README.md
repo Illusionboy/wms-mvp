@@ -33,6 +33,7 @@ JWT_SECRET_KEY=your_jwt_secret         # 生成：python -c "import secrets; pri
 ADMIN_USERNAME=admin                    # 首次启动自动创建此账号
 ADMIN_PASSWORD=your_admin_password
 API_KEY=your_api_key                    # 仅 CLI 工具脚本需要
+QINSI_WAREHOUSE_MAP={"北津守仓库":"普通仓库","乐天仓库":"乐天仓库"}   # 秦丝仓库名 → WMS 仓库名
 ```
 
 ### 2. 启动服务
@@ -49,6 +50,8 @@ docker compose up --build
 - **Telegram Bot**: 自动 polling，不需要公网域名
 
 PostgreSQL 数据保存在 Docker named volume `newproject_postgres_data`。`docker compose down` 保留数据，`docker compose down -v` 删除数据。
+
+> **代码更新后**请用 `docker compose up -d --build api` 重新构建镜像；`docker compose restart api` 仅重启容器，不会加载新代码。
 
 ## 首次登录
 
@@ -68,7 +71,7 @@ docker compose up -d postgres
 
 #### 方式一：Web UI（推荐）
 
-登录后进入 **商品管理** → 上传 Excel 文件。
+登录后进入 **商品管理** → 上传 Excel 文件。导入后可在商品列表中点击「编辑」按钮修改商品名称和箱入数。
 
 #### 方式二：API
 
@@ -99,20 +102,29 @@ python -m app.tools.init_inventory_from_count \
 
 `--replace` 覆盖现有库存。两张表无表头，第 1 列 JAN，第 2 列数量。
 
+### 库存桶合并（历史数据迁移）
+
+如果数据库存在同一商品在同一仓库的多个库存桶（旧版本遗留），运行一次即可合并：
+
+```bash
+docker compose exec api python -m tools.consolidate_inventory_buckets
+```
+
 ## Web UI 功能
 
 | 功能 | 说明 |
-| ------ | ------ |
-| 仪表盘 | 各仓库最后入/出库时间、最后盘点时间、数据延迟天数、负库存 SKU 数 |
-| 入库 | 搜索商品 → 选仓库/客户/库位 → 提交 |
-| 出库 | 搜索商品 → 选仓库/客户 → 提交 |
-| 调整 | 设定库存实际数量，写入 ADJUST 事务 |
+| --- | --- |
+| 仪表盘 | 各仓库最后入/出库时间、最后盘点时间、数据延迟天数；点击「负库存 SKU」数字展开清单 |
+| 入库 | 搜索商品 → 选仓库 → 可选填交易日期 → 提交 |
+| 出库 | 搜索商品 → 选仓库 → 可选填交易日期 → 提交 |
+| 调整 | 设定库存实际数量，写入 ADJUST 事务；可选填交易日期 |
 | 查询 | 按 JAN/商品名搜索库存 |
 | 微信报库 | 粘贴聊天记录 → AI 解析草稿 → 预览 → 确认导入 |
 | 乐天 CSV | 上传 RMS 出货 CSV → 直接写入出库记录 |
+| 秦丝同步 | 选日期范围 → 抓取订单 → 按订单勾选 → 确认写入（仓库自动映射） |
 | 盘点导入 | 上传秦丝 HTML 或 Excel → 对账预览 → 确认应用 |
-| 商品管理 | 上传商品字典 Excel，搜索商品主数据 |
-| 设置 | 添加用户、新增仓库/客户 |
+| 商品管理 | 上传商品字典 Excel；搜索后可直接在表格内编辑名称和箱入数 |
+| 设置 | 添加用户、新增仓库（含负库存开关）/客户 |
 
 ## Telegram Bot（查询）
 
@@ -132,6 +144,12 @@ Bot 仅支持读操作：
 ### 工作原理
 
 WMS 通过 httpx 直接调用秦丝生意通后端 API（无浏览器），拉取采购单（入库）和销售单（出库）的商品明细，写入 WMS 事务（`source="qinsi_scrape"`）。
+
+每条记录用 `reference_id = "qinsi:{order_no}:{jan_code}"` 去重，重复提交同一订单行自动跳过。
+
+**仓库自动映射**：秦丝抓取的仓库名（如"北津守仓库"）通过 `QINSI_WAREHOUSE_MAP` 环境变量自动映射到 WMS 仓库名，无需手动指定仓库。
+
+**交易日期**：apply 时自动使用秦丝订单的实际日期，不是 WMS 的录入时间。
 
 认证使用秦丝的 `gisALogin` session cookie，**有效期 7 天**。
 
@@ -158,36 +176,30 @@ JWT token 获取方式：打开 WMS 网页 → F12 → Console → `localStorage
 
 流程：① 自动填写账号密码 → ② 手动完成滑块 → ③ cookies 自动 POST 到 NAS → ④ 立即生效
 
-**本地开发（API 在本机）**：直接运行 `./refresh_qinsi.sh`，`NAS_API_URL` 留空或填 `http://localhost:8000` 时直接写入本地文件，无需 token。
-
 ### 检查授权状态
 
 ```bash
 curl http://localhost:8000/api/v1/qinsi/auth-status
 ```
 
-### 使用同步功能
-
-登录 Web UI → **秦丝同步** 标签：选择日期范围 → 抓取 → 按订单勾选（点「展开」查看商品明细）→ 确认写入。
-
 ## 月度盘点对账
 
 访问 <http://localhost:8000/count-import> 或 Web UI **盘点导入** 标签：
 
 1. 上传秦丝生意通 `.html` 或 `.xlsx` 盘点单
-1. 选择盘点日期（实物盘点当天）、仓库、客户
+1. 选择盘点日期（实物盘点当天）和仓库
 1. 系统计算对账量：`目标库存 = 盘点数量 + Σ(盘点日期之后的WMS入出库变动)`；`ADJUST量 = 目标库存 - 当前WMS库存`
 1. 预览表格（可按"有差异"筛选），可导出 Excel 留存
-1. 确认应用 → 写入 `source="physical_count"` 的 ADJUST 事务
+1. 确认应用 → 写入 `source="physical_count"` 的 ADJUST 事务，`transaction_date` 设为盘点日期
 
 ## 负库存模式
 
 月底盘点数据到次月 5 日才到，这段窗口期出入库不能停。管理员可按仓库开启负库存：
 
-- Web UI：**设置 → 仓库管理**
+- Web UI：**设置 → 仓库管理** → 点击每个仓库的「开启/关闭」按钮
 - API：`PATCH /api/v1/warehouses/{id}/allow-negative?enabled=true`
 
-开启后出库可超过当前库存量，余额变为负值（合法业务数据）。盘点数据到位后用盘点导入修正。
+开启后出库可超过当前库存量，余额变为负值（合法业务数据）。仪表盘点击「负库存 SKU」数字可查看明细清单。盘点数据到位后用盘点导入修正。
 
 ## API 认证
 
@@ -196,14 +208,25 @@ curl http://localhost:8000/api/v1/qinsi/auth-status
 - `Authorization: Bearer <jwt>` — 通过 `POST /api/v1/auth/login` 获取
 - `X-API-Key: <key>` — 兼容 CLI 工具脚本
 
-查询端点（search、status、count preview）无需认证。
+查询端点（search、status、count preview、negative-stock）无需认证。
 
 ## 数据分析
 
-从 `stock_transactions` 出发，关联 `inventory_records → products → warehouses → customers`。
+从 `stock_transactions` 出发，关联 `inventory_records → products → warehouses`。
 
-`source` 值：`telegram` / `rakuten_csv` / `chat_report` / `physical_count` / `web_ui`
+关键字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `transaction_date` | 实际业务日期（供应链分析的时序主轴） |
+| `created_at` | WMS 录入时间（`transaction_date` 为 NULL 时的回退） |
+| `source` | 数据来源渠道 |
+| `reference_id` | 幂等键（秦丝格式：`qinsi:{order_no}:{jan_code}`） |
+
+`source` 可选值：`telegram` / `rakuten_csv` / `chat_report` / `physical_count` / `web_ui` / `qinsi_scrape`
 
 `physical_count` 事务的 `note` 格式：`盘点日期:YYYY-MM-DD 盘点量:N 盘后变动:±N`
 
 `stock_transactions.user_id` 关联 `users.id`，可追踪每笔操作的操作员。
+
+供应链分析规划（需求预测、速度分级、损耗追踪等）见 `docs/supply_chain_analytics.md`。

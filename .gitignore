@@ -16,17 +16,25 @@ app/data/qinsi_schema_cache.json
 # 本地一键脚本（含本机路径，不适合共享）
 refresh_qinsi.sh
 
+# 乐天快递打包工具（本地独立项目，仅供参考，不纳入版本控制）
+乐天快递打包/
+
 # macOS
 .DS_Store
 **/.DS_Store
-4-30-normal.xlsx
-4-30-rakuten.xlsx
-rakuten_20260511.csv
-20260511.csv
+# 4-30-normal.xlsx
+# 4-30-rakuten.xlsx
+# rakuten_20260511.csv
+# 20260511.csv
+*.csv
+*.xlsx
+product_dict.json
 import_products.py
 process_excel.py
 rakuten_delivery_dtl.py
 merge_tool.py
 商品箱规数据5.12.xlsx
-秦丝生意通-库存盘点单.html
-秦丝生意通-库存盘点单_files/
+秦丝生意通-库存盘点单*.html
+秦丝生意通-库存盘点单*_files/
+docs/
+.claude/

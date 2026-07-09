@@ -25,6 +25,7 @@ from app.schemas.inventory_count import (
     QinsiSessionListResult,
 )
 from app.services.inventory import resolve_customer, resolve_warehouse
+from app.services.product_alias import resolve_canonical_jan
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ _CACHE_PATH = Path(__file__).parent.parent / "data" / "qinsi_schema_cache.json"
 
 # Hardcoded fallback indices (秦丝生意通 list5 as of 2024)
 _HARDCODED_MAP = QinsiColumnMap(jan_col=7, name_col=3, count_col=12, source="hardcoded")
+# list4 (明细表) column map — used when list5 is empty (JS grid not rendered on page save)
+# col[8]=goodsSn(JAN), col[3]=goodName, col[21]=quantity(盘点数量), NOT col[22](系统库存)
+_LIST4_MAP = QinsiColumnMap(jan_col=8, name_col=3, count_col=21, source="hardcoded")
 
 # Keyword hints for each column type
 _COL_HINTS: dict[str, list[str]] = {
@@ -98,6 +102,8 @@ async def _llm_repair_column_map(headers: list[str], sample_rows: list[list[str]
     from google import genai  # type: ignore
     from app.core.config import settings
 
+    if not settings.gemini_api_key:
+        raise RuntimeError("GEMINI_API_KEY 未配置，盘点列自动修复（LLM 兜底）不可用；请检查文件列名或配置 Key。")
     client = genai.Client(api_key=settings.gemini_api_key)
 
     headers_str = json.dumps(headers, ensure_ascii=False)
@@ -326,6 +332,17 @@ async def _parse_qinsi_html(
     headers, data_rows = _extract_table_rows(table)
 
     if not data_rows:
+        # list5 is empty — JS grid was not rendered when page was saved.
+        # Fall back to list4 (明细表) which is static HTML.
+        # col[21]=盘点数量(physical count), col[8]=JAN, col[3]=商品名
+        list4 = soup.find("table", id="list4")
+        if list4 and isinstance(list4, Tag):
+            _, list4_rows = _extract_table_rows(list4)
+            # Skip rows where the JAN column is empty (e.g. blank first row)
+            list4_rows = [r for r in list4_rows if len(r) > 8 and r[8].strip()]
+            if list4_rows:
+                logger.info("list5 为空，fallback 到 list4 解析（盘点量取 col[21]=quantity）")
+                return _apply_column_map(list4_rows, _LIST4_MAP)
         raise ValueError(f"第 {session_index} 个盘点记录中没有数据行")
 
     # If no header found, fall back to hardcoded map directly
@@ -405,6 +422,7 @@ async def create_inventory_count_draft(
     warehouse_name: str,
     customer_name: str | None,
     session_index: int = 0,
+    cover_uncovered: bool = True,
 ) -> InventoryCountDraft:
     parsed = await parse_count_file(content, filename, session_index=session_index)
 
@@ -423,6 +441,7 @@ async def create_inventory_count_draft(
         count_date=count_date,
         warehouse_id=warehouse.id,
         customer_id=customer.id if customer else None,
+        cover_uncovered=cover_uncovered,
     )
 
     document = InventoryCountDocument(
@@ -451,13 +470,28 @@ async def _compute_draft_lines(
     count_date: date,
     warehouse_id: int,
     customer_id: int | None,
+    cover_uncovered: bool = True,
 ) -> list[CountDraftLine]:
     # Transactions strictly after the end of count_date
     cutoff = datetime.combine(count_date, time(23, 59, 59)).replace(tzinfo=timezone.utc)
 
     lines: list[CountDraftLine] = []
-    for jan_code, product_name, count_qty in parsed:
-        # Current WMS total for this bucket group
+    covered_jans: set[str] = set()
+
+    # 同一份盘点表里，别名JAN和主JAN可能各占一行——归一化后按canonical JAN合并数量，
+    # 否则会生成两条指向同一商品桶的对账行（取首次出现的商品名，与秦丝同JAN多行合并逻辑一致）。
+    merged: dict[str, tuple[str, int]] = {}
+    for raw_jan_code, product_name, count_qty in parsed:
+        jan_code = await resolve_canonical_jan(session, raw_jan_code)
+        if jan_code in merged:
+            existing_name, existing_qty = merged[jan_code]
+            merged[jan_code] = (existing_name, existing_qty + count_qty)
+        else:
+            merged[jan_code] = (product_name, count_qty)
+
+    for jan_code, (product_name, count_qty) in merged.items():
+        covered_jans.add(jan_code)
+
         current_qty_result = await session.scalar(
             select(func.coalesce(func.sum(InventoryRecord.quantity), 0))
             .where(
@@ -478,11 +512,13 @@ async def _compute_draft_lines(
             .limit(1)
         ))
 
-        known_product = bool(await session.scalar(
-            select(Product.jan_code).where(Product.jan_code == jan_code).limit(1)
-        ))
+        product = await session.scalar(
+            select(Product).where(Product.jan_code == jan_code).limit(1)
+        )
+        known_product = product is not None
+        # 商品名以商品字典为准；字典中不存在（新增SKU）时才回退到文件解析出的名字
+        display_name = product.name_jp if product is not None else product_name
 
-        # Net stock change recorded in WMS after the count date
         delta_result = await session.scalar(
             select(func.coalesce(func.sum(StockTransaction.quantity_change), 0))
             .join(InventoryRecord, StockTransaction.inventory_record_id == InventoryRecord.id)
@@ -498,7 +534,7 @@ async def _compute_draft_lines(
         lines.append(
             CountDraftLine(
                 jan_code=jan_code,
-                product_name=product_name,
+                product_name=display_name,
                 count_quantity=count_qty,
                 delta_after_count=delta,
                 target_quantity=target_qty,
@@ -506,8 +542,63 @@ async def _compute_draft_lines(
                 adjust_delta=target_qty - current_qty,
                 has_wms_record=has_record,
                 known_product=known_product,
+                implicit_zero=False,
             )
         )
+
+    # ── 补充盘点表未覆盖的仓库SKU（cover_uncovered=True 时视为0，否则跳过）──
+    if not cover_uncovered:
+        return lines
+
+    not_in_filter = (
+        InventoryRecord.product_jan.not_in(list(covered_jans))
+        if covered_jans
+        else True  # count sheet was empty — treat all WMS records as uncovered
+    )
+    uncovered_stmt = (
+        select(InventoryRecord, Product)
+        .join(Product, Product.jan_code == InventoryRecord.product_jan, isouter=True)
+        .where(
+            InventoryRecord.warehouse_id == warehouse_id,
+            _customer_filter(customer_id),
+            not_in_filter,
+            InventoryRecord.quantity != 0,   # skip already-zero buckets
+        )
+        .order_by(InventoryRecord.product_jan.asc())
+    )
+    uncovered_rows = await session.execute(uncovered_stmt)
+
+    for record, product in uncovered_rows.all():
+        jan_code = record.product_jan
+        current_qty = record.quantity
+
+        delta_result = await session.scalar(
+            select(func.coalesce(func.sum(StockTransaction.quantity_change), 0))
+            .join(InventoryRecord, StockTransaction.inventory_record_id == InventoryRecord.id)
+            .where(
+                InventoryRecord.product_jan == jan_code,
+                InventoryRecord.warehouse_id == warehouse_id,
+                StockTransaction.created_at > cutoff,
+            )
+        )
+        delta = int(delta_result or 0)
+        target_qty = 0 + delta  # physical count = 0 for uncovered SKUs
+
+        lines.append(
+            CountDraftLine(
+                jan_code=jan_code,
+                product_name=product.name_jp if product else jan_code,
+                count_quantity=0,
+                delta_after_count=delta,
+                target_quantity=target_qty,
+                current_quantity=current_qty,
+                adjust_delta=target_qty - current_qty,
+                has_wms_record=True,
+                known_product=product is not None,
+                implicit_zero=True,
+            )
+        )
+
     return lines
 
 
@@ -541,8 +632,9 @@ async def apply_inventory_count_draft(
     session: AsyncSession,
     draft: InventoryCountDraft,
     user_id: int | None = None,
+    force: bool = False,
 ) -> InventoryCountApplyResult:
-    if draft.status == "applied":
+    if draft.status == "applied" and not force:
         return InventoryCountApplyResult(
             applied=False,
             adjusted_count=0,

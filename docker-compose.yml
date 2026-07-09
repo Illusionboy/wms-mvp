@@ -8,7 +8,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-wms_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wms_password}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # 云部署把 BIND_HOST 设为 127.0.0.1，Postgres 只在本机可达（不暴露到公网）。
+      # 本地默认 0.0.0.0 方便用宿主机工具连库。容器间仍走 postgres:5432，不受影响。
+      - "${BIND_HOST:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -30,8 +32,6 @@ services:
       DEBUG: ${DEBUG:-true}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-wms_user}:${POSTGRES_PASSWORD:-wms_password}@postgres:5432/${POSTGRES_DB:-wms}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-change-me}
-      TELEGRAM_WEBHOOK_PATH: ${TELEGRAM_WEBHOOK_PATH:-/api/v1/telegram/webhook}
       TELEGRAM_QUERY_USER_IDS: ${TELEGRAM_QUERY_USER_IDS:-}
       TELEGRAM_OPERATOR_USER_IDS: ${TELEGRAM_OPERATOR_USER_IDS:-}
       TELEGRAM_ADMIN_USER_IDS: ${TELEGRAM_ADMIN_USER_IDS:-}
@@ -44,8 +44,11 @@ services:
       QINSI_USERNAME: ${QINSI_USERNAME:-}
       QINSI_PASSWORD: ${QINSI_PASSWORD:-}
       QINSI_BASE_URL: ${QINSI_BASE_URL:-https://web.syt.qinsilk.com/gis/admin/}
+      QINSI_WAREHOUSE_MAP: "${QINSI_WAREHOUSE_MAP:-}"
     ports:
-      - "${API_PORT:-8000}:8000"
+      # 云 + NPM 时把 BIND_HOST 设为 127.0.0.1：API 只在本机可达，公网只走 NPM(80/443)。
+      # NPM 反代目标用容器名 api:8000（同一 docker 网络），不依赖此宿主机端口。
+      - "${BIND_HOST:-0.0.0.0}:${API_PORT:-8000}:8000"
     volumes:
       - ./app:/app/app
     depends_on:
@@ -58,6 +61,9 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: wms_telegram_bot
+    # 云部署暂不使用 Telegram bot：加入 profile 后，默认 `docker compose up` 不会启动本服务，
+    # 从而避免缺 TELEGRAM_BOT_TOKEN 时崩溃重启。需要时再用: docker compose --profile telegram up -d
+    profiles: ["telegram"]
     restart: unless-stopped
     environment:
       APP_NAME: ${APP_NAME:-WMS Inventory API}
@@ -66,8 +72,6 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-wms_user}:${POSTGRES_PASSWORD:-wms_password}@postgres:5432/${POSTGRES_DB:-wms}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_QUERY_USER_IDS: ${TELEGRAM_QUERY_USER_IDS:-}
-      TELEGRAM_OPERATOR_USER_IDS: ${TELEGRAM_OPERATOR_USER_IDS:-}
-      TELEGRAM_ADMIN_USER_IDS: ${TELEGRAM_ADMIN_USER_IDS:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
     volumes:
@@ -77,5 +81,30 @@ services:
         condition: service_healthy
     command: python -m app.bot.polling
 
+  # Nginx Proxy Manager — 反向代理 + Let's Encrypt SSL（带 Web 管理界面）。
+  # 主要给云部署用（VPS + 域名）。默认 `docker compose up` 不启动它（避免本地占用 80/443/81）。
+  # 云上启用: docker compose --profile proxy up -d
+  # 首次配置:
+  #   1) 浏览器开 http://<服务器IP>:81 ，默认账号 admin@example.com / changeme，登录后立即改密码。
+  #   2) Hosts → Proxy Hosts → Add：域名填你的域名，Forward Hostname 填 api、Forward Port 填 8000。
+  #   3) SSL 标签页 → Request a new SSL Certificate（Let's Encrypt）+ Force SSL。
+  #   注意：申证书前先把域名 A 记录解析到服务器 IP；确保放行 80/443（证书校验走 80）。
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: wms_npm
+    profiles: ["proxy"]
+    restart: unless-stopped
+    ports:
+      - "80:80"      # HTTP（证书校验 + 跳转 HTTPS）
+      - "443:443"    # HTTPS
+      - "81:81"      # 管理界面（建议用云防火墙只放行你的 IP）
+    volumes:
+      - npm_data:/data
+      - npm_letsencrypt:/etc/letsencrypt
+    depends_on:
+      - api
+
 volumes:
   postgres_data:
+  npm_data:
+  npm_letsencrypt:

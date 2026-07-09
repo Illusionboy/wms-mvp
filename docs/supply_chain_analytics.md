@@ -1,6 +1,6 @@
 # 供应链分析与需求预测 — 开发备忘
 
-## 当前数据模型（2026-06）
+## 当前数据模型（2026-06，已更新）
 
 每笔库存变动都写入 `stock_transactions`，以下字段现已可用于分析：
 
@@ -9,9 +9,12 @@
 | `transaction_type` | `IN` / `OUT` / `ADJUST` |
 | `quantity_change` | 变动数量，OUT 为负值 |
 | `source` | 数据来源（见下表） |
-| `reference_id` | 秦丝记录：`qinsi:{order_no}:{jan_code}` |
-| `created_at` | WMS 录入时间（≠ 实际业务时间） |
-| `note` | 自由文本，秦丝记录含实际日期字符串 |
+| `reference_id` | 秦丝记录：`qinsi:{order_no}:{jan_code}`；贸易出库：`trade:{draft_id}:{line_index}` |
+| `transaction_date` | **实际业务日期**（独立列，见下方"写入情况"） |
+| `created_at` | WMS 录入时间（`transaction_date` 为 NULL 时的回退） |
+| `customer` | 出库对方（结构化列，见下方"写入情况"） |
+| `supplier` | 入库对方（结构化列，见下方"写入情况"） |
+| `note` | 自由文本备注 |
 | `user_id` | 操作人 FK → `users` |
 | `inventory_record_id` | FK → `inventory_records` → `product_jan` / `warehouse_id` |
 
@@ -24,67 +27,59 @@
 | `chat_report` | 微信报库 AI 解析 |
 | `physical_count` | 月末盘点 ADJUST |
 | `web_ui` | 手动入库/出库/调整 |
+| `trade_shipment` | 贸易批发出库（Excel/拍照上传，Gemini 解析） |
+| `telegram` | Telegram bot（仅查询，不产生 transaction） |
+
+### `transaction_date` 写入情况
+
+| 来源 | 写入逻辑 |
+| --- | --- |
+| 秦丝批量 | `ScrapedRecord.record_date`（秦丝订单实际日期） |
+| 盘点 ADJUST | `document.count_date`（盘点当天） |
+| 手动入/出/调整 | 前端可选日期选择器（留空为 NULL） |
+| 乐天 CSV / 微信报库 / 贸易出库 | **暂为 NULL**，查询时回退到 `created_at` — 见下方「待办」 |
+
+### `customer` / `supplier` 写入情况
+
+| 来源 | 字段 | 取值 |
+| --- | --- | --- |
+| 秦丝同步 apply | OUT → `customer`；IN → `supplier` | `ScrapedRecord.customer_name`（秦丝订单对方名称） |
+| 贸易出库 apply | `customer` | 客户代码（mm/kk/cp/hn/xm/mmm 等） |
+| 其余来源 | NULL | — |
+
+`customer`/`supplier` 仅用于分析查询，**不影响** `InventoryRecord` 库存桶定位（桶仍按 `(product_jan, warehouse_id)`）。
 
 ---
 
-## 已知缺陷（分析时会踩的坑）
+## 已实现的历史查询端点 (`app/api/v1/endpoints/analytics.py`)
 
-### 1. 实际业务日期没有独立字段 ⚠️ 最关键
+只读、无需认证：
 
-- **现状**：`created_at` 是 WMS 录入时间，可能比实际业务发生滞后数天。
-  - 秦丝订单实际日期：埋在 `note` 文本里（`秦丝记录日期:2026-05-10`），不可直接 SQL 过滤。
-  - Rakuten CSV：配送日期同样未作为独立列保存。
-  - 盘点 ADJUST：`note` 含 `盘点日期:YYYY-MM-DD`，也是文本。
-- **影响**：无法直接做时序分析（按周/月销量趋势）；必须 `LIKE` 解析 `note`，脆弱且慢。
-- **解决方案**：
+- `GET /api/v1/analytics/counterparties` — 所有出现过的 `supplier`/`customer` 名称列表
+- `GET /api/v1/analytics/supplier-history?supplier=...&from_date=...&to_date=...&warehouse_id=...` — 按供应商查 IN 事务
+- `GET /api/v1/analytics/customer-history?customer=...&from_date=...&to_date=...&warehouse_id=...` — 按客户查 OUT 事务
+- `GET /api/v1/analytics/product-history?jan_code=...&from_date=...&to_date=...&transaction_type=...` — 按 JAN 查全部事务
+- `GET /api/v1/analytics/product-summary?jan_code=...&from_date=...&to_date=...` — 按 JAN 聚合 IN/OUT/ADJUST 总量
 
-```sql
-ALTER TABLE stock_transactions ADD COLUMN transaction_date DATE;
-```
+日期过滤对 `transaction_date IS NULL` 的记录宽松放行，避免历史数据因缺失日期被排除。
 
-写入规则：
-- 秦丝同步：使用 `ScrapedRecord.record_date`（爬虫从订单获取的实际日期）
-- Rakuten CSV：使用 CSV 中的配送/出货日期列
-- 手动操作 / 微信报库：默认 `created_at::date`，可选允许操作员手填
-- 盘点 ADJUST：使用盘点日期
-
-**优先级：高** — 不加此字段，所有时序分析都要绕路解析文本。
+另有 `POST /api/v1/rakuten/order-analysis`（`app/api/v1/endpoints/rakuten_order.py`）：上传乐天订单文件，按 JAN 汇总并与「乐天仓库」库存比对（`ok`/`insufficient`/`no_record`/`unknown`），只读不写入。
 
 ---
 
-### 2. 出库缺少客户/渠道维度
+## 待办（分析时仍会踩的坑）
 
-- **现状**：客户字段已从 inventory_record 定位键中移除（2026-06 重构），现在每条 transaction 没有结构化的"出库目的地/客户"字段。
-  - 乐天出库：可通过 `source='rakuten_csv'` 识别渠道，但没有具体收货方。
-  - 秦丝销售单：`customer_name` 在 `ScrapedRecord` 里，但 apply 时未写入 transaction。
-- **影响**：无法做 SKU × 客户/渠道的销量分解；只能区分乐天 vs 普通，无法细分普通渠道的具体客户。
-- **解决方案**：
+### 1. transaction_date 在乐天 CSV / 微信报库 / 贸易出库中仍为 NULL
 
-```sql
-ALTER TABLE stock_transactions ADD COLUMN channel VARCHAR(64);
--- 或者复用 note 字段补充结构化前缀
-```
-
-写入规则：
-- 秦丝销售单：写入 `ScrapedRecord.customer_name`
-- Rakuten：固定 `'乐天'`
-- 微信报库：由 AI 解析结果提供，或操作员手填
-
-**优先级：中** — 当前只有两个主渠道（乐天/普通），暂时够用；多客户场景需要。
-
----
-
-### 3. 入库缺少供应商字段
-
-- **现状**：秦丝采购单的 `supplier_name` 爬虫已能获取（`ScrapedRecord.customer_name` 对 IN 方向存的是供应商名），但 apply 时未写入 transaction。
-- **影响**：无法做 SKU × 供应商的采购分析，无法计算各供应商的供货周期（Lead Time）。
-- **解决方案**：同上，用 `channel` 字段或新增 `supplier VARCHAR(64)` 列写入供应商名。
+- **现状**：Rakuten CSV 中有配送日期列、微信报库 AI 解析结果中有交易日期字段，贸易出库有上传/单据日期，但三者 apply 逻辑均未写入 `transaction_date`。
+- **影响**：这三类事务的时序分析只能用 `created_at`（录入时间），可能比实际业务日期滞后。
+- **解决方案**：在对应 apply 逻辑中补全写入，参考秦丝同步 (`ScrapedRecord.record_date`) 和盘点 (`document.count_date`) 的现有写法。
 
 **优先级：中**
 
 ---
 
-### 4. 无采购与销售的配对（Lead Time 计算）
+### 2. 无采购与销售的配对（Lead Time 计算）
 
 - **现状**：入库和出库分别记录，但没有"这批货是为了履行哪个订单"的关联。
 - **影响**：无法直接计算从采购到售出的库存周转天数；Lead Time 只能靠统计均值估算。
@@ -94,7 +89,7 @@ ALTER TABLE stock_transactions ADD COLUMN channel VARCHAR(64);
 
 ---
 
-### 5. 无 ABC 速度分级
+### 3. 无 ABC 速度分级
 
 - **现状**：产品表无 `velocity_class` 字段（CLAUDE.md 中有规划）。
 - **影响**：无法自动识别高频 SKU（A 类）来优化库位和补货策略。
@@ -107,20 +102,22 @@ ALTER TABLE stock_transactions ADD COLUMN channel VARCHAR(64);
 ## 实施路线建议
 
 ```
-第一阶段（立即，数据质量）
-└── 加 transaction_date 列 + 补全写入逻辑（秦丝/Rakuten/盘点）
+已完成
+├── transaction_date 列（秦丝/盘点/手动已写入）
+├── customer/supplier 结构化列（秦丝/贸易出库已写入）
+└── 历史查询端点 (/analytics/*) + 乐天订单库存比对 (/rakuten/order-analysis)
 
-第二阶段（数据丰富，渠道分析）
-└── 加 channel/supplier 列 → 秦丝 apply 时写入客户/供应商名
+第一阶段（数据质量收尾）
+└── 补全 transaction_date：乐天 CSV / 微信报库 / 贸易出库
 
-第三阶段（分析应用）
-└── 导出接口 / BI 连接（Metabase / Grafana / Superset）
-└── ABC 分级定期任务
+第二阶段（分析应用）
+├── 导出接口 / BI 连接（Metabase / Grafana / Superset），可直接调用 /analytics/* 端点
+├── ABC 分级定期任务
 └── 安全库存阈值自动计算（基于历史出库均值 + 标准差）
 
-第四阶段（进阶）
-└── Lead Time 追踪（采购单与入库配对）
-└── 需求预测模型（移动平均 / 简单回归，输入：时序出库数据）
+第三阶段（进阶）
+├── Lead Time 追踪（采购单与入库配对）
+└── 需求预测模型（移动平均 / 简单回归，输入：/analytics/product-history 时序数据）
 ```
 
 ---
@@ -128,9 +125,9 @@ ALTER TABLE stock_transactions ADD COLUMN channel VARCHAR(64);
 ## 当前可用的分析查询示例
 
 ```sql
--- 按月按SKU出库量（用录入时间，精度有限）
+-- 按月按SKU出库量（优先用 transaction_date，缺失时回退 created_at）
 SELECT
-    date_trunc('month', st.created_at) AS month,
+    date_trunc('month', COALESCE(st.transaction_date, st.created_at::date)) AS month,
     ir.product_jan,
     p.name_jp,
     SUM(ABS(st.quantity_change)) AS total_out
@@ -138,19 +135,32 @@ FROM stock_transactions st
 JOIN inventory_records ir ON ir.id = st.inventory_record_id
 JOIN products p ON p.jan_code = ir.product_jan
 WHERE st.transaction_type = 'OUT'
-  AND st.source IN ('rakuten_csv', 'qinsi_scrape', 'chat_report')
+  AND st.source IN ('rakuten_csv', 'qinsi_scrape', 'chat_report', 'trade_shipment')
 GROUP BY 1, 2, 3
 ORDER BY 1 DESC, 4 DESC;
 
--- 按渠道出库对比
+-- 按渠道(source)出库对比
 SELECT
     source,
-    date_trunc('month', created_at) AS month,
+    date_trunc('month', COALESCE(transaction_date, created_at::date)) AS month,
     SUM(ABS(quantity_change)) AS qty
 FROM stock_transactions
 WHERE transaction_type = 'OUT'
 GROUP BY 1, 2
 ORDER BY 2 DESC, 3 DESC;
+
+-- 按客户出库汇总（结构化 customer 列，秦丝/贸易出库适用）
+SELECT
+    customer,
+    ir.product_jan,
+    p.name_jp,
+    SUM(ABS(st.quantity_change)) AS total_out
+FROM stock_transactions st
+JOIN inventory_records ir ON ir.id = st.inventory_record_id
+JOIN products p ON p.jan_code = ir.product_jan
+WHERE st.transaction_type = 'OUT' AND st.customer IS NOT NULL
+GROUP BY 1, 2, 3
+ORDER BY 1, 4 DESC;
 
 -- 当前负库存清单
 SELECT ir.product_jan, p.name_jp, w.name AS warehouse, ir.quantity

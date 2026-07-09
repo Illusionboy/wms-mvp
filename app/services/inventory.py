@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,7 +11,8 @@ from app.models.inventory_import_job import InventoryImportJob
 from app.models.product import Product
 from app.models.stock_transaction import StockTransaction, StockTransactionType
 from app.models.warehouse import Warehouse
-from app.schemas.inventory import InventoryImportCreate, StockAdjustCreate, StockInCreate, StockOutCreate, WarehouseStatusRead
+from app.schemas.inventory import InventoryImportCreate, StockAdjustCreate, StockInCreate, StockOutCreate, StockTransferCreate, WarehouseStatusRead
+from app.services.product_alias import resolve_canonical_jan
 
 
 async def resolve_warehouse(session: AsyncSession, name: str) -> Warehouse | None:
@@ -81,9 +82,19 @@ class StockMutationResult:
     low_stock_alert: LowStockAlert | None = None
 
 
+async def _resolve_alias_for_search(session: AsyncSession, keyword: str) -> str | None:
+    """若关键字精确等于某个别名JAN，返回其主JAN，便于把主商品也纳入搜索结果。"""
+    normalized = keyword.strip()
+    if not normalized.isdigit():
+        return None
+    canonical = await resolve_canonical_jan(session, normalized)
+    return canonical if canonical != normalized else None
+
+
 async def search_inventory_items(session: AsyncSession, keyword: str, limit: int = 20) -> list[Product]:
+    alias_canonical_jan = await _resolve_alias_for_search(session, keyword)
     statement = (
-        _product_search_statement(keyword=keyword, limit=limit)
+        _product_search_statement(keyword=keyword, limit=limit, alias_canonical_jan=alias_canonical_jan)
         .options(
             selectinload(Product.inventory_records).selectinload(InventoryRecord.warehouse),
             selectinload(Product.inventory_records).selectinload(InventoryRecord.customer),
@@ -94,19 +105,45 @@ async def search_inventory_items(session: AsyncSession, keyword: str, limit: int
 
 
 async def search_products(session: AsyncSession, keyword: str, limit: int = 20) -> list[Product]:
-    result = await session.scalars(_product_search_statement(keyword=keyword, limit=limit))
+    alias_canonical_jan = await _resolve_alias_for_search(session, keyword)
+    result = await session.scalars(_product_search_statement(keyword=keyword, limit=limit, alias_canonical_jan=alias_canonical_jan))
     return list(result.all())
 
 
-def _product_search_statement(keyword: str, limit: int):
+def is_outer_jan_match(keyword: str, product: Product) -> bool:
+    """Return True when keyword matched via outer_jan but NOT the product's own jan_code."""
+    if not product.outer_jan:
+        return False
+    kw = keyword.strip()
+    if not kw.isdigit() or len(kw) != 5:
+        return False
+    like_5 = kw + "_"
+    outer = product.outer_jan
+    jan = product.jan_code
+    # Check if outer_jan matches the 5-digit pattern
+    outer_hit = outer[:-1].endswith(kw) or outer.endswith(kw)
+    # Check if jan_code itself would also match (then it's not an outer-jan-only hit)
+    jan_hit = jan[:-1].endswith(kw) or jan.endswith(kw)
+    return outer_hit and not jan_hit
+
+
+def _product_search_statement(keyword: str, limit: int, alias_canonical_jan: str | None = None):
     normalized_keyword = keyword.strip()
     name_pattern = f"%{normalized_keyword}%"
 
     conditions = []
     rank_conditions = []
-    if normalized_keyword.isdigit():
+    if alias_canonical_jan:
+        # 关键字精确命中了某个别名JAN：只返回主JAN对应的商品。
+        # 别名JAN自己的 Product 行在合并后仍然保留（用于历史追溯），但已经没有库存——
+        # 如果不在这里跳过下面的"精确匹配关键字本身"分支，它会和主JAN一起被搜到，
+        # 变成两个商品同时命中，导致贸易出库等需要"唯一匹配"的流程误判为 ambiguous_product。
+        conditions.append(Product.jan_code == alias_canonical_jan)
+        rank_conditions.append((Product.jan_code == alias_canonical_jan, 0))
+    elif normalized_keyword.isdigit():
         conditions.append(Product.jan_code == normalized_keyword)
         rank_conditions.append((Product.jan_code == normalized_keyword, 0))
+    if normalized_keyword.isdigit():
         # 假设 normalized_keyword 是用户输入的 JAN 码片段
         keyword_len = len(normalized_keyword)
         
@@ -126,6 +163,16 @@ def _product_search_statement(keyword: str, limit: int):
             )
             conditions.append(suffix_condition)
             rank_conditions.append((suffix_condition, 1))
+            # 同款逻辑应用于 outer_jan（外箱JAN末6位前5位 或 末5位）
+            outer_condition = and_(
+                Product.outer_jan.isnot(None),
+                or_(
+                    Product.outer_jan.like(like_pattern),
+                    Product.outer_jan.endswith(normalized_keyword),
+                ),
+            )
+            conditions.append(outer_condition)
+            rank_conditions.append((outer_condition, 2))  # rank 低于直接 JAN 命中
     else:
         conditions.extend(
             [
@@ -153,6 +200,7 @@ async def stock_in_item(
     commit: bool = True,
     user_id: int | None = None,
 ) -> StockMutationResult:
+    payload.sku = await resolve_canonical_jan(session, payload.sku)
     product = await session.scalar(select(Product).where(Product.jan_code == payload.sku))
     warehouse = await session.scalar(select(Warehouse).where(Warehouse.id == payload.warehouse_id))
     if product is None or warehouse is None:
@@ -188,9 +236,13 @@ async def stock_in_item(
         note=payload.note,
         user_id=user_id,
         transaction_date=payload.transaction_date,
+        supplier=payload.supplier,
     )
     session.add(transaction)
     await session.flush()
+    # Auto-reserve: promote waiting CustomerAllocation rows for this JAN if stock now sufficient
+    from app.services.customer_allocations import try_auto_reserve  # lazy to avoid circular import
+    await try_auto_reserve(session, payload.sku, payload.warehouse_id)
     if commit:
         await session.commit()
     refreshed_record = await _get_inventory_record_for_response(session, record.id)
@@ -211,7 +263,9 @@ async def stock_out_item(
     *,
     commit: bool = True,
     user_id: int | None = None,
+    force_negative: bool = False,
 ) -> StockMutationResult:
+    payload.sku = await resolve_canonical_jan(session, payload.sku)
     try:
         # with_for_update() inside _find_single_inventory_record prevents concurrent deduction
         record = await _find_single_inventory_record(
@@ -220,9 +274,9 @@ async def stock_out_item(
             warehouse_id=payload.warehouse_id,
         )
     except InventoryRecordNotFoundError:
-        # No existing record — only allowed when warehouse has negative stock enabled
+        # No existing record — allowed when warehouse has negative stock enabled OR caller forces it
         warehouse = await session.get(Warehouse, payload.warehouse_id)
-        if warehouse is None or not warehouse.allow_negative_stock:
+        if not force_negative and (warehouse is None or not warehouse.allow_negative_stock):
             raise
         product = await session.scalar(select(Product).where(Product.jan_code == payload.sku))
         if product is None:
@@ -241,11 +295,21 @@ async def stock_out_item(
     previous_quantity = record.quantity
     if record.quantity < payload.quantity:
         warehouse = await session.get(Warehouse, payload.warehouse_id)
-        if warehouse is None or not warehouse.allow_negative_stock:
+        if not force_negative and (warehouse is None or not warehouse.allow_negative_stock):
             raise InsufficientStockError
 
     record.quantity -= payload.quantity
     await session.flush()
+    if record.quantity < 0:
+        warehouse_for_log = await session.get(Warehouse, payload.warehouse_id)
+        from app.services.system_log import write_system_log  # lazy to avoid circular import
+        await write_system_log(
+            session,
+            category="negative_stock",
+            message=f"出库后库存变为负数：当前库存 {record.quantity}（出库 {payload.quantity}）",
+            jan_code=payload.sku,
+            warehouse_name=warehouse_for_log.name if warehouse_for_log else None,
+        )
     low_stock_alert = None
     if not payload.suppress_low_stock_alert:
         low_stock_alert = await _maybe_create_low_stock_alert(session=session, jan_code=payload.sku)
@@ -258,9 +322,14 @@ async def stock_out_item(
         note=payload.note,
         user_id=user_id,
         transaction_date=payload.transaction_date,
+        customer=payload.customer,
     )
     session.add(transaction)
     await session.flush()
+    # Outbound flows don't know about CustomerAllocation; re-check whether any
+    # reserved allocation for this JAN is no longer backed by enough stock.
+    from app.services.customer_allocations import check_for_reservation_conflict  # lazy to avoid circular import
+    await check_for_reservation_conflict(session, payload.sku, payload.warehouse_id, trigger="stock_out")
     if commit:
         await session.commit()
     refreshed_record = await _get_inventory_record_for_response(session, record.id)
@@ -283,6 +352,7 @@ async def adjust_stock_item(
     commit: bool = True,
     user_id: int | None = None,
 ) -> StockMutationResult:
+    payload.sku = await resolve_canonical_jan(session, payload.sku)
     record = await _find_single_inventory_record(
         session=session,
         sku=payload.sku,
@@ -292,6 +362,16 @@ async def adjust_stock_item(
     quantity_delta = payload.actual_quantity - previous_quantity
     record.quantity = payload.actual_quantity
     await session.flush()
+    if record.quantity < 0:
+        warehouse_for_log = await session.get(Warehouse, payload.warehouse_id)
+        from app.services.system_log import write_system_log  # lazy to avoid circular import
+        await write_system_log(
+            session,
+            category="negative_stock",
+            message=f"调整后库存变为负数：当前库存 {record.quantity}",
+            jan_code=payload.sku,
+            warehouse_name=warehouse_for_log.name if warehouse_for_log else None,
+        )
     low_stock_alert = await _maybe_create_low_stock_alert(session=session, jan_code=payload.sku)
     transaction = _create_stock_transaction(
         record=record,
@@ -305,6 +385,12 @@ async def adjust_stock_item(
     )
     session.add(transaction)
     await session.flush()
+    if quantity_delta > 0:
+        from app.services.customer_allocations import try_auto_reserve  # lazy to avoid circular import
+        await try_auto_reserve(session, payload.sku, payload.warehouse_id)
+    elif quantity_delta < 0:
+        from app.services.customer_allocations import check_for_reservation_conflict  # lazy to avoid circular import
+        await check_for_reservation_conflict(session, payload.sku, payload.warehouse_id, trigger="stock_adjust")
     if commit:
         await session.commit()
     refreshed_record = await _get_inventory_record_for_response(session, record.id)
@@ -318,6 +404,47 @@ async def adjust_stock_item(
         quantity_delta=quantity_delta,
         low_stock_alert=low_stock_alert,
     )
+
+
+async def transfer_stock_item(
+    session: AsyncSession,
+    payload: StockTransferCreate,
+    *,
+    user_id: int | None = None,
+) -> tuple[StockMutationResult, StockMutationResult]:
+    from uuid import uuid4
+
+    if payload.from_warehouse_id == payload.to_warehouse_id:
+        raise InventoryServiceError("调出仓库和调入仓库不能相同")
+
+    ref = f"transfer:{uuid4().hex}"
+    note = payload.note or ""
+
+    out_payload = StockOutCreate(
+        sku=payload.sku,
+        warehouse_id=payload.from_warehouse_id,
+        quantity=payload.quantity,
+        source="web_ui",
+        reference_id=ref,
+        note=note,
+        transaction_date=payload.transaction_date,
+    )
+    out_result = await stock_out_item(session, out_payload, commit=False, user_id=user_id)
+
+    in_payload = StockInCreate(
+        sku=payload.sku,
+        warehouse_id=payload.to_warehouse_id,
+        quantity=payload.quantity,
+        location_code="A-00-00",
+        source="web_ui",
+        reference_id=ref,
+        note=note,
+        transaction_date=payload.transaction_date,
+    )
+    in_result = await stock_in_item(session, in_payload, commit=False, user_id=user_id)
+
+    await session.commit()
+    return out_result, in_result
 
 
 async def _refresh_low_stock_state(session: AsyncSession, jan_code: str) -> None:
@@ -404,6 +531,8 @@ def _create_stock_transaction(
     note: str | None = None,
     user_id: int | None = None,
     transaction_date: date | None = None,
+    supplier: str | None = None,
+    customer: str | None = None,
 ) -> StockTransaction:
     return StockTransaction(
         inventory_record_id=record.id,
@@ -414,6 +543,8 @@ def _create_stock_transaction(
         note=note,
         user_id=user_id,
         transaction_date=transaction_date,
+        supplier=supplier,
+        customer=customer,
     )
 
 
@@ -435,8 +566,14 @@ async def get_system_status(session: AsyncSession) -> list[WarehouseStatusRead]:
             func.max(
                 case((StockTransaction.source == "physical_count", StockTransaction.created_at), else_=None)
             ).label("last_physical_count_at"),
-            func.count(
-                case((InventoryRecord.quantity < 0, 1), else_=None)
+            (
+                select(func.count())
+                .where(
+                    InventoryRecord.warehouse_id == Warehouse.id,
+                    InventoryRecord.quantity < 0,
+                )
+                .correlate(Warehouse)
+                .scalar_subquery()
             ).label("negative_stock_count"),
         )
         .select_from(Warehouse)
@@ -471,6 +608,42 @@ async def get_system_status(session: AsyncSession) -> list[WarehouseStatusRead]:
             )
         )
     return result
+
+
+async def export_warehouse_inventory(
+    session: AsyncSession,
+    warehouse_id: int,
+) -> tuple[str, list[dict]]:
+    """Return (warehouse_name, rows) for all inventory records in the warehouse.
+
+    Each row is a flat dict ready for serialisation to Excel or CSV.
+    Only products with inventory records are included; zero-quantity rows are included.
+    """
+    wh = await session.get(Warehouse, warehouse_id)
+    if wh is None:
+        raise ValueError(f"Warehouse {warehouse_id} not found")
+
+    stmt = (
+        select(InventoryRecord, Product)
+        .join(Product, InventoryRecord.product_jan == Product.jan_code)
+        .where(InventoryRecord.warehouse_id == warehouse_id)
+        .order_by(Product.jan_code.asc())
+    )
+    rows_db = (await session.execute(stmt)).all()
+
+    rows = [
+        {
+            "JAN码": rec.product_jan,
+            "商品名(日语)": prod.name_jp,
+            "商品名(中文)": prod.name_zh or "",
+            "库存数量": rec.quantity,
+            "箱规(个/箱)": prod.units_per_case or "",
+            "库位": rec.location_code or "",
+            "最后更新": rec.updated_at.strftime("%Y-%m-%d %H:%M") if rec.updated_at else "",
+        }
+        for rec, prod in rows_db
+    ]
+    return wh.name, rows
 
 
 async def create_inventory_import_job(
