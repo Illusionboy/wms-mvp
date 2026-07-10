@@ -411,6 +411,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="container-place" onclick="nav(this)">
         <span class="icon">⚲</span> 库位绑定
       </button>
+      <button class="nav-item" data-section="container-labels" onclick="nav(this)">
+        <span class="icon">🏷</span> 标签打印
+      </button>
     </div>
 
     <div class="sidebar-footer">
@@ -1420,7 +1423,14 @@ tr:hover td { background: var(--accent-bg); }
         <div class="form-row" style="margin:0"><label>状态</label>
           <select id="cp-f-status"><option value="">全部</option><option value="staging">备货中</option><option value="empty">空</option><option value="loaded">已装柜</option></select>
         </div>
-        <div class="form-row" style="margin:0"><label>托盘码</label><input type="text" id="cp-f-code" placeholder="托盘码" onkeydown="if(event.key==='Enter')loadPalletList()"></div>
+        <div class="form-row" style="margin:0"><label>托盘码 / 扫库位</label>
+          <div class="input-scan">
+            <input type="text" id="cp-f-code" placeholder="托盘码" onkeydown="if(event.key==='Enter')loadPalletList()">
+            <button type="button" class="scan-btn" title="扫码(托盘/库位均可)" onclick="scanPalletQuery()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+          </div>
+        </div>
+        <div class="form-row" style="margin:0"><label>库位</label><input type="text" id="cp-f-loc" placeholder="A-12-03" onkeydown="if(event.key==='Enter')loadPalletList()"></div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);white-space:nowrap"><input type="checkbox" id="cp-f-unlocated" onchange="loadPalletList()"> 只看无库位</label>
         <button class="btn btn-primary" style="margin-bottom:0" onclick="loadPalletList()">查询</button>
       </div>
       <div id="cp-list" style="margin-top:12px"></div>
@@ -1497,6 +1507,39 @@ tr:hover td { background: var(--accent-bg); }
       </div>
     </div>
 
+    <!-- 标签打印 -->
+    <div class="section" id="section-container-labels">
+      <div class="section-title">标签打印</div>
+      <div class="section-sub">生成托盘 / 库位 QR 标签。QR 内嵌 URL：原生相机扫直接打开，App 内扫码抠出码本身。默认每码 2 张（A4 裁成两张 A5 作正反面）。</div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+          <div class="form-row" style="margin:0"><label>标签类型</label>
+            <select id="lbl-type" onchange="lblOnTypeChange()">
+              <option value="pallet">托盘标签（自动序号）</option>
+              <option value="location">库位标签（粘贴列表）</option>
+            </select>
+          </div>
+          <div class="form-row" style="margin:0"><label>域名（QR URL 用）</label><input type="text" id="lbl-domain" value="jinfuwms.online"></div>
+          <div class="form-row" style="margin:0"><label>每码份数（正反=2）</label><input type="number" id="lbl-copies" value="2" min="1" max="6"></div>
+        </div>
+        <div id="lbl-pallet-opts" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:10px;margin-top:10px">
+          <div class="form-row" style="margin:0"><label>前缀</label><input type="text" id="lbl-prefix" value="PLT" onchange="lblInitStart()"></div>
+          <div class="form-row" style="margin:0"><label>序号位数</label><input type="number" id="lbl-width" value="4" min="1" max="8" onchange="lblInitStart()"></div>
+          <div class="form-row" style="margin:0"><label>起始序号</label><input type="number" id="lbl-start" value="1" min="1"></div>
+          <div class="form-row" style="margin:0"><label>数量</label><input type="number" id="lbl-count" value="10" min="1" max="500"></div>
+        </div>
+        <div id="lbl-loc-opts" style="display:none;margin-top:10px">
+          <div class="form-row" style="margin:0"><label>库位码（一行一个，如 A-12-03）</label><textarea id="lbl-loc-list" placeholder="A-12-01&#10;A-12-02&#10;A-12-03" style="min-height:80px"></textarea></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-primary" onclick="lblGenerate()">生成预览</button>
+          <button class="btn btn-ghost" onclick="lblPrint()">打印</button>
+        </div>
+        <div id="lbl-hint" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
+      </div>
+      <div id="lbl-preview" style="margin-top:12px"></div>
+    </div>
+
   </div><!-- /main -->
 </div><!-- /app-shell -->
 
@@ -1548,7 +1591,7 @@ function showApp() {
   document.getElementById('sidebar-username').textContent = _username;
   loadGlobals();
   loadDashboard();
-  initWorkspace();
+  if (!handleDeepLink()) initWorkspace();
 }
 
 // ── API helper ─────────────────────────────────────────────────────────────
@@ -1625,6 +1668,7 @@ function nav(btn) {
   if (btn.dataset.section === 'alloc') loadConflictLogs();
   if (btn.dataset.section === 'system-log') loadSystemLogs();
   if (btn.dataset.section === 'container-pallets') loadPalletList();
+  if (btn.dataset.section === 'container-labels') lblOnTypeChange();
   if (['supplier-history','customer-history'].includes(btn.dataset.section)) loadCounterpartyLists();
   closeSidebar();
   document.getElementById('main').scrollTo({ top: 0 });
@@ -3264,7 +3308,7 @@ function editProductRow(jan, nameJp, nameZh, upc, outerJan) {
     <td><input type="text" value="${nameJp}" id="pedit-jp-${jan}" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td><input type="text" value="${nameZh}" id="pedit-zh-${jan}" placeholder="中文名（可选）" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td><input type="number" value="${upc}" id="pedit-upc-${jan}" min="1" placeholder="—" style="width:70px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
-    <td><input type="text" value="${outerJan}" id="pedit-outer-${jan}" placeholder="外箱JAN（可选）" maxlength="13" style="width:110px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+    <td><input type="text" value="${outerJan}" id="pedit-outer-${jan}" placeholder="外箱JAN（14位ITF可选）" maxlength="14" style="width:120px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td style="white-space:nowrap">
       <button class="btn btn-primary btn-sm" onclick="saveProductRow('${jan}')">保存</button>
       <button class="btn btn-ghost btn-sm" onclick="searchProducts()">取消</button>
@@ -3984,6 +4028,21 @@ function loadZxing() {
   return _zxingPromise;
 }
 
+let _qrcodePromise = null;
+function loadQrcode() {
+  if (window.qrcode) return Promise.resolve();
+  if (_qrcodePromise) return _qrcodePromise;
+  _qrcodePromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = '/static/vendor/qrcode.min.js';
+    s.async = true;
+    s.onload = () => window.qrcode ? resolve() : reject(new Error('QR 库加载异常'));
+    s.onerror = () => { _qrcodePromise = null; reject(new Error('QR 库加载失败')); };
+    document.head.appendChild(s);
+  });
+  return _qrcodePromise;
+}
+
 async function startZxingScan(video, statusEl) {
   statusEl.textContent = '加载扫码组件…';
   await loadZxing();
@@ -4104,10 +4163,17 @@ let _workspace = 'ops';
 let _addPalletId = null;
 
 // 扫码填入原始文本（托盘码/库位码不是 JAN，不能剥成纯数字）
+// QR 可内嵌 URL(如 https://域名/app?pallet=PLT-0001 或 ?loc=A-12-03)：
+// App 内扫码抠出码本身；原生相机扫同一个 QR 则打开该 URL(深链)。纯码 QR 也兼容。
+function extractCode(raw) {
+  const s = String(raw || '').trim();
+  const m = s.match(/[?&#](?:pallet|loc)=([^&#]+)/i);
+  return m ? decodeURIComponent(m[1]) : s;
+}
 function scanIntoText(inputId) {
   openScanner((code) => {
     const el = document.getElementById(inputId);
-    el.value = String(code || '').trim();
+    el.value = extractCode(code);
     toast(`已识别：${el.value}`, 'ok');
   });
 }
@@ -4127,6 +4193,19 @@ function initWorkspace() {
   if (location.hash.includes('ws=container') || saved === 'container') switchWorkspace('container');
 }
 
+// 深链：原生相机扫 QR 打开 https://域名/app?pallet=PLT-0001 或 ?loc=A-12-03 → 直达托盘/库位查询
+function handleDeepLink() {
+  let search = location.search || '';
+  if (!search && location.hash.includes('?')) search = '?' + location.hash.split('?')[1];
+  const params = new URLSearchParams(search);
+  const pallet = params.get('pallet'), loc = params.get('loc');
+  if (!pallet && !loc) return false;
+  if (pallet) document.getElementById('cp-f-code').value = pallet;
+  if (loc) document.getElementById('cp-f-loc').value = loc;
+  switchWorkspace('container');  // 切到集装箱工作区 → nav 到「托盘查询」→ 用上面填好的过滤条件查
+  return true;
+}
+
 function _palletStatusLabel(s) { return ({ empty: '空', staging: '备货中', loaded: '已装柜' })[s] || s; }
 function _cval(id) { const e = document.getElementById(id); return e ? e.value.trim() : ''; }
 
@@ -4144,12 +4223,29 @@ function _renderItemsStatic(p) {
 }
 
 // ── 托盘查询 ──
+function scanPalletQuery() {
+  openScanner((code) => {
+    const c = extractCode(code);
+    // 扫到库位 QR(loc=) → 按库位查；扫到托盘 QR/码 → 按托盘码查
+    const raw = String(code || '');
+    if (/[?&#]loc=/i.test(raw)) {
+      document.getElementById('cp-f-loc').value = c;
+      document.getElementById('cp-f-code').value = '';
+    } else {
+      document.getElementById('cp-f-code').value = c;
+      document.getElementById('cp-f-loc').value = '';
+    }
+    loadPalletList();
+  });
+}
 async function loadPalletList() {
   const params = new URLSearchParams();
   const d = _cval('cp-f-date'); if (d) params.set('planned_outbound_date', d);
   const c = _cval('cp-f-customer'); if (c) params.set('customer_name', c);
   const s = _cval('cp-f-status'); if (s) params.set('status', s);
   const code = _cval('cp-f-code'); if (code) params.set('code', code);
+  const loc = _cval('cp-f-loc'); if (loc) params.set('shelf_location', loc);
+  if (document.getElementById('cp-f-unlocated')?.checked) params.set('unlocated', 'true');
   const el = document.getElementById('cp-list');
   document.getElementById('cp-detail').innerHTML = '';
   el.innerHTML = '<p class="loading">加载中…</p>';
@@ -4301,11 +4397,111 @@ async function submitPlacePallet() {
   if (!code) { toast('请扫描 / 输入托盘码', 'err'); return; }
   if (!/^[A-Z]-\d{2}-\d{2}$/.test(loc)) { toast('库位格式应为 区-排-层，如 A-12-03', 'err'); return; }
   try {
-    const p = await api('POST', '/containers/pallets/place', { pallet_code: code, location_code: loc });
-    rel.innerHTML = resultCard('ok', `托盘「${esc(p.code)}」已放到库位 ${esc(p.shelf_location)}`);
+    const res = await api('POST', '/containers/pallets/place', { pallet_code: code, location_code: loc });
+    const p = res.pallet;
+    const displaced = res.displaced_pallet_code ? `<br><span style="color:var(--warn)">↺ 原占用该库位的托盘「${esc(res.displaced_pallet_code)}」已自动解绑</span>` : '';
+    rel.innerHTML = resultCard('ok', `托盘「${esc(p.code)}」已放到库位 ${esc(p.shelf_location)}${displaced}`);
     toast('库位已绑定', 'ok');
     document.getElementById('pl-code').value = ''; document.getElementById('pl-loc').value = '';
   } catch (e) { rel.innerHTML = resultCard('err', e.message); }
+}
+
+// ── 标签打印（托盘/库位 QR，QR 内嵌 URL 双用途）──────────────────────────────
+function lblOnTypeChange() {
+  const t = document.getElementById('lbl-type').value;
+  document.getElementById('lbl-pallet-opts').style.display = t === 'pallet' ? 'grid' : 'none';
+  document.getElementById('lbl-loc-opts').style.display = t === 'location' ? 'block' : 'none';
+  if (t === 'pallet') lblInitStart();
+}
+async function lblInitStart() {
+  if (document.getElementById('lbl-type').value !== 'pallet') return;
+  try {
+    const prefix = _cval('lbl-prefix') || 'PLT';
+    const width = +document.getElementById('lbl-width').value || 4;
+    const r = await api('GET', `/containers/pallets/next-serial?prefix=${encodeURIComponent(prefix)}&width=${width}`);
+    document.getElementById('lbl-start').value = r.next_serial;
+    document.getElementById('lbl-hint').textContent = `下一个可用序号：${r.next_code}（防重号，已自动填入起始序号）`;
+  } catch {}
+}
+function _lblItems() {
+  const domain = (_cval('lbl-domain') || 'jinfuwms.online').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  const base = `https://${domain}/app`;
+  const t = document.getElementById('lbl-type').value;
+  const items = [];
+  if (t === 'pallet') {
+    const prefix = _cval('lbl-prefix') || 'PLT';
+    const width = +document.getElementById('lbl-width').value || 4;
+    const start = +document.getElementById('lbl-start').value || 1;
+    const count = Math.min(500, Math.max(0, +document.getElementById('lbl-count').value || 0));
+    for (let i = 0; i < count; i++) {
+      const code = `${prefix}-${String(start + i).padStart(width, '0')}`;
+      items.push({ code, url: `${base}?pallet=${encodeURIComponent(code)}`, kind: '托盘' });
+    }
+  } else {
+    const list = (document.getElementById('lbl-loc-list').value || '').split('\n').map(s => s.trim().toUpperCase()).filter(Boolean);
+    for (const code of list) items.push({ code, url: `${base}?loc=${encodeURIComponent(code)}`, kind: '库位' });
+  }
+  return items;
+}
+function _qrSvg(url) {
+  const qr = qrcode(0, 'M');
+  qr.addData(url); qr.make();
+  return qr.createSvgTag({ scalable: true, margin: 1 }).replace('<svg ', '<svg style="width:100%;height:100%;display:block" ');
+}
+function _lblSheetHTML(items, copies) {
+  return items.map(it => {
+    const svg = _qrSvg(it.url);
+    const cell = `<div class="lbl-cell">
+        <div class="lbl-qr">${svg}</div>
+        <div class="lbl-txt">
+          <div class="lbl-code">${esc(it.code)}</div>
+          <div class="lbl-kind">${it.kind}标签 · 扫码识别</div>
+          <div class="lbl-blank">客户：__________</div>
+          <div class="lbl-blank">出库日：________</div>
+          <div class="lbl-blank">库位：__________</div>
+        </div>
+      </div>`;
+    return `<div class="lbl-page">${cell.repeat(copies)}</div>`;
+  }).join('');
+}
+const _LBL_PRINT_CSS = `
+*{box-sizing:border-box}
+@page{size:A4;margin:8mm}
+body{margin:0;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:#000}
+.lbl-page{width:100%;height:281mm;display:flex;flex-direction:column;page-break-after:always}
+.lbl-page:last-child{page-break-after:auto}
+.lbl-cell{flex:1;border:1px dashed #bbb;display:flex;align-items:center;gap:8mm;padding:8mm;overflow:hidden}
+.lbl-qr{width:55mm;height:55mm;flex:0 0 auto}
+.lbl-qr svg{width:100%;height:100%;display:block}
+.lbl-txt{flex:1;min-width:0}
+.lbl-code{font-size:34pt;font-weight:800;letter-spacing:1px;font-family:ui-monospace,monospace;word-break:break-all;line-height:1.1}
+.lbl-kind{font-size:11pt;color:#666;margin:4mm 0 6mm}
+.lbl-blank{font-size:13pt;margin:3mm 0;color:#333}
+`;
+async function lblGenerate() {
+  try { await loadQrcode(); } catch (e) { toast(e.message, 'err'); return; }
+  const items = _lblItems();
+  if (!items.length) { toast('没有可生成的标签（检查数量/库位列表）', 'err'); return; }
+  const copies = Math.max(1, +document.getElementById('lbl-copies').value || 1);
+  const preview = items.slice(0, 60).map(it =>
+    `<div style="border:1px solid var(--border);border-radius:6px;padding:8px;width:132px;text-align:center;background:#fff">
+       <div style="width:104px;height:104px;margin:0 auto">${_qrSvg(it.url)}</div>
+       <div style="font-family:monospace;font-weight:700;font-size:12px;color:#000;margin-top:4px;word-break:break-all">${esc(it.code)}</div>
+     </div>`).join('');
+  document.getElementById('lbl-preview').innerHTML =
+    `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">共 ${items.length} 个码 × ${copies} 份 = ${items.length * copies} 张（${items.length} 页 A4，每页 ${copies} 张相同）。点「打印」出干净的 A4 打印页。</div>`
+    + `<div style="display:flex;flex-wrap:wrap;gap:10px">${preview}</div>`
+    + (items.length > 60 ? `<div style="font-size:12px;color:var(--muted);margin-top:8px">预览仅显示前 60 个，打印会全部输出。</div>` : '');
+}
+async function lblPrint() {
+  try { await loadQrcode(); } catch (e) { toast(e.message, 'err'); return; }
+  const items = _lblItems();
+  if (!items.length) { toast('没有可生成的标签', 'err'); return; }
+  const copies = Math.max(1, +document.getElementById('lbl-copies').value || 1);
+  const w = window.open('', '_blank');
+  if (!w) { toast('打印窗口被浏览器拦截，请允许弹窗后重试', 'err'); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>标签打印</title><style>${_LBL_PRINT_CSS}</style></head><body>${_lblSheetHTML(items, copies)}<scr`+`ipt>window.onload=function(){setTimeout(function(){window.print()},200)}</scr`+`ipt></body></html>`);
+  w.document.close();
 }
 </script>
 </body>

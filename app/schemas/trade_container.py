@@ -82,3 +82,17 @@ class PalletItemSetQuantity(BaseModel):
 class PalletPlaceLocation(BaseModel):
     pallet_code: PalletCode
     location_code: LocationCode
+
+
+class PalletPlaceResult(BaseModel):
+    """库位绑定结果。1:1：新绑定会把原占用该库位的托盘自动解绑。"""
+    pallet: PalletRead
+    displaced_pallet_code: str | None = None  # 原占用该库位、现被自动解绑的托盘码
+
+
+class NextSerialRead(BaseModel):
+    """托盘标签生成用：下一个可用序号（防重号）。"""
+    prefix: str
+    width: int
+    next_serial: int
+    next_code: str

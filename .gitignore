@@ -15,6 +15,7 @@ app/data/qinsi_selectors.json
 app/data/qinsi_schema_cache.json
 # 本地一键脚本（含本机路径，不适合共享）
 refresh_qinsi.sh
+sync_vps_to_nas.sh
 
 # 乐天快递打包工具（本地独立项目，仅供参考，不纳入版本控制）
 乐天快递打包/

@@ -42,7 +42,11 @@ async def init_db() -> None:
             "ALTER TABLE stock_transactions ADD COLUMN IF NOT EXISTS customer VARCHAR(255)"
         ))
         await conn.execute(text(
-            "ALTER TABLE products ADD COLUMN IF NOT EXISTS outer_jan VARCHAR(13)"
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS outer_jan VARCHAR(14)"
+        ))
+        # 外箱箱码 ITF-14 为 14 位；早期建的列是 VARCHAR(13)，在此放宽（幂等，已是14则无变化）
+        await conn.execute(text(
+            "ALTER TABLE products ALTER COLUMN outer_jan TYPE VARCHAR(14)"
         ))
         # Partial unique index: prevents duplicate batch transactions at the DB level.
         # Includes transaction_type so that a transfer's paired OUT+IN rows (same reference_id,
