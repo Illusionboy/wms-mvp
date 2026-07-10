@@ -17,8 +17,10 @@ from app.models.pallet import Pallet, PalletItem
 from app.models.product import Product
 from app.schemas.trade_container import (
     DailyCustomerRead,
+    NextSerialRead,
     PalletCandidateRead,
     PalletItemRead,
+    PalletPlaceResult,
     PalletRead,
 )
 from app.services.customer_allocations import (
@@ -88,6 +90,8 @@ async def list_pallets(
     planned_outbound_date: date | None = None,
     status: str | None = None,
     code: str | None = None,
+    shelf_location: str | None = None,
+    unlocated: bool = False,
 ) -> list[PalletRead]:
     stmt = select(Pallet).options(selectinload(Pallet.items))
     if customer_name:
@@ -98,9 +102,28 @@ async def list_pallets(
         stmt = stmt.where(Pallet.status == status)
     if code:
         stmt = stmt.where(Pallet.code.ilike(f"%{code.strip()}%"))
+    if shelf_location:  # 扫库位查内容：1:1 下正常返回该库位上的那一个托盘
+        stmt = stmt.where(Pallet.shelf_location == shelf_location.strip())
+    if unlocated:  # 无库位（临时放地面区）的托盘
+        stmt = stmt.where(Pallet.shelf_location.is_(None))
     stmt = stmt.order_by(Pallet.updated_at.desc())
     pallets = (await session.scalars(stmt)).all()
     return [await _to_read(session, p) for p in pallets]
+
+
+async def next_pallet_serial(session: AsyncSession, prefix: str = "PLT", width: int = 4) -> NextSerialRead:
+    """托盘标签生成：返回下一个可用序号（现有 prefix-#### 最大序号 +1），防重号。"""
+    prefix = prefix.strip() or "PLT"
+    like = f"{prefix}-%"
+    codes = (await session.scalars(select(Pallet.code).where(Pallet.code.like(like)))).all()
+    plen = len(prefix) + 1
+    mx = 0
+    for c in codes:
+        suf = c[plen:]
+        if suf.isdigit():
+            mx = max(mx, int(suf))
+    nxt = mx + 1
+    return NextSerialRead(prefix=prefix, width=width, next_serial=nxt, next_code=f"{prefix}-{nxt:0{width}d}")
 
 
 async def list_daily_customers(session: AsyncSession, planned_outbound_date: date) -> list[DailyCustomerRead]:
@@ -249,14 +272,23 @@ async def place_pallet_at_location(
     *,
     pallet_code: str,
     location_code: str,
-) -> PalletRead:
-    """库位绑定：扫托盘码 + 扫库位码 → 更新 Pallet.shelf_location。仅改字段、幂等。"""
+) -> PalletPlaceResult:
+    """库位绑定（库位↔托盘 1:1）：把托盘放到该库位；原占用该库位的其它托盘自动解绑。"""
     code = pallet_code.strip()
+    loc = location_code.strip()
     pallet = await session.scalar(select(Pallet).where(Pallet.code == code).with_for_update())
     if pallet is None:
         raise ValueError(f"托盘「{code}」不存在，请先建托盘")
-    pallet.shelf_location = location_code.strip()
+    # 1:1 —— 清掉原来占用该库位的其它托盘（新映射建立、旧映射自动断开）
+    displaced_code: str | None = None
+    others = (await session.scalars(
+        select(Pallet).where(Pallet.shelf_location == loc, Pallet.code != code).with_for_update()
+    )).all()
+    for other in others:
+        displaced_code = other.code  # 1:1 正常只有一个
+        other.shelf_location = None
+    pallet.shelf_location = loc
     await session.commit()
-    reloaded = await get_pallet_by_code(session, code)
-    assert reloaded is not None
-    return reloaded
+    placed = await get_pallet_by_code(session, code)
+    assert placed is not None
+    return PalletPlaceResult(pallet=placed, displaced_pallet_code=displaced_code)

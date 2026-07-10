@@ -9,11 +9,13 @@ from app.api.deps import require_auth
 from app.db.session import get_db_session
 from app.schemas.trade_container import (
     DailyCustomerRead,
+    NextSerialRead,
     PalletAddItems,
     PalletCandidateRead,
     PalletCreate,
     PalletItemSetQuantity,
     PalletPlaceLocation,
+    PalletPlaceResult,
     PalletRead,
 )
 from app.services import trade_containers as svc
@@ -43,6 +45,8 @@ async def list_pallets(
     planned_outbound_date: date | None = None,
     status: str | None = None,
     code: str | None = None,
+    shelf_location: str | None = None,
+    unlocated: bool = False,
     session: AsyncSession = Depends(get_db_session),
 ) -> list[PalletRead]:
     return await svc.list_pallets(
@@ -51,7 +55,19 @@ async def list_pallets(
         planned_outbound_date=planned_outbound_date,
         status=status,
         code=code,
+        shelf_location=shelf_location,
+        unlocated=unlocated,
     )
+
+
+@router.get("/pallets/next-serial", response_model=NextSerialRead)
+async def next_serial(
+    prefix: str = "PLT",
+    width: int = 4,
+    session: AsyncSession = Depends(get_db_session),
+) -> NextSerialRead:
+    """托盘标签生成：下一个可用序号（防重号）。"""
+    return await svc.next_pallet_serial(session, prefix=prefix, width=width)
 
 
 @router.get("/pallets/by-code/{code}", response_model=PalletRead)
@@ -105,12 +121,12 @@ async def create_pallet(
         _raise(exc)
 
 
-@router.post("/pallets/place", response_model=PalletRead, dependencies=[Depends(require_auth)])
+@router.post("/pallets/place", response_model=PalletPlaceResult, dependencies=[Depends(require_auth)])
 async def place_pallet(
     payload: PalletPlaceLocation,
     session: AsyncSession = Depends(get_db_session),
-) -> PalletRead:
-    """库位绑定：扫托盘码 + 扫库位码 → 放置到该库位。"""
+) -> PalletPlaceResult:
+    """库位绑定：扫托盘码 + 扫库位码 → 放置到该库位（1:1，原占用者自动解绑）。"""
     try:
         return await svc.place_pallet_at_location(
             session, pallet_code=payload.pallet_code, location_code=payload.location_code
