@@ -32,6 +32,8 @@ rakuten-automation/
 # 20260511.csv
 *.csv
 *.xlsx
+# 例外：乐天服务的 header-only 列模板（仅列名、无 PII），服务运行时读取，必须纳入版本库
+!app/services/rakuten_assets/*.csv
 product_dict.json
 import_products.py
 process_excel.py
