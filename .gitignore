@@ -19,6 +19,9 @@ sync_vps_to_nas.sh
 
 # 乐天快递打包工具（本地独立项目，仅供参考，不纳入版本控制）
 乐天快递打包/
+# 乐天参考项目 + 自动化样本（含客户 PII、账号 HTML，绝不提交）
+rakuten-shipping/
+rakuten-automation/
 
 # macOS
 .DS_Store

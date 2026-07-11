@@ -357,6 +357,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="rakuten" onclick="nav(this)">
         <span class="icon">▤</span> 乐天出库
       </button>
+      <button class="nav-item" data-section="rakuten-label" onclick="nav(this)">
+        <span class="icon">🏷</span> 乐天快递单
+      </button>
       <button class="nav-item" data-section="trade-shipment" onclick="nav(this)">
         <span class="icon">⇄</span> 贸易出库
       </button>
@@ -1409,6 +1412,39 @@ tr:hover td { background: var(--accent-bg); }
           <button class="btn btn-primary btn-sm" onclick="addTelegramUser()">添加</button>
         </div>
         <div id="tg-user-list" style="margin-top:10px"></div>
+      </div>
+    </div>
+
+    <!-- 乐天快递单生成 -->
+    <div class="section" id="section-rakuten-label">
+      <div class="section-title">乐天快递单生成</div>
+      <div class="section-sub">上传 RMS 订单明细 CSV（全カラムダウンロード用）→ 生成佐川/Yamato/郵便 三家上传 CSV（打包下载，含 mapping.json 供单号回填）</div>
+      <div class="card">
+        <div class="form-row">
+          <label>店铺</label>
+          <select id="rl-store"><option value="1">一号店</option><option value="2">二号店</option></select>
+        </div>
+        <div class="form-row">
+          <label>RMS 订单 CSV</label>
+          <input type="file" id="rl-file" accept=".csv" style="padding:6px 0;border:none;background:none">
+        </div>
+        <button class="btn btn-primary" onclick="genRakutenLabels()">生成并下载</button>
+        <div id="rl-result" style="margin-top:12px"></div>
+      </div>
+      <hr class="divider">
+      <div class="card">
+        <div class="card-title">运单号回填 CSV（発送完了報告）</div>
+        <div class="section-sub" style="margin-bottom:10px">上传【快递出单结果文件】+【生成时的 mapping.json】→ 生成 RMS 発送完了報告 CSV（cp932），你再手动传到 RMS「■発送完了報告データ」框</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-row"><label>快递结果文件（如佐川 出荷履歴）</label><input type="file" id="sr-result" accept=".csv" style="padding:6px 0;border:none;background:none"></div>
+          <div class="form-row"><label>mapping.json（P1 下载包里）</label><input type="file" id="sr-mapping" accept=".json" style="padding:6px 0;border:none;background:none"></div>
+          <div class="form-row"><label>快递公司（自动对应 RMS 配送会社代码）</label>
+            <select id="sr-courier"><option value="sagawa">佐川急便（1002）</option><option value="yamato">ヤマト運輸（1001）</option></select>
+          </div>
+          <div class="form-row"><label>発送日（默认今天）</label><input type="date" id="sr-date"></div>
+        </div>
+        <button class="btn btn-primary" onclick="genShipmentReport()">生成回填 CSV</button>
+        <div id="sr-result" style="margin-top:12px"></div>
       </div>
     </div>
 
@@ -4502,6 +4538,72 @@ async function lblPrint() {
   if (!w) { toast('打印窗口被浏览器拦截，请允许弹窗后重试', 'err'); return; }
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>标签打印</title><style>${_LBL_PRINT_CSS}</style></head><body>${_lblSheetHTML(items, copies)}<scr`+`ipt>window.onload=function(){setTimeout(function(){window.print()},200)}</scr`+`ipt></body></html>`);
   w.document.close();
+}
+
+// ── 乐天快递单生成（上传 RMS CSV → 下载打包 ZIP）────────────────────────────
+async function genRakutenLabels() {
+  const f = document.getElementById('rl-file').files[0];
+  const store = document.getElementById('rl-store').value;
+  const rel = document.getElementById('rl-result');
+  if (!f) { toast('请选择 RMS 订单 CSV', 'err'); return; }
+  rel.innerHTML = '<p class="loading">生成中…</p>';
+  try {
+    const fd = new FormData(); fd.append('file', f);
+    const res = await fetch(`/api/v1/rakuten/labels?store=${encodeURIComponent(store)}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${_token}` }, body: fd,
+    });
+    if (!res.ok) { let m = 'HTTP ' + res.status; try { const j = await res.json(); m = j.detail || m; } catch {} throw new Error(m); }
+    const counts = JSON.parse(res.headers.get('X-Counts') || '{}');
+    const errN = +(res.headers.get('X-Err-Count') || '0');
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') || '';
+    const mm = cd.match(/filename="?([^"]+)"?/);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = mm ? mm[1] : `rakuten_labels_store${store}.zip`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+    const errMsg = errN ? ` <span style="color:var(--warn)">⚠ ${errN} 行商品未解析（见 err_export.csv，需人工登记）</span>` : '';
+    rel.innerHTML = resultCard('ok', `已生成并下载 ✓ 佐川 ${counts.sagawa || 0} / Yamato ${counts.yamato || 0} / 郵便 ${counts.post || 0} 单${errMsg}`);
+    toast('已生成', 'ok');
+  } catch (e) { rel.innerHTML = resultCard('err', e.message); }
+}
+
+// ── P4：生成 発送完了報告 回填 CSV ──────────────────────────────────────────
+async function genShipmentReport() {
+  const rf = document.getElementById('sr-result').files[0];
+  const mf = document.getElementById('sr-mapping').files[0];
+  const dt = document.getElementById('sr-date').value;
+  const out = document.getElementById('sr-result');
+  // 快递 → RMS 配送会社代码 + 结果文件里 mgmt_no/单号 的列名（乐天固定代码）
+  const _RK = {
+    sagawa: { code: '1002', ref: 'お客様管理番号', track: 'お問い合せ送り状No.' },
+    yamato: { code: '1001', ref: '検索キー1', track: '伝票番号' },
+  };
+  const cfg = _RK[document.getElementById('sr-courier').value] || _RK.sagawa;
+  if (!rf) { toast('请选择快递结果文件', 'err'); return; }
+  if (!mf) { toast('请选择 mapping.json', 'err'); return; }
+  out.innerHTML = '<p class="loading">生成中…</p>';
+  try {
+    const fd = new FormData(); fd.append('result_file', rf); fd.append('mapping_file', mf);
+    let url = `/api/v1/rakuten/shipment-report?courier_code=${cfg.code}&ref_field=${encodeURIComponent(cfg.ref)}&tracking_field=${encodeURIComponent(cfg.track)}`;
+    if (dt) url += `&ship_date=${encodeURIComponent(dt)}`;
+    const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${_token}` }, body: fd });
+    if (!res.ok) { let m = 'HTTP ' + res.status; try { const j = await res.json(); m = j.detail || m; } catch {} throw new Error(m); }
+    const rowN = res.headers.get('X-Row-Count') || '0';
+    const matched = res.headers.get('X-Matched') || '0';
+    const withTrack = res.headers.get('X-With-Tracking') || '0';
+    let unmatched = []; try { unmatched = JSON.parse(res.headers.get('X-Unmatched') || '[]'); } catch {}
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') || '';
+    const mm = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = mm ? decodeURIComponent(mm[1]) : '発送完了報告.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+    const warn = unmatched.length ? ` <span style="color:var(--warn)">⚠ ${unmatched.length} 个运单在 mapping 里没对上（结果文件与 mapping 是否同一批？）</span>` : '';
+    out.innerHTML = resultCard('ok', `已生成并下载 ✓ 对上 ${matched} 张运单、${rowN} 条订单行（带单号 ${withTrack}）${warn}`);
+    toast('已生成', 'ok');
+  } catch (e) { out.innerHTML = resultCard('err', e.message); }
 }
 </script>
 </body>
