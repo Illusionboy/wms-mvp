@@ -288,6 +288,23 @@ def _clean_head(c: str) -> str:
     return str(c).replace("﻿", "").strip().strip('"').strip()
 
 
+def _decode_result(b: bytes, *expect_fields: str) -> str:
+    """自动识别快递结果文件编码：佐川多为 UTF-8(BOM)，Yamato B2 多为 Shift-JIS(cp932)。
+    用"哪种编码解出的表头包含期望列名"来判定，避免 cp932 被当 UTF-8 解成乱码。"""
+    best = None
+    for enc in ("utf-8-sig", "cp932", "utf-8", "shift_jis"):
+        try:
+            text = b.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+        if best is None:
+            best = text
+        head = text.splitlines()[0] if text else ""
+        if any(f and f in head for f in expect_fields):
+            return text
+    return best if best is not None else b.decode("utf-8-sig", errors="replace")
+
+
 @dataclass
 class ShipmentReportResult:
     csv_bytes: bytes
@@ -314,7 +331,7 @@ def build_shipment_report(
     - 输出 cp932，列顺序与 RMS「発送完了報告用」模板一致。
     """
     ship_date = ship_date or date.today().strftime("%Y-%m-%d")
-    text = result_bytes.decode("utf-8-sig", errors="replace")
+    text = _decode_result(result_bytes, ref_field, tracking_field)
     reader = list(csv.reader(io.StringIO(text)))
     out_rows: list[list[str]] = []
     matched = with_tracking = 0
