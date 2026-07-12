@@ -4,6 +4,7 @@ services:
     container_name: wms_postgres
     restart: unless-stopped
     environment:
+      TZ: ${TZ:-Asia/Tokyo}
       POSTGRES_DB: ${POSTGRES_DB:-wms}
       POSTGRES_USER: ${POSTGRES_USER:-wms_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wms_password}
@@ -27,6 +28,7 @@ services:
     container_name: wms_api
     restart: unless-stopped
     environment:
+      TZ: ${TZ:-Asia/Tokyo}
       APP_NAME: ${APP_NAME:-WMS Inventory API}
       APP_ENV: ${APP_ENV:-local}
       DEBUG: ${DEBUG:-true}
@@ -66,6 +68,7 @@ services:
     profiles: ["telegram"]
     restart: unless-stopped
     environment:
+      TZ: ${TZ:-Asia/Tokyo}
       APP_NAME: ${APP_NAME:-WMS Inventory API}
       APP_ENV: ${APP_ENV:-local}
       DEBUG: ${DEBUG:-true}
