@@ -2075,6 +2075,8 @@ async function doSearch() {
       const records = p.inventory_records || [];
       const upc = p.units_per_case ? `${p.units_per_case}入` : '—';
       const editBtn = `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="jumpToProductEdit('${esc(p.jan_code)}')">编辑</button>`;
+      const histBtn = `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;margin-left:4px" onclick="jumpToProductHistory('${esc(p.jan_code)}')">进出库</button>`;
+      const actions = editBtn + histBtn;
       const warning = p.outer_jan_warning
         ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#92400e">${esc(p.outer_jan_warning)}</div>`
         : '';
@@ -2087,14 +2089,14 @@ async function doSearch() {
             <td>${r.location_code}</td>
             <td><strong style="color:${r.quantity < 0 ? 'var(--danger)' : 'inherit'}">${r.quantity}</strong></td>
             <td>${upc}</td>
-            <td>${i === 0 ? editBtn : ''}</td>
+            <td style="white-space:nowrap">${i === 0 ? actions : ''}</td>
           </tr>`).join('')
         : `<tr>
             <td><code style="font-size:11px">${p.jan_code}</code></td>
             <td>${esc(p.name_jp)}<br><small style="color:var(--muted)">${esc(p.name_zh||'')}</small></td>
             <td colspan="4" style="color:var(--muted)">无库存记录</td>
             <td>${upc}</td>
-            <td>${editBtn}</td>
+            <td style="white-space:nowrap">${actions}</td>
           </tr>`;
       return warning + '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品名</th><th>仓库</th><th>客户</th><th>库位</th><th>数量</th><th>入数</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
         + `<div id="search-alloc-${esc(p.jan_code)}" style="margin:4px 0 4px 2px"></div>`;
@@ -2141,6 +2143,21 @@ function jumpToProductEdit(janCode) {
   if (btn) nav(btn);
   document.getElementById('prod-search-kw').value = janCode;
   searchProducts();
+}
+
+// 从库存查询结果跳到「商品进出库情况」并直接查该 JAN 的全部记录（清空日期/类型，最新在上）
+function jumpToProductHistory(janCode) {
+  const btn = document.querySelector('.nav-item[data-section="product-history"]');
+  if (btn) nav(btn);
+  document.getElementById('ph-jan').value = janCode;
+  document.getElementById('ph-jan-display').textContent = janCode;
+  document.getElementById('ph-name-display').textContent = '';
+  document.getElementById('ph-selected').classList.add('show');
+  document.getElementById('ph-search').value = '';
+  document.getElementById('ph-from').value = '';
+  document.getElementById('ph-to').value = '';
+  document.getElementById('ph-type').value = '';
+  queryProductHistory();
 }
 
 // ── Chat Report ────────────────────────────────────────────────────────────

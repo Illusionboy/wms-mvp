@@ -11,7 +11,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -27,6 +27,16 @@ router = APIRouter()
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+def _effective_date():
+    """业务日期表达式：transaction_date 为空时回退到 created_at 的日期部分。
+
+    用于排序与日期过滤——乐天 CSV / 微信报库 / 贸易出库 的 transaction_date 目前为 NULL，
+    若按 transaction_date 直接排序会被排到最后（nullslast），按 `OR IS NULL` 过滤又会让它们
+    无视日期范围全部漏放（"选了时间还是全出来"）。统一用 COALESCE 回退到 created_at 即可修正两者。
+    """
+    return func.coalesce(StockTransaction.transaction_date, cast(StockTransaction.created_at, Date))
+
 
 def _txn_to_dict(txn: StockTransaction) -> dict:
     ir = txn.inventory_record
@@ -97,25 +107,15 @@ async def supplier_history(
             StockTransaction.supplier.ilike(f"%{supplier}%"),
         )
         .order_by(
-            StockTransaction.transaction_date.desc().nullslast(),
+            _effective_date().desc(),
             StockTransaction.created_at.desc(),
         )
         .limit(limit)
     )
     if from_date:
-        stmt = stmt.where(
-            or_(
-                StockTransaction.transaction_date >= from_date,
-                StockTransaction.transaction_date.is_(None),
-            )
-        )
+        stmt = stmt.where(_effective_date() >= from_date)
     if to_date:
-        stmt = stmt.where(
-            or_(
-                StockTransaction.transaction_date <= to_date,
-                StockTransaction.transaction_date.is_(None),
-            )
-        )
+        stmt = stmt.where(_effective_date() <= to_date)
     if warehouse_id:
         stmt = stmt.join(
             InventoryRecord, InventoryRecord.id == StockTransaction.inventory_record_id
@@ -148,25 +148,15 @@ async def customer_history(
             StockTransaction.customer.ilike(f"%{customer}%"),
         )
         .order_by(
-            StockTransaction.transaction_date.desc().nullslast(),
+            _effective_date().desc(),
             StockTransaction.created_at.desc(),
         )
         .limit(limit)
     )
     if from_date:
-        stmt = stmt.where(
-            or_(
-                StockTransaction.transaction_date >= from_date,
-                StockTransaction.transaction_date.is_(None),
-            )
-        )
+        stmt = stmt.where(_effective_date() >= from_date)
     if to_date:
-        stmt = stmt.where(
-            or_(
-                StockTransaction.transaction_date <= to_date,
-                StockTransaction.transaction_date.is_(None),
-            )
-        )
+        stmt = stmt.where(_effective_date() <= to_date)
     if warehouse_id:
         stmt = stmt.join(
             InventoryRecord, InventoryRecord.id == StockTransaction.inventory_record_id
@@ -198,7 +188,7 @@ async def product_history(
         )
         .where(InventoryRecord.product_jan == jan_code)
         .order_by(
-            StockTransaction.transaction_date.desc().nullslast(),
+            _effective_date().desc(),
             StockTransaction.created_at.desc(),
         )
         .limit(limit)
@@ -206,19 +196,9 @@ async def product_history(
     if transaction_type:
         stmt = stmt.where(StockTransaction.transaction_type == transaction_type.upper())
     if from_date:
-        stmt = stmt.where(
-            or_(
-                StockTransaction.transaction_date >= from_date,
-                StockTransaction.transaction_date.is_(None),
-            )
-        )
+        stmt = stmt.where(_effective_date() >= from_date)
     if to_date:
-        stmt = stmt.where(
-            or_(
-                StockTransaction.transaction_date <= to_date,
-                StockTransaction.transaction_date.is_(None),
-            )
-        )
+        stmt = stmt.where(_effective_date() <= to_date)
     if warehouse_id:
         stmt = stmt.where(InventoryRecord.warehouse_id == warehouse_id)
 
@@ -245,9 +225,9 @@ async def product_summary(
         .group_by(StockTransaction.transaction_type)
     )
     if from_date:
-        base = base.where(StockTransaction.transaction_date >= from_date)
+        base = base.where(_effective_date() >= from_date)
     if to_date:
-        base = base.where(StockTransaction.transaction_date <= to_date)
+        base = base.where(_effective_date() <= to_date)
 
     rows = await session.execute(base)
     summary: dict[str, dict] = {}
