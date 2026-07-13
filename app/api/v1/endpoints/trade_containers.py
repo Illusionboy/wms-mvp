@@ -149,6 +149,25 @@ async def add_items(
         _raise(exc)
 
 
+@router.post(
+    "/pallets/{pallet_id}/subtract-items",
+    response_model=PalletRead,
+    dependencies=[Depends(require_auth)],
+)
+async def subtract_items(
+    pallet_id: int,
+    payload: PalletAddItems,
+    session: AsyncSession = Depends(get_db_session),
+) -> PalletRead:
+    """减货（增量扣减）：从托盘扣减货物，扣到 0 移除。减掉的货回默认 A-00-00 库位。"""
+    try:
+        return await svc.subtract_items_from_pallet(
+            session, pallet_id, [(it.jan_code, it.quantity) for it in payload.items]
+        )
+    except ValueError as exc:
+        _raise(exc)
+
+
 @router.patch(
     "/pallets/{pallet_id}/items/{jan_code}",
     response_model=PalletRead,

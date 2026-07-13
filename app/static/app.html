@@ -369,6 +369,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="count-import" onclick="nav(this)">
         <span class="icon">≡</span> 盘点导入
       </button>
+      <button class="nav-item" data-section="count" onclick="nav(this)">
+        <span class="icon">⊞</span> 批量点数
+      </button>
       <button class="nav-item" data-section="qinsi" onclick="nav(this)">
         <span class="icon">⬇</span> 秦丝同步
       </button>
@@ -1069,6 +1072,89 @@ tr:hover td { background: var(--accent-bg); }
     </div>
 
     <!-- Qinsi Scraper -->
+    <!-- 批量点数（数据通信功能）——扫码/手输/Excel 收集 (JAN,数量)，产出通用 JSON / 微信报库文本 / 库存模拟 / 托盘对账。只读库存 -->
+    <div class="section" id="section-count">
+      <div class="section-title">批量点数</div>
+      <div class="section-sub">扫码 / 手输 / Excel 收集 (JAN, 数量)，生成通用 JSON 供各模块复用；并出微信报库文本、库存是否够货模拟、装柜前与托盘 QR 对账。全程只读、不改库存。</div>
+
+      <!-- 会话条 -->
+      <div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span id="count-session-label" style="font-size:13px;color:var(--text-dim)">会话：新建中</span>
+        <select id="count-session-pick" onchange="countSwitchSession()" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px"></select>
+        <button class="btn btn-ghost btn-sm" onclick="countNewSession()">新建会话</button>
+        <button class="btn btn-ghost btn-sm" onclick="countClear()">清空</button>
+        <span id="count-save-state" style="font-size:12px;color:var(--text-dim);margin-left:auto"></span>
+      </div>
+
+      <!-- 点数工作台 -->
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">点数工作台</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-row" style="margin:0;flex:1;min-width:160px"><label>JAN（扫商品 / 外箱码或输入）</label>
+            <div class="input-scan"><input type="text" id="count-jan" placeholder="JAN…" onkeydown="if(event.key==='Enter')countAddManual()"><button type="button" class="scan-btn" title="扫码" onclick="countScan()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button></div>
+          </div>
+          <div class="form-row" style="margin:0;width:90px"><label>数量</label><input type="number" id="count-qty" min="1" value="1"></div>
+          <button class="btn btn-primary" style="margin-bottom:0" onclick="countAddManual()">加入</button>
+        </div>
+        <div id="count-items" style="margin-top:12px"></div>
+        <div id="count-total" style="margin-top:8px;font-weight:600"></div>
+      </div>
+
+      <!-- Excel 导入 -->
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">Excel / CSV 报库导入（sheet = 客户 / 供应商，含 JAN + 数量）</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="file" id="count-file" accept=".xlsx,.xls">
+          <button class="btn btn-ghost btn-sm" onclick="countImportExcel()">导入</button>
+        </div>
+      </div>
+
+      <!-- 通用 JSON -->
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">通用数据结构（JAN + 数量）</div>
+        <textarea id="count-json" readonly rows="4" style="width:100%;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:12px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"></textarea>
+        <button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="countCopy('count-json')">复制 JSON</button>
+      </div>
+
+      <!-- 微信报库文本 -->
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">微信报库文本</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-row" style="margin:0"><label>日期</label><input type="date" id="count-wx-date"></div>
+          <div class="form-row" style="margin:0"><label>方向</label><select id="count-wx-dir"><option value="到库">到库</option><option value="出库">出库</option></select></div>
+          <div class="form-row" style="margin:0;flex:1;min-width:120px"><label>供应商 / 客户</label><input type="text" id="count-wx-party" placeholder="手输…"></div>
+          <button class="btn btn-ghost btn-sm" style="margin-bottom:0" onclick="countBuildWx()">生成</button>
+        </div>
+        <textarea id="count-wx" readonly rows="6" style="width:100%;box-sizing:border-box;margin-top:8px;font-size:13px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"></textarea>
+        <button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="countCopy('count-wx')">复制文本</button>
+      </div>
+
+      <!-- 库存模拟 -->
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">库存模拟（是否够货）</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-row" style="margin:0"><label>仓库</label><select id="count-sim-wh"></select></div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px"><input type="checkbox" id="count-sim-excl"> 除去已预留</label>
+          <button class="btn btn-primary btn-sm" style="margin-bottom:8px" onclick="countSimulate()">模拟</button>
+        </div>
+        <div id="count-sim-result"></div>
+      </div>
+
+      <!-- 贸易检查 -->
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">贸易检查（装柜前 · 与托盘 QR 对账）</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-row" style="margin:0;flex:1;min-width:160px"><label>托盘码（扫 QR 或输入，可累加多个）</label>
+            <div class="input-scan"><input type="text" id="count-pallet-code" placeholder="扫托盘 QR…" onkeydown="if(event.key==='Enter')countAddPalletCode()"><button type="button" class="scan-btn" title="扫码" onclick="countScanPallet()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button></div>
+          </div>
+          <button class="btn btn-ghost btn-sm" style="margin-bottom:0" onclick="countAddPalletCode()">加入托盘</button>
+        </div>
+        <div id="count-pallet-codes" style="margin-top:8px"></div>
+        <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="countPalletCheck()">对账</button>
+        <div id="count-pallet-result" style="margin-top:12px"></div>
+      </div>
+    </div>
+
     <div class="section" id="section-qinsi">
       <div class="section-title">秦丝生意通同步</div>
       <div class="section-sub">从秦丝生意通爬取出入库记录，勾选后导入 WMS</div>
@@ -1518,6 +1604,16 @@ tr:hover td { background: var(--accent-bg); }
             </div>
             <div class="form-row" style="margin:0;width:90px"><label>数量</label><input type="number" id="ca-manual-qty" min="1" value="1"></div>
             <button class="btn btn-primary" style="margin-bottom:0" onclick="addManualItem()">加入</button>
+            <button class="btn btn-ghost" style="margin-bottom:0" onclick="subtractManualItem()">减货</button>
+          </div>
+          <div class="section-sub" style="margin:6px 0 0">减货：从托盘扣减该 JAN 的数量，扣到 0 移除；减掉的货回默认 A-00-00 库位（不改库存）。</div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">粘贴批量（点数模块的通用 JSON）</div>
+          <textarea id="ca-paste" rows="3" placeholder='[{"jan":"4900000000000","qty":10}, ...]' style="width:100%;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:12px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"></textarea>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="btn btn-primary btn-sm" onclick="pasteAddPallet()">粘贴加货</button>
+            <button class="btn btn-ghost btn-sm" onclick="pasteSubtractPallet()">粘贴减货</button>
           </div>
         </div>
         <div class="card" style="margin-top:12px">
@@ -1704,6 +1800,7 @@ function nav(btn) {
   if (btn.dataset.section === 'alloc') loadConflictLogs();
   if (btn.dataset.section === 'system-log') loadSystemLogs();
   if (btn.dataset.section === 'container-pallets') loadPalletList();
+  if (btn.dataset.section === 'count') countInit();
   if (btn.dataset.section === 'container-labels') lblOnTypeChange();
   if (['supplier-history','customer-history'].includes(btn.dataset.section)) loadCounterpartyLists();
   closeSidebar();
@@ -4417,6 +4514,291 @@ async function setPalletItem(jan, qty) {
     await api('PATCH', '/containers/pallets/' + _addPalletId + '/items/' + encodeURIComponent(jan), { quantity: qty });
     toast('已更新', 'ok'); await refreshAddScreen();
   } catch (e) { toast(e.message, 'err'); }
+}
+// 托盘减货（增量扣减，回 A-00-00）+ 粘贴批量加/减货
+async function _subtractItemsAndRefresh(items) {
+  try { await api('POST', '/containers/pallets/' + _addPalletId + '/subtract-items', { items }); toast('已减货，回 A-00-00 默认库位', 'ok'); await refreshAddScreen(); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function subtractManualItem() {
+  const jan = _cval('ca-manual-jan');
+  const q = +document.getElementById('ca-manual-qty').value;
+  if (!jan) { toast('请输入 / 扫描 JAN', 'err'); return; }
+  if (!q || q < 1) { toast('数量须 ≥ 1', 'err'); return; }
+  await _subtractItemsAndRefresh([{ jan_code: jan, quantity: q }]);
+  document.getElementById('ca-manual-jan').value = '';
+}
+function _parsePasteItems(text) {
+  let data;
+  try { data = JSON.parse(text); } catch { throw new Error('JSON 解析失败，请粘贴 [{"jan":..,"qty":..}] 格式'); }
+  if (!Array.isArray(data)) throw new Error('应为数组');
+  const items = [];
+  for (const o of data) {
+    const jan = String(o.jan || o.jan_code || '').trim();
+    const qty = +(o.qty != null ? o.qty : o.quantity);
+    if (jan && qty > 0) items.push({ jan_code: jan, quantity: qty });
+  }
+  if (!items.length) throw new Error('没有有效条目');
+  return items;
+}
+async function pasteAddPallet() {
+  if (!_addPalletId) { toast('请先加载托盘', 'err'); return; }
+  try { await _addItemsAndRefresh(_parsePasteItems(document.getElementById('ca-paste').value)); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function pasteSubtractPallet() {
+  if (!_addPalletId) { toast('请先加载托盘', 'err'); return; }
+  try { await _subtractItemsAndRefresh(_parsePasteItems(document.getElementById('ca-paste').value)); }
+  catch (e) { toast(e.message, 'err'); }
+}
+
+// ═══ 批量点数模块（数据通信功能）═══════════════════════════════════════════
+let _count = { sessionId: null, items: [], palletCodes: [] };
+const _COUNT_LS = 'wms_count_v1';
+let _countSaveTimer = null;
+let _countInited = false;
+
+function _todayStr() {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function _countQty(it) { return it.whole_case ? (+it.case_size || 0) * (+it.case_count || 0) : (+it.quantity || 0); }
+function _countItemPayload(it) {
+  return {
+    jan_code: it.jan_code, quantity: _countQty(it), whole_case: !!it.whole_case,
+    case_size: it.case_size != null ? +it.case_size : null,
+    case_count: it.case_count != null ? +it.case_count : null,
+    name_zh: it.name_zh || null, is_new: !!it.is_new,
+  };
+}
+
+async function countInit() {
+  if (!_countInited) {  // 先从 localStorage 即时恢复（防刷新丢失）
+    try { const raw = localStorage.getItem(_COUNT_LS); if (raw) { const d = JSON.parse(raw); _count.sessionId = d.sessionId || null; _count.items = d.items || []; } } catch {}
+    _countInited = true;
+  }
+  const wh = document.getElementById('count-sim-wh');
+  if (wh) wh.innerHTML = _warehouses.map(w => `<option value="${w.id}">${esc(w.name)}</option>`).join('');
+  const dt = document.getElementById('count-wx-date'); if (dt && !dt.value) dt.value = _todayStr();
+  countLoadSessions();
+  _countRender();
+}
+async function countLoadSessions() {
+  const pick = document.getElementById('count-session-pick'); if (!pick) return;
+  try {
+    const list = await api('GET', '/counting/sessions');
+    pick.innerHTML = ['<option value="">— 继续已有会话 —</option>']
+      .concat(list.map(s => `<option value="${s.id}" ${s.id === _count.sessionId ? 'selected' : ''}>#${s.id} ${esc(s.name || '')} (${s.items.length}项)</option>`)).join('');
+  } catch {}
+}
+async function countSwitchSession() {
+  const id = +document.getElementById('count-session-pick').value; if (!id) return;
+  try {
+    const s = await api('GET', '/counting/sessions/' + id);
+    _count.sessionId = s.id; _count.items = s.items.map(it => ({ ...it }));
+    _countPersistLocal(); _countRender(); toast('已切换到会话 #' + id, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+function countNewSession() {
+  _count.sessionId = null; _count.items = [];
+  _countPersistLocal(); _countRender(); countLoadSessions();
+  toast('已开新会话（首次保存时创建）', 'info');
+}
+function countClear() {
+  if (!_count.items.length || confirm('清空当前会话的所有点数？')) { _count.items = []; _countAfterChange(); }
+}
+function _countPersistLocal() {
+  try { localStorage.setItem(_COUNT_LS, JSON.stringify({ sessionId: _count.sessionId, items: _count.items })); } catch {}
+}
+function _countScheduleSave() {
+  _countPersistLocal();
+  const st = document.getElementById('count-save-state'); if (st) st.textContent = '未保存…';
+  clearTimeout(_countSaveTimer); _countSaveTimer = setTimeout(_countServerSave, 500);
+}
+async function _countServerSave() {
+  const payload = { items: _count.items.map(_countItemPayload) };
+  const st = document.getElementById('count-save-state');
+  try {
+    if (_count.sessionId) await api('PATCH', '/counting/sessions/' + _count.sessionId, payload);
+    else { const s = await api('POST', '/counting/sessions', payload); _count.sessionId = s.id; _countPersistLocal(); countLoadSessions(); _countRenderSessionBar(); }
+    if (st) st.textContent = '已保存 ' + new Date().toLocaleTimeString();
+  } catch (e) { if (st) st.textContent = '云端保存失败（本地已存）'; }
+}
+async function countScan() { openScanner(async code => { await _countAddCode(code, 1); }); }
+async function countAddManual() {
+  const v = document.getElementById('count-jan').value.trim();
+  const q = +document.getElementById('count-qty').value || 1;
+  if (!v) { toast('请输入 / 扫描 JAN', 'err'); return; }
+  await _countAddCode(v, q);
+  document.getElementById('count-jan').value = ''; document.getElementById('count-qty').value = 1;
+  document.getElementById('count-jan').focus();
+}
+async function _countAddCode(code, qty) {
+  qty = +qty || 1;
+  let jan, name_zh = null, units = null, is_new = false;
+  try {
+    const { items } = await resolveScan(code);
+    if (items && items.length) {
+      const p = items[0]; jan = p.jan_code; name_zh = p.name_zh || null; units = p.units_per_case || null;
+      if (items.length > 1) toast('多个匹配，已取第一个，请核对', 'info');
+    }
+  } catch {}
+  if (!jan) { jan = String(code).replace(/\D/g, '') || String(code).trim(); is_new = true; }
+  const ex = _count.items.find(it => it.jan_code === jan && !it.whole_case);
+  if (ex) ex.quantity = (+ex.quantity || 0) + qty;
+  else _count.items.push({ jan_code: jan, quantity: qty, whole_case: false, case_size: units, case_count: null, name_zh, is_new });
+  _countAfterChange();
+  if (is_new) toast('新品(未登记)已加入，可就地登记', 'info');
+}
+function _countAfterChange() { _countRender(); _countScheduleSave(); }
+function _countRender() {
+  _countRenderSessionBar();
+  const box = document.getElementById('count-items');
+  if (box) {
+    if (!_count.items.length) box.innerHTML = '<p class="loading">还没点数。扫码 / 手输 / 导入 Excel 开始。</p>';
+    else box.innerHTML = '<div class="table-wrap"><table><thead><tr><th>商品(中文)</th><th>JAN</th><th>整箱</th><th>数量</th><th></th></tr></thead><tbody>'
+      + _count.items.map((it, i) => _countRow(it, i)).join('') + '</tbody></table></div>';
+  }
+  _countLiveUpdate();
+}
+function _countRow(it, i) {
+  const badge = it.is_new ? '<span class="badge badge-warn" style="margin-left:4px;font-size:10px">新品</span>' : '';
+  const nameCell = it.is_new
+    ? `<input type="text" value="${esc(it.name_zh || '')}" placeholder="中文名…" oninput="countEditName(${i},this.value)" style="width:120px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">`
+    : esc(it.name_zh || '—');
+  const inp = 'style="width:60px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"';
+  let qtyCell;
+  if (it.whole_case) {
+    qtyCell = `<input type="number" min="0" value="${it.case_size != null ? it.case_size : ''}" placeholder="箱入数" oninput="countRecalcRow(${i})" id="ccs-${i}" ${inp}>`
+      + ` × <input type="number" min="0" value="${it.case_count != null ? it.case_count : ''}" placeholder="箱数" oninput="countRecalcRow(${i})" id="ccc-${i}" ${inp}>`
+      + ` = <b id="cqv-${i}">${_countQty(it)}</b>`;
+  } else {
+    qtyCell = `<input type="number" min="0" value="${+it.quantity || 0}" oninput="countSetQty(${i},this.value)" ${inp}>`;
+  }
+  const reg = it.is_new ? `<button class="btn btn-ghost btn-sm" onclick="countRegisterNew(${i})">登记新品</button>` : '';
+  return `<tr>
+    <td>${nameCell}</td>
+    <td><code style="font-size:11px">${it.jan_code}</code>${badge}</td>
+    <td style="text-align:center"><input type="checkbox" ${it.whole_case ? 'checked' : ''} onchange="countToggleWC(${i},this.checked)"></td>
+    <td style="white-space:nowrap">${qtyCell}</td>
+    <td style="white-space:nowrap">${reg}<button class="btn btn-ghost btn-sm" onclick="countDel(${i})">删除</button></td>
+  </tr>`;
+}
+function _countLiveUpdate() {
+  const total = _count.items.reduce((s, it) => s + _countQty(it), 0);
+  const tEl = document.getElementById('count-total'); if (tEl) tEl.textContent = `合计：${_count.items.length} 个 SKU / ${total} 件`;
+  const j = document.getElementById('count-json'); if (j) j.value = JSON.stringify(_count.items.map(it => ({ jan: it.jan_code, qty: _countQty(it) })));
+}
+function _countRenderSessionBar() {
+  const l = document.getElementById('count-session-label'); if (l) l.textContent = _count.sessionId ? ('会话 #' + _count.sessionId) : '会话：新建中';
+}
+function countSetQty(i, v) { _count.items[i].quantity = +v || 0; _countLiveUpdate(); _countScheduleSave(); }
+function countRecalcRow(i) {
+  const cs = +document.getElementById('ccs-' + i).value || 0, cc = +document.getElementById('ccc-' + i).value || 0;
+  _count.items[i].case_size = cs; _count.items[i].case_count = cc; _count.items[i].quantity = cs * cc;
+  const v = document.getElementById('cqv-' + i); if (v) v.textContent = cs * cc;
+  _countLiveUpdate(); _countScheduleSave();
+}
+function countToggleWC(i, on) {
+  const it = _count.items[i]; it.whole_case = on;
+  if (on && it.case_count == null) it.case_count = it.quantity ? 1 : null;
+  _countAfterChange();
+}
+function countEditName(i, v) { _count.items[i].name_zh = v; _countScheduleSave(); }
+function countDel(i) { _count.items.splice(i, 1); _countAfterChange(); }
+async function countRegisterNew(i) {
+  const it = _count.items[i];
+  const nameZh = prompt('登记新品 — 中文名（也用作日文名兜底）：', it.name_zh || '');
+  if (nameZh === null) return;
+  const csRaw = prompt('箱入数（每箱个数，可留空）：', it.case_size != null ? it.case_size : '');
+  const body = { jan_code: it.jan_code, name_jp: (nameZh || it.jan_code) };
+  if (nameZh) body.name_zh = nameZh;
+  if (csRaw && +csRaw > 0) body.units_per_case = +csRaw;
+  try {
+    await api('POST', '/inventory/products', body);
+    it.is_new = false; if (nameZh) it.name_zh = nameZh; if (csRaw && +csRaw > 0) it.case_size = +csRaw;
+    toast('新品已登记', 'ok'); _countAfterChange();
+  } catch (e) { toast('登记失败：' + e.message, 'err'); }
+}
+async function countImportExcel() {
+  const f = document.getElementById('count-file').files[0];
+  if (!f) { toast('请选择文件', 'err'); return; }
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    const res = await api('POST', '/counting/import-excel', fd, true);
+    for (const im of res.items) {
+      const ex = _count.items.find(it => it.jan_code === im.jan_code && !it.whole_case);
+      if (ex) ex.quantity = (+ex.quantity || 0) + im.quantity;
+      else _count.items.push({ jan_code: im.jan_code, quantity: im.quantity, whole_case: false, case_size: im.units_per_case || null, case_count: null, name_zh: im.name_zh || null, is_new: im.is_new });
+    }
+    _countAfterChange();
+    toast(`导入 ${res.items.length} 项${res.new_count ? '，其中 ' + res.new_count + ' 个新品待登记' : ''}`, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+function countBuildWx() {
+  const date = document.getElementById('count-wx-date').value || _todayStr();
+  const dir = document.getElementById('count-wx-dir').value;
+  const party = document.getElementById('count-wx-party').value.trim();
+  const head = `${date} ${dir}${party ? ' ' + party : ''}`;
+  const lines = _count.items.map(it => `${it.name_zh || '?'} ${String(it.jan_code).slice(-6)}:${_countQty(it)}`);
+  document.getElementById('count-wx').value = [head].concat(lines).join('\n');
+}
+async function countSimulate() {
+  const items = _count.items.map(it => ({ jan_code: it.jan_code, quantity: _countQty(it) })).filter(x => x.quantity > 0);
+  if (!items.length) { toast('还没有点数', 'err'); return; }
+  const wid = +document.getElementById('count-sim-wh').value;
+  const excl = document.getElementById('count-sim-excl').checked;
+  try { _countRenderSim((await api('POST', '/counting/simulate', { items, warehouse_id: wid, exclude_reserved: excl })).rows); }
+  catch (e) { toast(e.message, 'err'); }
+}
+const _SIM_LABEL = { ok: '<span style="color:#16a34a">够</span>', insufficient: '<span style="color:var(--danger)">不足</span>', no_record: '<span style="color:var(--text-dim)">无记录</span>', unknown: '<span style="color:var(--text-dim)">目录外</span>' };
+function _countRenderSim(rows) {
+  document.getElementById('count-sim-result').innerHTML = '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品</th><th>需求</th><th>现库存</th><th>预留</th><th>可用</th><th>状态</th></tr></thead><tbody>'
+    + rows.map(r => `<tr>
+      <td><code style="font-size:11px">${r.jan_code}</code></td>
+      <td>${esc(r.name_zh || '—')}</td>
+      <td>${r.need}</td>
+      <td>${r.current_stock == null ? '—' : r.current_stock}</td>
+      <td>${r.reserved || 0}</td>
+      <td>${r.available == null ? '—' : r.available}</td>
+      <td>${_SIM_LABEL[r.status] || r.status}</td>
+    </tr>`).join('') + '</tbody></table></div>';
+}
+function countScanPallet() { openScanner(code => { document.getElementById('count-pallet-code').value = extractCode(code); countAddPalletCode(); }); }
+function countAddPalletCode() {
+  const el = document.getElementById('count-pallet-code'); const code = extractCode(el.value); el.value = '';
+  if (!code) return;
+  if (!_count.palletCodes.includes(code)) _count.palletCodes.push(code);
+  _countRenderPalletCodes();
+}
+function _countRenderPalletCodes() {
+  document.getElementById('count-pallet-codes').innerHTML = _count.palletCodes.map((c, i) =>
+    `<span class="cand-chip" style="margin:2px 4px 2px 0;display:inline-block">${esc(c)} <a href="javascript:countDelPalletCode(${i})" style="color:var(--danger);text-decoration:none">×</a></span>`).join('');
+}
+function countDelPalletCode(i) { _count.palletCodes.splice(i, 1); _countRenderPalletCodes(); }
+async function countPalletCheck() {
+  const items = _count.items.map(it => ({ jan_code: it.jan_code, quantity: _countQty(it) })).filter(x => x.quantity > 0);
+  if (!items.length) { toast('还没有点数', 'err'); return; }
+  if (!_count.palletCodes.length) { toast('请先扫 / 加入托盘码', 'err'); return; }
+  try {
+    const res = await api('POST', '/counting/pallet-check', { items, pallet_codes: _count.palletCodes });
+    const warn = res.unknown_pallet_codes.length ? `<p style="color:var(--danger);font-size:12px">未找到托盘：${res.unknown_pallet_codes.map(esc).join(', ')}</p>` : '';
+    document.getElementById('count-pallet-result').innerHTML = warn + '<div class="table-wrap"><table><thead><tr><th>JAN</th><th>商品</th><th>点数</th><th>托盘应有</th><th>差异</th><th>结果</th></tr></thead><tbody>'
+      + res.rows.map(r => `<tr>
+        <td><code style="font-size:11px">${r.jan_code}</code></td>
+        <td>${esc(r.name_zh || '—')}</td>
+        <td>${r.counted}</td>
+        <td>${r.expected}</td>
+        <td>${r.diff === 0 ? '0' : '<b style="color:var(--danger)">' + (r.diff > 0 ? '+' : '') + r.diff + '</b>'}</td>
+        <td>${r.match ? '<span style="color:#16a34a">一致</span>' : '<button class="btn btn-ghost btn-sm" onclick="countAdopt(\'' + r.jan_code + '\',' + r.counted + ')">采纳实际数</button>'}</td>
+      </tr>`).join('') + '</tbody></table></div>';
+  } catch (e) { toast(e.message, 'err'); }
+}
+function countAdopt(jan, counted) { toast(`已确认 ${jan} 采纳实际点数 ${counted}（托盘数据未改动）`, 'ok'); }
+async function countCopy(id) {
+  const el = document.getElementById(id); const text = el.value;
+  try { await navigator.clipboard.writeText(text); toast('已复制', 'ok'); }
+  catch { el.focus(); el.select(); try { document.execCommand('copy'); toast('已复制', 'ok'); } catch { toast('复制失败，请手动选择', 'err'); } }
 }
 function goToAdd(code) {
   const btn = document.querySelector('.nav-item[data-section="container-add"]');

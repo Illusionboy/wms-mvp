@@ -267,6 +267,40 @@ async def set_pallet_item_quantity(
     return await _to_read(session, pallet)
 
 
+async def subtract_items_from_pallet(
+    session: AsyncSession,
+    pallet_id: int,
+    items: list[tuple[str, int]],
+) -> PalletRead:
+    """减货：从托盘扣减货物（增量），扣到 ≤0 则整行移除。别名 JAN 归并到主 JAN。
+
+    语义：减掉的货**回默认 A-00-00 库位**（=离开托盘、回归未分组一般库存）；
+    与加货对称，**只改托盘自身，绝不写 StockTransaction / 改 InventoryRecord**
+    （加货没从库存扣，减货也不能往库存加，否则双计）。
+    """
+    pallet = await _load_pallet(session, pallet_id, for_update=True)
+    if pallet is None:
+        raise ValueError("托盘不存在")
+    if pallet.status == "loaded":
+        raise ValueError("托盘已装柜，不能再减货")
+
+    existing = {it.jan_code: it for it in pallet.items}
+    for raw_jan, qty in items:
+        if qty <= 0:
+            continue
+        jan = await resolve_canonical_jan(session, raw_jan.strip())
+        row = existing.get(jan)
+        if row is None:
+            continue  # 托盘上没有该 JAN，跳过（减货只针对已在托盘上的货）
+        row.quantity -= qty
+        if row.quantity <= 0:
+            pallet.items.remove(row)  # delete-orphan 级联删除该行
+            del existing[jan]
+
+    await session.commit()
+    return await _to_read(session, pallet)
+
+
 async def place_pallet_at_location(
     session: AsyncSession,
     *,
