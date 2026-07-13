@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -288,6 +289,15 @@ def _clean_head(c: str) -> str:
     return str(c).replace("﻿", "").strip().strip('"').strip()
 
 
+def _norm_col(c: str) -> str:
+    """列名归一：清洗 + NFKC 折叠全角↔半角。
+
+    Yamato B2「発行済データ」导出把列名用全角数字（`検索キー１` = U+FF11），
+    而我们生成/配置用半角（`検索キー1` = U+0031），直接 == 匹配会落空 → 回填空表。
+    NFKC 把全角数字/字母折成半角，使两者一致（也归一其它全角符号）。"""
+    return unicodedata.normalize("NFKC", _clean_head(c))
+
+
 def _decode_result(b: bytes, *expect_fields: str) -> str:
     """自动识别快递结果文件编码：佐川多为 UTF-8(BOM)，Yamato B2 多为 Shift-JIS(cp932)。
     用"哪种编码解出的表头包含期望列名"来判定，避免 cp932 被当 UTF-8 解成乱码。"""
@@ -299,8 +309,8 @@ def _decode_result(b: bytes, *expect_fields: str) -> str:
             continue
         if best is None:
             best = text
-        head = text.splitlines()[0] if text else ""
-        if any(f and f in head for f in expect_fields):
+        head = unicodedata.normalize("NFKC", text.splitlines()[0]) if text else ""
+        if any(f and unicodedata.normalize("NFKC", f) in head for f in expect_fields):
             return text
     return best if best is not None else b.decode("utf-8-sig", errors="replace")
 
@@ -337,9 +347,11 @@ def build_shipment_report(
     matched = with_tracking = 0
     unmatched: list[str] = []
     if reader:
-        hdr = [_clean_head(c) for c in reader[0]]
-        ri = hdr.index(ref_field) if ref_field in hdr else -1
-        ti = hdr.index(tracking_field) if tracking_field in hdr else -1
+        # 用 NFKC 归一后的列名匹配，兼容 Yamato 全角 `検索キー１` vs 半角 `検索キー1`
+        hdr = [_norm_col(c) for c in reader[0]]
+        ref_key, track_key = _norm_col(ref_field), _norm_col(tracking_field)
+        ri = hdr.index(ref_key) if ref_key in hdr else -1
+        ti = hdr.index(track_key) if track_key in hdr else -1
         for r in reader[1:]:
             mgmt = r[ri].strip() if 0 <= ri < len(r) else ""
             track = r[ti].strip() if 0 <= ti < len(r) else ""
