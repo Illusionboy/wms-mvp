@@ -11,6 +11,7 @@ from app.models.pallet import Pallet, PalletItem
 from app.models.product import Product
 from app.models.product_jan_alias import ProductJanAlias
 from app.models.qinsi_scrape_cache import QinsiScrapeCache
+from app.models.rakuten_credential import RakutenCredential
 from app.models.rakuten_order_draft import RakutenOrderDraft
 from app.models.rakuten_shipment_draft import RakutenShipmentDraft
 from app.models.stock_transaction import StockTransaction, StockTransactionType
@@ -33,6 +34,7 @@ __all__ = [
     "Product",
     "ProductJanAlias",
     "QinsiScrapeCache",
+    "RakutenCredential",
     "RakutenOrderDraft",
     "RakutenShipmentDraft",
     "StockTransaction",

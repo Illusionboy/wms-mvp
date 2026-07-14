@@ -1477,6 +1477,27 @@ tr:hover td { background: var(--accent-bg); }
         </div>
         <div id="warehouse-list"></div>
       </div>
+      <hr class="divider">
+      <div class="card">
+        <div class="card-title">乐天账号（P2 自动下载用）</div>
+        <p style="font-size:13px;color:var(--muted);margin:0 0 12px">
+          每店两组账号：<b>RMS 登录</b> + <b>CSV 下载专用</b>。密码加密存库、不回显（留空=保持不变）。改密码只需在此更新，无需重部署。店铺标识与快递单生成的一致（1/2）。
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <div class="form-row" style="margin:0"><label>店铺标识 (1/2)</label><input type="text" id="rk-store" placeholder="1"></div>
+          <div class="form-row" style="margin:0"><label>展示名</label><input type="text" id="rk-label" placeholder="一号店"></div>
+          <div class="form-row" style="margin:0"><label>RMS 登录账号</label><input type="text" id="rk-rms-user" placeholder="login_id" autocomplete="off"></div>
+          <div class="form-row" style="margin:0"><label>RMS 密码</label><input type="password" id="rk-rms-pass" placeholder="留空=不改" autocomplete="new-password"></div>
+          <div class="form-row" style="margin:0"><label>CSV 下载账号</label><input type="text" id="rk-csv-user" placeholder="johnzhao" autocomplete="off"></div>
+          <div class="form-row" style="margin:0"><label>CSV 下载密码</label><input type="password" id="rk-csv-pass" placeholder="留空=不改" autocomplete="new-password"></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px"><input type="checkbox" id="rk-enabled" checked> 启用（参与定时下载）</label>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" onclick="saveRakutenCred()">保存店铺凭据</button>
+          <button class="btn btn-ghost" onclick="clearRakutenForm()">清空表单</button>
+        </div>
+        <div id="rk-cred-list" style="margin-top:12px"></div>
+      </div>
       <hr class="divider" style="display:none">
       <div class="card" style="display:none">
         <div class="card-title">客户管理</div>
@@ -3548,6 +3569,72 @@ async function loadSettingsLists() {
     _customers.map(c => `<tr><td>${c.name}</td></tr>`).join('') +
     '</tbody></table></div>';
   await loadTelegramUsers();
+  loadRakutenCreds();
+}
+
+// ── 乐天账号凭据（P2a）──────────────────────────────────────────────────────
+async function loadRakutenCreds() {
+  const el = document.getElementById('rk-cred-list');
+  if (!el) return;
+  try {
+    const rows = await api('GET', '/rakuten/credentials');
+    if (!rows.length) { el.innerHTML = '<p class="loading">还没有配置乐天账号</p>'; return; }
+    const ok = '<span class="badge badge-neutral" style="background:#dcfce7;color:#166534">✓</span>';
+    const no = '<span class="badge badge-warn">未设</span>';
+    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>店铺</th><th>RMS账号</th><th>RMS密码</th><th>CSV账号</th><th>CSV密码</th><th>启用</th><th></th></tr></thead><tbody>'
+      + rows.map(r => `<tr>
+          <td><b>${esc(r.store)}</b>${r.store_label ? ' <small style="color:var(--muted)">'+esc(r.store_label)+'</small>' : ''}</td>
+          <td>${esc(r.rms_login_id || '—')}</td>
+          <td>${r.has_rms_password ? ok : no}</td>
+          <td>${esc(r.csv_user || '—')}</td>
+          <td>${r.has_csv_password ? ok : no}</td>
+          <td>${r.enabled ? '<span class="badge badge-neutral">开</span>' : '<span class="badge badge-warn">停</span>'}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-ghost btn-sm" onclick="editRakutenCred('${esc(r.store)}','${esc(r.store_label||'')}','${esc(r.rms_login_id||'')}','${esc(r.csv_user||'')}',${r.enabled})">编辑</button>
+            <button class="btn btn-ghost btn-sm" style="margin-left:4px" onclick="delRakutenCred('${esc(r.store)}')">删除</button>
+          </td>
+        </tr>`).join('') + '</tbody></table></div>';
+  } catch (e) { el.innerHTML = resultCard('err', e.message); }
+}
+function clearRakutenForm() {
+  ['rk-store','rk-label','rk-rms-user','rk-rms-pass','rk-csv-user','rk-csv-pass'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('rk-enabled').checked = true;
+}
+function editRakutenCred(store, label, rmsUser, csvUser, enabled) {
+  document.getElementById('rk-store').value = store;
+  document.getElementById('rk-label').value = label;
+  document.getElementById('rk-rms-user').value = rmsUser;
+  document.getElementById('rk-csv-user').value = csvUser;
+  document.getElementById('rk-rms-pass').value = '';   // 留空=不改
+  document.getElementById('rk-csv-pass').value = '';
+  document.getElementById('rk-enabled').checked = enabled;
+  document.getElementById('rk-store').scrollIntoView({ block: 'center' });
+  toast('已载入，改完点保存（密码留空则不变）', 'info');
+}
+async function saveRakutenCred() {
+  const store = document.getElementById('rk-store').value.trim();
+  if (!store) { toast('请填店铺标识（1/2）', 'err'); return; }
+  const body = {
+    store,
+    store_label: document.getElementById('rk-label').value.trim() || null,
+    rms_login_id: document.getElementById('rk-rms-user').value.trim() || null,
+    rms_password: document.getElementById('rk-rms-pass').value || null,
+    csv_user: document.getElementById('rk-csv-user').value.trim() || null,
+    csv_password: document.getElementById('rk-csv-pass').value || null,
+    enabled: document.getElementById('rk-enabled').checked,
+  };
+  try {
+    await api('PUT', '/rakuten/credentials', body);
+    toast('已保存', 'ok');
+    document.getElementById('rk-rms-pass').value = '';
+    document.getElementById('rk-csv-pass').value = '';
+    loadRakutenCreds();
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function delRakutenCred(store) {
+  if (!confirm(`删除店铺「${store}」的乐天凭据？`)) return;
+  try { await api('DELETE', '/rakuten/credentials/' + encodeURIComponent(store)); toast('已删除', 'ok'); loadRakutenCreds(); }
+  catch (e) { toast(e.message, 'err'); }
 }
 
 async function loadTelegramUsers() {

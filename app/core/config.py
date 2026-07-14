@@ -25,6 +25,9 @@ class Settings(BaseSettings):
         validation_alias="JWT_SECRET_KEY",
     )
     jwt_expire_days: int = 30
+    # 乐天凭据加密密钥（对称加密 rakuten_credentials 里的密码）。任意字符串即可，
+    # 后端会用 SHA-256 派生出合法的 Fernet 密钥。未设置时回退到 jwt_secret_key。
+    rakuten_cred_key: str | None = Field(default=None, validation_alias="RAKUTEN_CRED_KEY")
     admin_username: str | None = Field(default=None, validation_alias="ADMIN_USERNAME")
     admin_password: str | None = Field(default=None, validation_alias="ADMIN_PASSWORD")
     # 秦丝生意通爬虫配置

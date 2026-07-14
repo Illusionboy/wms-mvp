@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import admin, analytics, auth, count_session, customers, health, inventory, inventory_count, qinsi_scrape, rakuten_label, rakuten_order, status, telegram, telegram_users, trade_allocations, trade_containers, warehouses
+from app.api.v1.endpoints import admin, analytics, auth, count_session, customers, health, inventory, inventory_count, qinsi_scrape, rakuten_credentials, rakuten_label, rakuten_order, status, telegram, telegram_users, trade_allocations, trade_containers, warehouses
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
@@ -15,6 +15,7 @@ api_router.include_router(qinsi_scrape.router, prefix="/qinsi", tags=["qinsi-scr
 api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(rakuten_order.router, prefix="/rakuten", tags=["rakuten-order"])
 api_router.include_router(rakuten_label.router, prefix="/rakuten", tags=["rakuten-label"])
+api_router.include_router(rakuten_credentials.router, prefix="/rakuten", tags=["rakuten-credentials"])
 api_router.include_router(telegram.router, prefix="/telegram", tags=["telegram"])
 api_router.include_router(telegram_users.router, prefix="/telegram-users", tags=["telegram-users"])
 api_router.include_router(trade_allocations.router, prefix="/trade", tags=["trade-allocations"])
