@@ -83,6 +83,7 @@ async def shipment_report(
             "X-Row-Count": str(res.row_count),
             "X-Matched": str(res.matched_mgmt),
             "X-With-Tracking": str(res.with_tracking),
+            "X-Ignored": str(res.ignored_no_ref),
             "X-Unmatched": json.dumps(res.unmatched_mgmt, ensure_ascii=False),
         },
     )

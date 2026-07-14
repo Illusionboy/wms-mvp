@@ -566,6 +566,9 @@ async def get_system_status(session: AsyncSession) -> list[WarehouseStatusRead]:
             func.max(
                 case((StockTransaction.source == "physical_count", StockTransaction.created_at), else_=None)
             ).label("last_physical_count_at"),
+            func.max(
+                case((StockTransaction.reference_id.like("transfer:%"), StockTransaction.created_at), else_=None)
+            ).label("last_transfer_at"),
             (
                 select(func.count())
                 .where(
@@ -603,6 +606,7 @@ async def get_system_status(session: AsyncSession) -> list[WarehouseStatusRead]:
                 last_stock_out_at=row.last_stock_out_at,
                 last_csv_apply_at=row.last_csv_apply_at,
                 last_physical_count_at=row.last_physical_count_at,
+                last_transfer_at=row.last_transfer_at,
                 data_gap_days=data_gap_days,
                 negative_stock_count=row.negative_stock_count,
             )

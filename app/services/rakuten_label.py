@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -289,6 +290,11 @@ def _clean_head(c: str) -> str:
     return str(c).replace("﻿", "").strip().strip('"').strip()
 
 
+# 本工具生成的管理番号格式：{store}{S|Y}{seq:04d}，如 1S0001 / 1Y0011。
+# 用它区分"我方生成的运单" vs "手工/他途出货的运单（お客様管理番号 为空或非此格式）"——后者回填时忽略。
+_MGMT_RE = re.compile(r"^\d+[SY]\d{4,}$")
+
+
 def _norm_col(c: str) -> str:
     """列名归一：清洗 + NFKC 折叠全角↔半角。
 
@@ -322,6 +328,7 @@ class ShipmentReportResult:
     matched_mgmt: int = 0     # 结果文件里对上映射的运单数
     with_tracking: int = 0    # 其中带单号的行数
     unmatched_mgmt: list[str] = field(default_factory=list)  # 结果里有、映射里没有的 mgmt_no
+    ignored_no_ref: int = 0   # 无客户番号/非本工具管理番号 → 忽略的运单数（手工或他途出货）
 
 
 def build_shipment_report(
@@ -344,7 +351,7 @@ def build_shipment_report(
     text = _decode_result(result_bytes, ref_field, tracking_field)
     reader = list(csv.reader(io.StringIO(text)))
     out_rows: list[list[str]] = []
-    matched = with_tracking = 0
+    matched = with_tracking = ignored = 0
     unmatched: list[str] = []
     if reader:
         # 用 NFKC 归一后的列名匹配，兼容 Yamato 全角 `検索キー１` vs 半角 `検索キー1`
@@ -355,7 +362,11 @@ def build_shipment_report(
         for r in reader[1:]:
             mgmt = r[ri].strip() if 0 <= ri < len(r) else ""
             track = r[ti].strip() if 0 <= ti < len(r) else ""
-            if not mgmt:
+            if not _MGMT_RE.match(mgmt):
+                # 无客户番号（空）或非本工具管理番号（手工/他途出货）→ 回填时忽略该运单。
+                # 用"有单号"判定这是一张真实运单（而非表尾空行/表头残留），据此计数。
+                if track:
+                    ignored += 1
                 continue
             entries = mapping.get(mgmt)
             if not entries:
@@ -374,5 +385,5 @@ def build_shipment_report(
     return ShipmentReportResult(
         csv_bytes=sio.getvalue().encode("cp932", errors="replace"),
         row_count=len(out_rows), matched_mgmt=matched, with_tracking=with_tracking,
-        unmatched_mgmt=sorted(set(unmatched)),
+        unmatched_mgmt=sorted(set(unmatched)), ignored_no_ref=ignored,
     )

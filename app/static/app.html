@@ -588,6 +588,7 @@ tr:hover td { background: var(--accent-bg); }
     <div class="section" id="section-stock-transfer">
       <div class="section-title">调库</div>
       <div class="section-sub">将商品从一个仓库移至另一个仓库（自动写入出库+入库两笔记录）</div>
+      <div id="st-last-transfer" style="font-size:13px;color:var(--accent);margin:-4px 0 12px"></div>
       <div class="card">
         <div class="form-row">
           <label>搜索商品 (JAN / 商品名)</label>
@@ -1800,6 +1801,7 @@ function nav(btn) {
   if (btn.dataset.section === 'alloc') loadConflictLogs();
   if (btn.dataset.section === 'system-log') loadSystemLogs();
   if (btn.dataset.section === 'container-pallets') loadPalletList();
+  if (btn.dataset.section === 'stock-transfer') loadLastTransfer();
   if (btn.dataset.section === 'count') countInit();
   if (btn.dataset.section === 'container-labels') lblOnTypeChange();
   if (['supplier-history','customer-history'].includes(btn.dataset.section)) loadCounterpartyLists();
@@ -2059,7 +2061,19 @@ async function submitTransfer() {
       `${res.message}  调出后库存: ${res.from_quantity_after}，调入后库存: ${res.to_quantity_after}`);
     toast('调库成功', 'ok');
     resetForm('st');
+    loadLastTransfer();
   } catch (e) { document.getElementById('st-result').innerHTML = resultCard('err', e.message); }
+}
+
+// 最后调库时间标签：取各仓库 last_transfer_at 的最新值（调库同时写出/入两仓，取全局最新即为最后一次调库）
+async function loadLastTransfer() {
+  const el = document.getElementById('st-last-transfer');
+  if (!el) return;
+  try {
+    const rows = await api('GET', '/status');
+    const times = rows.map(r => r.last_transfer_at).filter(Boolean).sort();
+    el.textContent = times.length ? ('最后调库时间：' + fmtDate(times[times.length - 1])) : '最后调库时间：暂无调库记录';
+  } catch { el.textContent = ''; }
 }
 
 // ── Search ─────────────────────────────────────────────────────────────────
@@ -4991,6 +5005,7 @@ async function genShipmentReport() {
     const rowN = res.headers.get('X-Row-Count') || '0';
     const matched = res.headers.get('X-Matched') || '0';
     const withTrack = res.headers.get('X-With-Tracking') || '0';
+    const ignored = res.headers.get('X-Ignored') || '0';
     let unmatched = []; try { unmatched = JSON.parse(res.headers.get('X-Unmatched') || '[]'); } catch {}
     const blob = await res.blob();
     const cd = res.headers.get('Content-Disposition') || '';
@@ -5000,7 +5015,8 @@ async function genShipmentReport() {
     a.download = mm ? decodeURIComponent(mm[1]) : '発送完了報告.csv';
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
     const warn = unmatched.length ? ` <span style="color:var(--warn)">⚠ ${unmatched.length} 个运单在 mapping 里没对上（结果文件与 mapping 是否同一批？）</span>` : '';
-    out.innerHTML = resultCard('ok', `已生成并下载 ✓ 对上 ${matched} 张运单、${rowN} 条订单行（带单号 ${withTrack}）${warn}`);
+    const ign = +ignored ? ` <span style="color:var(--muted)">已忽略 ${ignored} 张无客户番号的运单（手工/他途出货）</span>` : '';
+    out.innerHTML = resultCard('ok', `已生成并下载 ✓ 对上 ${matched} 张运单、${rowN} 条订单行（带单号 ${withTrack}）${ign}${warn}`);
     toast('已生成', 'ok');
   } catch (e) { out.innerHTML = resultCard('err', e.message); }
 }
