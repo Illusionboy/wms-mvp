@@ -11,6 +11,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         tzdata \
+        # 日文字体：让 headless chromium 截图里的日文正常显示（P2b 调试用）
+        fonts-noto-cjk \
         # Playwright/Chromium runtime dependencies
         libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxcomposite1 \
         libxdamage1 libxfixes3 libxrandr2 libgbm1 libxkbcommon0 \

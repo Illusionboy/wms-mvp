@@ -19,7 +19,10 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 
-_ENTRY_URL = "https://csvdl-rp.rms.rakuten.co.jp/rms/mall/csvdl/CD02_01_001?dataType=opp_order"
+# 入口必须是 RMS 登录门户（未登录会渲染 RMS 登录表单）；直接打 csvdl 深链会被判 unauthorized。
+_LOGIN_URL = "https://mainmenu.rms.rakuten.co.jp/"
+# 登录成功后再导航到订单 CSV 下载表单页。
+_DATA_URL = "https://csvdl-rp.rms.rakuten.co.jp/rms/mall/csvdl/CD02_01_001?dataType=opp_order"
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
 _DEBUG_DIR = Path("app/data/rms_debug")
@@ -89,10 +92,10 @@ async def download_shipping_orders(
         page.set_default_timeout(30000)
 
         try:
-            # 1. 入口 → 跳 RMS 登录
-            await page.goto(_ENTRY_URL, wait_until="domcontentloaded")
-            await page.wait_for_timeout(1500)
-            await shot(page, "entry_or_rms_login")
+            # 1. 入口 = RMS 登录门户（未登录渲染 RMS 登录表单）
+            await page.goto(_LOGIN_URL, wait_until="domcontentloaded")
+            await page.wait_for_timeout(2000)
+            await shot(page, "rms_login_portal")
 
             # 2. RMS 登录表单
             if await page.locator("input[name='login_id']").count():
@@ -132,10 +135,9 @@ async def download_shipping_orders(
             await page.wait_for_timeout(2000)
             await shot(page, "after_login")
 
-            # 5. 到下载表单页（可能需要显式回到入口）
-            if "csvdl" not in page.url:
-                await page.goto(_ENTRY_URL, wait_until="domcontentloaded")
-                await page.wait_for_timeout(2000)
+            # 5. 登录成功后导航到订单 CSV 下载表单页
+            await page.goto(_DATA_URL, wait_until="domcontentloaded")
+            await page.wait_for_timeout(2500)
             await shot(page, "download_form")
 
             if not await page.locator("select[name='fromYmd']").count():
