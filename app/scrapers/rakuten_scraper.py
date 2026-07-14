@@ -19,8 +19,9 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 
-# 入口必须是 RMS 登录门户（未登录会渲染 RMS 登录表单）；直接打 csvdl 深链会被判 unauthorized。
-_LOGIN_URL = "https://mainmenu.rms.rakuten.co.jp/"
+# 入口必须是 RMS 登录门户（未登录会渲染 RMS 登录表单）；直接打 csvdl 深链会被判 unauthorized，
+# 打裸 mainmenu 会跳"再度ログインをお願いいたします"并指向带 /rms 的正确 URL。
+_LOGIN_URL = "https://mainmenu.rms.rakuten.co.jp/rms"
 # 登录成功后再导航到订单 CSV 下载表单页。
 _DATA_URL = "https://csvdl-rp.rms.rakuten.co.jp/rms/mall/csvdl/CD02_01_001?dataType=opp_order"
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
