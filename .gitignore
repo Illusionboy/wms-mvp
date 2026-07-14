@@ -11,6 +11,7 @@ GIT_DEPLOY.md
 # 秦丝 session（含敏感 cookies）和调试截图
 app/data/qinsi_session.json
 app/data/scraper_debug/
+app/data/rms_debug/
 app/data/qinsi_selectors.json
 app/data/qinsi_schema_cache.json
 # 本地一键脚本（含本机路径，不适合共享）

@@ -1529,6 +1529,17 @@ tr:hover td { background: var(--accent-bg); }
     <div class="section" id="section-rakuten-label">
       <div class="section-title">乐天快递单生成</div>
       <div class="section-sub">上传 RMS 订单明细 CSV（全カラムダウンロード用）→ 生成佐川/Yamato/郵便 三家上传 CSV（打包下载，含 mapping.json 供单号回填）</div>
+      <div class="card" style="border:1px dashed var(--accent)">
+        <div class="card-title">🤖 自动下载订单（P2b · 监督首跑）</div>
+        <div class="section-sub" style="margin-bottom:10px">用「设置→乐天账号」里的凭据自动登录 RMS 下载近 N 天「発送待ち」CSV。<b>第一次请盯着看下面的每步截图</b>，确认能过登录（若被风控拦，我们改走本机刷 session）。成功后可直接下 CSV 或喂给下方快递单生成。</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-row" style="margin:0"><label>店铺</label><select id="ad-store"><option value="1">一号店(1)</option><option value="2">二号店(2)</option></select></div>
+          <div class="form-row" style="margin:0;width:110px"><label>近 N 天</label><input type="number" id="ad-days" min="1" max="60" value="10"></div>
+          <button class="btn btn-primary" style="margin-bottom:0" onclick="runAutoDownload()">立即下载（调试）</button>
+        </div>
+        <div id="ad-result" style="margin-top:12px"></div>
+      </div>
+      <hr class="divider">
       <div class="card">
         <div class="form-row">
           <label>店铺</label>
@@ -5115,6 +5126,62 @@ async function genShipmentReport() {
     out.innerHTML = resultCard('ok', `已生成并下载 ✓ 对上 ${matched} 张运单、${rowN} 条订单行（带单号 ${withTrack}）${ign}${warn}`);
     toast('已生成', 'ok');
   } catch (e) { out.innerHTML = resultCard('err', e.message); }
+}
+
+// ── P2b 自动下载（监督首跑）──────────────────────────────────────────────────
+async function runAutoDownload() {
+  const store = document.getElementById('ad-store').value;
+  const days = +document.getElementById('ad-days').value || 10;
+  const out = document.getElementById('ad-result');
+  out.innerHTML = '<p class="loading">正在启动浏览器登录+下载…（约 20–60 秒，首跑请耐心）</p>';
+  try {
+    const r = await api('POST', `/rakuten/auto-download?store=${encodeURIComponent(store)}&days=${days}`);
+    let html = '';
+    if (r.success) {
+      html += `<div style="color:#16a34a;font-weight:600;margin-bottom:8px">✓ 下载成功：${esc(r.csv_name||'')}（${r.csv_row_count==null?'?':r.csv_row_count} 条発送待ち）</div>`;
+      html += `<button class="btn btn-primary btn-sm" onclick="_adDownloadCsv()">下载 CSV</button> <button class="btn btn-ghost btn-sm" onclick="_adToLabels()">→ 喂给快递单生成</button>`;
+      window._adCsvB64 = r.csv_b64; window._adCsvName = r.csv_name || 'orders.csv';
+    } else {
+      html += `<div style="color:var(--danger);font-weight:600;margin-bottom:8px">✗ 未完成：${esc(r.error||'见下方步骤截图')}</div>`;
+    }
+    html += '<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">';
+    (r.steps||[]).forEach((s,i) => {
+      const shot = (r.shots||[])[i];
+      const dot = s.ok ? '<span style="color:#16a34a">●</span>' : '<span style="color:var(--danger)">●</span>';
+      html += `<div style="border:1px solid var(--border);border-radius:6px;padding:8px">
+        <div style="font-size:13px">${dot} <b>${esc(s.step)}</b>${s.note?(' <span style="color:var(--muted)">— '+esc(s.note)+'</span>'):''}</div>
+        <div style="font-size:11px;color:var(--muted);word-break:break-all">${esc(s.url||'')}</div>
+        ${shot?`<img data-shot="${esc(store)}/${esc(shot)}" style="max-width:100%;margin-top:6px;border:1px solid var(--border);border-radius:4px;cursor:pointer" onclick="window.open(this.src)">`:''}
+      </div>`;
+    });
+    html += '</div>';
+    out.innerHTML = html;
+    out.querySelectorAll('img[data-shot]').forEach(img => _authImg(img, '/rakuten/auto-download/shot/' + img.dataset.shot));
+  } catch (e) { out.innerHTML = resultCard('err', e.message); }
+}
+async function _authImg(img, path) {
+  try { const r = await fetch('/api/v1' + path, { headers: { Authorization: `Bearer ${_token}` } }); if (r.ok) img.src = URL.createObjectURL(await r.blob()); } catch {}
+}
+function _b64ToBlob(b64, type) {
+  const bin = atob(b64), arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type });
+}
+function _adDownloadCsv() {
+  if (!window._adCsvB64) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(_b64ToBlob(window._adCsvB64, 'text/csv'));
+  a.download = window._adCsvName || 'orders.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+}
+function _adToLabels() {
+  if (!window._adCsvB64) return;
+  const file = new File([_b64ToBlob(window._adCsvB64, 'text/csv')], window._adCsvName || 'orders.csv', { type: 'text/csv' });
+  const dt = new DataTransfer(); dt.items.add(file);
+  document.getElementById('rl-file').files = dt.files;
+  document.getElementById('rl-store').value = document.getElementById('ad-store').value;
+  toast('已填入下方「RMS 订单 CSV」，点生成并下载即可', 'ok');
+  document.getElementById('rl-file').scrollIntoView({ block: 'center' });
 }
 </script>
 </body>
