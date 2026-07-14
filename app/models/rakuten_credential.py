@@ -7,8 +7,9 @@ from app.db.base import Base, TimestampMixin
 class RakutenCredential(TimestampMixin, Base):
     """乐天店铺账号凭据（P2 自动下载用）。每店一条。
 
-    每店需要两组凭据：
+    每店需要三组凭据：
       - RMS 登录：`rms_login_id` + `rms_password_enc`（登录 rms.rakuten.co.jp 后台）
+      - 楽天会員：`member_email` + `member_password_enc`（RMS 登录后 session upgrade 弹的邮箱登录）
       - CSV 下载专用：`csv_user` + `csv_password_enc`（データダウンロード 页下载区单独输入）
 
     密码字段以对称加密密文存储（见 app/services/crypto.py），**绝不明文入库、绝不返回前端**。
@@ -22,6 +23,8 @@ class RakutenCredential(TimestampMixin, Base):
     store_label: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 展示名，如"一号店"
     rms_login_id: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     rms_password_enc: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    member_email: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    member_password_enc: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     csv_user: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     csv_password_enc: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

@@ -16,8 +16,10 @@ def _to_read(c: RakutenCredential) -> RakutenCredentialRead:
         store=c.store,
         store_label=c.store_label,
         rms_login_id=c.rms_login_id,
+        member_email=c.member_email,
         csv_user=c.csv_user,
         has_rms_password=bool(c.rms_password_enc),
+        has_member_password=bool(c.member_password_enc),
         has_csv_password=bool(c.csv_password_enc),
         enabled=c.enabled,
         created_at=c.created_at,
@@ -47,10 +49,14 @@ async def upsert_credential(
         c.store_label = payload.store_label
     if payload.rms_login_id is not None:
         c.rms_login_id = payload.rms_login_id
+    if payload.member_email is not None:
+        c.member_email = payload.member_email
     if payload.csv_user is not None:
         c.csv_user = payload.csv_user
     if payload.rms_password:  # 非空才覆盖，留空保持原密文
         c.rms_password_enc = encrypt(payload.rms_password)
+    if payload.member_password:
+        c.member_password_enc = encrypt(payload.member_password)
     if payload.csv_password:
         c.csv_password_enc = encrypt(payload.csv_password)
     c.enabled = payload.enabled
@@ -79,6 +85,8 @@ async def get_credential_plain(session: AsyncSession, store: str) -> dict | None
         "store_label": c.store_label,
         "rms_login_id": c.rms_login_id,
         "rms_password": decrypt(c.rms_password_enc),
+        "member_email": c.member_email,
+        "member_password": decrypt(c.member_password_enc),
         "csv_user": c.csv_user,
         "csv_password": decrypt(c.csv_password_enc),
         "enabled": c.enabled,

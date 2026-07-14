@@ -1488,6 +1488,8 @@ tr:hover td { background: var(--accent-bg); }
           <div class="form-row" style="margin:0"><label>展示名</label><input type="text" id="rk-label" placeholder="一号店"></div>
           <div class="form-row" style="margin:0"><label>RMS 登录账号</label><input type="text" id="rk-rms-user" placeholder="login_id" autocomplete="off"></div>
           <div class="form-row" style="margin:0"><label>RMS 密码</label><input type="password" id="rk-rms-pass" placeholder="留空=不改" autocomplete="new-password"></div>
+          <div class="form-row" style="margin:0"><label>楽天会員 邮箱</label><input type="text" id="rk-member-email" placeholder="RMS登录后弹的邮箱登录" autocomplete="off"></div>
+          <div class="form-row" style="margin:0"><label>楽天会員 密码</label><input type="password" id="rk-member-pass" placeholder="留空=不改" autocomplete="new-password"></div>
           <div class="form-row" style="margin:0"><label>CSV 下载账号</label><input type="text" id="rk-csv-user" placeholder="johnzhao" autocomplete="off"></div>
           <div class="form-row" style="margin:0"><label>CSV 下载密码</label><input type="password" id="rk-csv-pass" placeholder="留空=不改" autocomplete="new-password"></div>
         </div>
@@ -3581,31 +3583,35 @@ async function loadRakutenCreds() {
     if (!rows.length) { el.innerHTML = '<p class="loading">还没有配置乐天账号</p>'; return; }
     const ok = '<span class="badge badge-neutral" style="background:#dcfce7;color:#166534">✓</span>';
     const no = '<span class="badge badge-warn">未设</span>';
-    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>店铺</th><th>RMS账号</th><th>RMS密码</th><th>CSV账号</th><th>CSV密码</th><th>启用</th><th></th></tr></thead><tbody>'
+    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>店铺</th><th>RMS账号</th><th>RMS密码</th><th>会員邮箱</th><th>会員密码</th><th>CSV账号</th><th>CSV密码</th><th>启用</th><th></th></tr></thead><tbody>'
       + rows.map(r => `<tr>
           <td><b>${esc(r.store)}</b>${r.store_label ? ' <small style="color:var(--muted)">'+esc(r.store_label)+'</small>' : ''}</td>
           <td>${esc(r.rms_login_id || '—')}</td>
           <td>${r.has_rms_password ? ok : no}</td>
+          <td>${esc(r.member_email || '—')}</td>
+          <td>${r.has_member_password ? ok : no}</td>
           <td>${esc(r.csv_user || '—')}</td>
           <td>${r.has_csv_password ? ok : no}</td>
           <td>${r.enabled ? '<span class="badge badge-neutral">开</span>' : '<span class="badge badge-warn">停</span>'}</td>
           <td style="white-space:nowrap">
-            <button class="btn btn-ghost btn-sm" onclick="editRakutenCred('${esc(r.store)}','${esc(r.store_label||'')}','${esc(r.rms_login_id||'')}','${esc(r.csv_user||'')}',${r.enabled})">编辑</button>
+            <button class="btn btn-ghost btn-sm" onclick="editRakutenCred('${esc(r.store)}','${esc(r.store_label||'')}','${esc(r.rms_login_id||'')}','${esc(r.member_email||'')}','${esc(r.csv_user||'')}',${r.enabled})">编辑</button>
             <button class="btn btn-ghost btn-sm" style="margin-left:4px" onclick="delRakutenCred('${esc(r.store)}')">删除</button>
           </td>
         </tr>`).join('') + '</tbody></table></div>';
   } catch (e) { el.innerHTML = resultCard('err', e.message); }
 }
 function clearRakutenForm() {
-  ['rk-store','rk-label','rk-rms-user','rk-rms-pass','rk-csv-user','rk-csv-pass'].forEach(id => document.getElementById(id).value = '');
+  ['rk-store','rk-label','rk-rms-user','rk-rms-pass','rk-member-email','rk-member-pass','rk-csv-user','rk-csv-pass'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('rk-enabled').checked = true;
 }
-function editRakutenCred(store, label, rmsUser, csvUser, enabled) {
+function editRakutenCred(store, label, rmsUser, memberEmail, csvUser, enabled) {
   document.getElementById('rk-store').value = store;
   document.getElementById('rk-label').value = label;
   document.getElementById('rk-rms-user').value = rmsUser;
+  document.getElementById('rk-member-email').value = memberEmail;
   document.getElementById('rk-csv-user').value = csvUser;
   document.getElementById('rk-rms-pass').value = '';   // 留空=不改
+  document.getElementById('rk-member-pass').value = '';
   document.getElementById('rk-csv-pass').value = '';
   document.getElementById('rk-enabled').checked = enabled;
   document.getElementById('rk-store').scrollIntoView({ block: 'center' });
@@ -3619,6 +3625,8 @@ async function saveRakutenCred() {
     store_label: document.getElementById('rk-label').value.trim() || null,
     rms_login_id: document.getElementById('rk-rms-user').value.trim() || null,
     rms_password: document.getElementById('rk-rms-pass').value || null,
+    member_email: document.getElementById('rk-member-email').value.trim() || null,
+    member_password: document.getElementById('rk-member-pass').value || null,
     csv_user: document.getElementById('rk-csv-user').value.trim() || null,
     csv_password: document.getElementById('rk-csv-pass').value || null,
     enabled: document.getElementById('rk-enabled').checked,
@@ -3627,6 +3635,7 @@ async function saveRakutenCred() {
     await api('PUT', '/rakuten/credentials', body);
     toast('已保存', 'ok');
     document.getElementById('rk-rms-pass').value = '';
+    document.getElementById('rk-member-pass').value = '';
     document.getElementById('rk-csv-pass').value = '';
     loadRakutenCreds();
   } catch (e) { toast(e.message, 'err'); }

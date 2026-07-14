@@ -48,6 +48,14 @@ async def init_db() -> None:
         await conn.execute(text(
             "ALTER TABLE products ALTER COLUMN outer_jan TYPE VARCHAR(14)"
         ))
+        # P2: rakuten_credentials 补「楽天会員（session upgrade 邮箱登录）」凭据列。
+        # 表本身由 create_all 建（模型已含新列），此处 ALTER 只为已部署的旧表补列（幂等）。
+        await conn.execute(text(
+            "ALTER TABLE rakuten_credentials ADD COLUMN IF NOT EXISTS member_email VARCHAR(255) NOT NULL DEFAULT ''"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE rakuten_credentials ADD COLUMN IF NOT EXISTS member_password_enc VARCHAR(512) NOT NULL DEFAULT ''"
+        ))
         # Partial unique index: prevents duplicate batch transactions at the DB level.
         # Includes transaction_type so that a transfer's paired OUT+IN rows (same reference_id,
         # different transaction_type) are allowed to coexist without violating the constraint.
