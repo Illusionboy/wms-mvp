@@ -127,8 +127,10 @@ async def download_shipping_orders(
                 await page.wait_for_selector("#password_current, input[name='password']", timeout=20000)
                 await page.fill("#password_current", creds["member_password"])
                 await shot(page, "sso_password_filled")
-                await _click_primary(page, ("ログイン", "登录", "サインイン", "Sign in", "次へ"))
-                await page.wait_for_timeout(3000)
+                # 提交按钮是「次へ」——必须优先匹配它，否则会误点页面上的诱饵链接
+                # 「別の楽天IDでログイン」(含"ログイン")导致退回邮箱屏。
+                await _click_primary(page, ("次へ", "サインイン", "Sign in"))
+                await page.wait_for_timeout(3500)
             except PWTimeout:
                 await shot(page, "sso_password_MISSING", ok=False, note="没等到密码输入框")
 
