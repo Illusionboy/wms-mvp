@@ -223,19 +223,17 @@ async def download_shipping_orders(
             except Exception:
                 pass
 
-            # 7c. 填 CSV 下载专用账密。密码=该页唯一 password 框；账号=同一张表里的另一个
-            #     (非 password/非 hidden) input——不依赖标签文案匹配，最稳。
+            # 7c. 填 CSV 下载专用账密——下载页确切字段：账号 #user / 密码 #passwd。
+            #     兜底 JS 直接置 value（防字段短暂不可见导致 fill 超时）。
             try:
-                await page.locator("input[type='password']").first.fill(creds["csv_password"])
-            except Exception as exc:  # noqa: BLE001
-                await shot(page, "csv_pwd_FAIL", ok=False, note=str(exc)[:150])
-            try:
-                await page.locator(
-                    "xpath=(//input[@type='password'])[1]/ancestor::table[1]"
-                    "//input[not(@type='password') and not(@type='hidden')]"
-                ).first.fill(creds["csv_user"])
-            except Exception as exc:  # noqa: BLE001
-                await shot(page, "csv_user_FAIL", ok=False, note=str(exc)[:150])
+                await page.fill("#user", creds["csv_user"], timeout=10000)
+                await page.fill("#passwd", creds["csv_password"], timeout=10000)
+            except Exception:  # noqa: BLE001
+                try:
+                    await page.eval_on_selector("#user", "(e,v)=>{e.value=v}", creds["csv_user"])
+                    await page.eval_on_selector("#passwd", "(e,v)=>{e.value=v}", creds["csv_password"])
+                except Exception as exc:  # noqa: BLE001
+                    await shot(page, "csv_creds_FAIL", ok=False, note=str(exc)[:150])
             await shot(page, "csv_creds_filled")
 
             # 7d. ダウンロードする → 捕获下载
