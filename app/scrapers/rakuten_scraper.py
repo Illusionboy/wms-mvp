@@ -210,17 +210,19 @@ async def download_shipping_orders(
             await page.wait_for_timeout(800)
             await shot(page, "download_ready")
 
-            # 7c. 填 CSV 下载专用账密。按"标签格的相邻格里的 input"精确定位——
-            #     之前用 tr:has-text 命中了包住整块的外层 <tr>，两次都填到第一个(账号)框，
-            #     把密码写进了账号框。密码另兜底 input[type=password]（该页唯一）。
+            # 7c. 填 CSV 下载专用账密。密码=该页唯一 password 框；账号=同一张表里的另一个
+            #     (非 password/非 hidden) input——不依赖标签文案匹配，最稳。
             try:
-                await page.locator("td:text-is('ユーザ名') + td input").first.fill(creds["csv_user"])
-            except Exception as exc:  # noqa: BLE001
-                await shot(page, "csv_user_FAIL", ok=False, note=str(exc)[:150])
-            try:
-                await page.locator("td:text-is('パスワード') + td input, input[type='password']").first.fill(creds["csv_password"])
+                await page.locator("input[type='password']").first.fill(creds["csv_password"])
             except Exception as exc:  # noqa: BLE001
                 await shot(page, "csv_pwd_FAIL", ok=False, note=str(exc)[:150])
+            try:
+                await page.locator(
+                    "xpath=(//input[@type='password'])[1]/ancestor::table[1]"
+                    "//input[not(@type='password') and not(@type='hidden')]"
+                ).first.fill(creds["csv_user"])
+            except Exception as exc:  # noqa: BLE001
+                await shot(page, "csv_user_FAIL", ok=False, note=str(exc)[:150])
             await shot(page, "csv_creds_filled")
 
             # 7d. ダウンロードする → 捕获下载
