@@ -138,10 +138,14 @@ async def download_shipping_orders(
             await page.wait_for_timeout(2000)
             await shot(page, "after_login")
 
-            # 4b. 登录后 R-Login 中间页（「お気をつけください」安全提示等）——点过 1~N 个「次へ」
+            # 4b. 登录后 R-Login 中间页——点过 1~N 个门户：
+            #     「お気をつけください」(次へ) + 「…RMSを利用します」(合规确认，进 RMS)。
             #     不点过这些、直接打 csvdl 会被判「認証が必要です」。
-            for _ in range(4):
-                nxt = page.locator("button:has-text('次へ'), a:has-text('次へ'), input[value='次へ']")
+            for _ in range(5):
+                nxt = page.locator(
+                    "button:has-text('次へ'), a:has-text('次へ'), input[value='次へ'], "
+                    "button:has-text('RMSを利用'), a:has-text('RMSを利用'), input[value*='RMSを利用']"
+                )
                 if not await nxt.count():
                     break
                 try:
