@@ -47,6 +47,8 @@ services:
       QINSI_PASSWORD: ${QINSI_PASSWORD:-}
       QINSI_BASE_URL: ${QINSI_BASE_URL:-https://web.syt.qinsilk.com/gis/admin/}
       QINSI_WAREHOUSE_MAP: "${QINSI_WAREHOUSE_MAP:-}"
+      RAKUTEN_CRED_KEY: ${RAKUTEN_CRED_KEY:-}
+      RAKUTEN_AUTO_ENABLED: ${RAKUTEN_AUTO_ENABLED:-false}
     ports:
       # 云 + NPM 时把 BIND_HOST 设为 127.0.0.1：API 只在本机可达，公网只走 NPM(80/443)。
       # NPM 反代目标用容器名 api:8000（同一 docker 网络），不依赖此宿主机端口。
