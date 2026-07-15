@@ -138,6 +138,20 @@ async def download_shipping_orders(
             await page.wait_for_timeout(2000)
             await shot(page, "after_login")
 
+            # 4b. 登录后 R-Login 中间页（「お気をつけください」安全提示等）——点过 1~N 个「次へ」
+            #     不点过这些、直接打 csvdl 会被判「認証が必要です」。
+            for _ in range(4):
+                nxt = page.locator("button:has-text('次へ'), a:has-text('次へ'), input[value='次へ']")
+                if not await nxt.count():
+                    break
+                try:
+                    await nxt.first.click()
+                    await page.wait_for_load_state("domcontentloaded")
+                    await page.wait_for_timeout(1800)
+                except Exception:
+                    break
+            await shot(page, "after_interstitials")
+
             # 5. 登录成功后导航到订单 CSV 下载表单页
             await page.goto(_DATA_URL, wait_until="domcontentloaded")
             await page.wait_for_timeout(2500)
