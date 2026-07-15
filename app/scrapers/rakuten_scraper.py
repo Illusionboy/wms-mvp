@@ -138,16 +138,27 @@ async def download_shipping_orders(
             await page.wait_for_timeout(2000)
             await shot(page, "after_login")
 
-            # 4b. 登录后 R-Login 中间页——点过 1~N 个门户：
-            #     「お気をつけください」(次へ) + 「…RMSを利用します」(合规确认，进 RMS)。
-            #     不点过这些、直接打 csvdl 会被判「認証が必要です」。
-            for _ in range(5):
-                nxt = page.locator(
-                    "button:has-text('次へ'), a:has-text('次へ'), input[value='次へ'], "
-                    "button:has-text('RMSを利用'), a:has-text('RMSを利用'), input[value*='RMSを利用']"
-                )
+            # 4b. 登录后 RMS 会连插若干门户页，逐个点过（不点过直接打 csvdl 会被判「認証が必要です」）：
+            #     「お気をつけください」(次へ) → 「…RMSを利用します」(合规) → 公告页(勾"確認した"+「RMSメインメニューへ進む」)。
+            gate = (
+                "button:has-text('次へ'), a:has-text('次へ'), input[value='次へ'], "
+                "button:has-text('RMSを利用'), a:has-text('RMSを利用'), input[value*='RMSを利用'], "
+                "button:has-text('進む'), a:has-text('進む'), input[value*='進む'], "
+                "button:has-text('メインメニュー'), a:has-text('メインメニュー')"
+            )
+            for _ in range(6):
+                nxt = page.locator(gate)
                 if not await nxt.count():
                     break
+                # 门户页可能要求先勾"内容について確認した"复选框才放行
+                cbs = page.locator("input[type='checkbox']")
+                for i in range(await cbs.count()):
+                    try:
+                        cb = cbs.nth(i)
+                        if await cb.is_visible() and not await cb.is_checked():
+                            await cb.check(timeout=1500)
+                    except Exception:
+                        pass
                 try:
                     await nxt.first.click()
                     await page.wait_for_load_state("domcontentloaded")
