@@ -236,10 +236,10 @@ async def download_shipping_orders(
                     await shot(page, "csv_creds_FAIL", ok=False, note=str(exc)[:150])
             await shot(page, "csv_creds_filled")
 
-            # 7d. ダウンロードする → 捕获下载
+            # 7d. 点「ダウンロードする」(#downloadBtn，type=button 且 value 带空格，故直接按 id 点) → 捕获下载
             try:
                 async with page.expect_download(timeout=90000) as dl:
-                    await _click_primary(page, ("ダウンロードする",))
+                    await page.click("#downloadBtn", timeout=15000)
                 download = await dl.value
                 path = await download.path()
                 res.csv_bytes = Path(path).read_bytes()
