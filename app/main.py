@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -16,7 +17,15 @@ _STATIC_DIR = Path(__file__).parent / "static"
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     await init_db()
-    yield
+    task: asyncio.Task | None = None
+    if settings.rakuten_auto_enabled:
+        from app.services.rakuten_scheduler import rakuten_scheduler_loop
+        task = asyncio.create_task(rakuten_scheduler_loop())
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
 
 
 def create_app() -> FastAPI:

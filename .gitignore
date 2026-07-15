@@ -12,6 +12,7 @@ GIT_DEPLOY.md
 app/data/qinsi_session.json
 app/data/scraper_debug/
 app/data/rms_debug/
+app/data/rakuten_auto/
 app/data/qinsi_selectors.json
 app/data/qinsi_schema_cache.json
 # 本地一键脚本（含本机路径，不适合共享）

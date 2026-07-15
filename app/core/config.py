@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # 乐天凭据加密密钥（对称加密 rakuten_credentials 里的密码）。任意字符串即可，
     # 后端会用 SHA-256 派生出合法的 Fernet 密钥。未设置时回退到 jwt_secret_key。
     rakuten_cred_key: str | None = Field(default=None, validation_alias="RAKUTEN_CRED_KEY")
+    # 乐天自动下载定时（Mon–Sat 08:50 JST）总开关。仅在跑抓取的那台(VPS)设 true。
+    rakuten_auto_enabled: bool = Field(default=False, validation_alias="RAKUTEN_AUTO_ENABLED")
     admin_username: str | None = Field(default=None, validation_alias="ADMIN_USERNAME")
     admin_password: str | None = Field(default=None, validation_alias="ADMIN_PASSWORD")
     # 秦丝生意通爬虫配置
