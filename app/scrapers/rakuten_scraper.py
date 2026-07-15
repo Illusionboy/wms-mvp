@@ -197,29 +197,31 @@ async def download_shipping_orders(
                 pass
             await shot(page, "form_filled")
 
-            # 7a. データを作成する
+            # 7a. データを作成する（异步生成：処理中 → 下载区出现）
             await _click_primary(page, ("データを作成する", "作成", "生成"))
-            await page.wait_for_timeout(3500)
-            await shot(page, "after_create")
+            # 7b. 等"処理中"结束、下载区(ダウンロードする 按钮 + ユーザ名/パスワード)出现（通常几秒；大数据可能久）
+            try:
+                await page.wait_for_selector(
+                    "input[value='ダウンロードする'], button:has-text('ダウンロードする'), input[value*='ダウンロード']",
+                    timeout=180000,
+                )
+            except PWTimeout:
+                await shot(page, "create_wait_timeout", ok=False, note="等生成超时(処理中>3分钟)")
+            await page.wait_for_timeout(800)
+            await shot(page, "download_ready")
 
-            # 7b. 下载区填 CSV 专用账密
-            csv_user_sel = "input[name='downloadUser'], input[name='userId'], input[name='user']"
-            # 更稳：按可见的两个文本框（ユーザ名/パスワード）
-            if creds.get("csv_user"):
-                try:
-                    await page.get_by_label(re.compile("ユーザ名|ユーザ|user", re.I)).first.fill(creds["csv_user"])
-                except Exception:
-                    pass
-                try:
-                    await page.get_by_label(re.compile("パスワード|password", re.I)).first.fill(creds["csv_password"])
-                except Exception:
-                    pass
+            # 7c. 填 CSV 下载专用账密（表格行内定位：ユーザ名行 / パスワード行的 input）
+            try:
+                await page.locator("tr", has_text="ユーザ名").locator("input").first.fill(creds["csv_user"])
+                await page.locator("tr", has_text="パスワード").locator("input").first.fill(creds["csv_password"])
+            except Exception as exc:  # noqa: BLE001
+                await shot(page, "csv_creds_FAIL", ok=False, note=f"CSV账密填写失败:{exc}")
             await shot(page, "csv_creds_filled")
 
-            # 7c. ダウンロードする → 捕获下载
+            # 7d. ダウンロードする → 捕获下载
             try:
-                async with page.expect_download(timeout=60000) as dl:
-                    await _click_primary(page, ("ダウンロードする", "ダウンロード", "下载"))
+                async with page.expect_download(timeout=90000) as dl:
+                    await _click_primary(page, ("ダウンロードする",))
                 download = await dl.value
                 path = await download.path()
                 res.csv_bytes = Path(path).read_bytes()
@@ -227,7 +229,7 @@ async def download_shipping_orders(
                 res.success = True
                 await shot(page, "downloaded", note=f"{len(res.csv_bytes)} bytes")
             except PWTimeout:
-                await shot(page, "download_TIMEOUT", ok=False, note="点了下载但没捕获到文件（账密错？或异步生成）")
+                await shot(page, "download_TIMEOUT", ok=False, note="点了下载但没捕获到文件（账密错？）")
                 res.error = "未捕获到下载文件（见截图）"
 
         except Exception as exc:  # noqa: BLE001
