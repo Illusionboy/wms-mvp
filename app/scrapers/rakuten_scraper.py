@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -209,6 +210,18 @@ async def download_shipping_orders(
                 await shot(page, "create_wait_timeout", ok=False, note="等生成超时(処理中>3分钟)")
             await page.wait_for_timeout(800)
             await shot(page, "download_ready")
+            # 存下载页 HTML + 所有可见文本框的 name/id/type，便于精确定位账密框（调试）
+            try:
+                (debug_dir / "download_page.html").write_text(await page.content(), encoding="utf-8")
+                fields = await page.eval_on_selector_all(
+                    "input",
+                    "els => els.map(e => ({type:e.type, name:e.name, id:e.id, "
+                    "vis:!!(e.offsetWidth||e.offsetHeight)}))",
+                )
+                (debug_dir / "download_inputs.json").write_text(
+                    json.dumps(fields, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
 
             # 7c. 填 CSV 下载专用账密。密码=该页唯一 password 框；账号=同一张表里的另一个
             #     (非 password/非 hidden) input——不依赖标签文案匹配，最稳。
