@@ -135,20 +135,17 @@ async def backfill_draft(
                     continue
                 await gn.click()
                 await gn.fill(jan)
-                await page.wait_for_timeout(1500)   # 等搜索下拉 list4
-                # 选中：先按 Enter（全 JAN 单结果多按扫码逻辑自动选中），兜底点 list4 整行
-                await gn.press("Enter")
-                await page.wait_for_timeout(1000)
-                row = page.locator("#list4 tr.jqgrow").first
-                if await row.count() and await row.is_visible():
-                    try:
-                        await row.click(force=True)
-                    except Exception:
-                        try:
-                            await row.dispatch_event("click")
-                        except Exception:
-                            pass
-                    await page.wait_for_timeout(800)
+                await page.wait_for_timeout(1600)   # 等搜索下拉 list4
+                sel = page.locator("td[aria-describedby='list4_goodName']").filter(has_text="点击选择").first
+                if not await sel.count():
+                    sel = page.locator("#list4 tr.jqgrow td[aria-describedby='list4_goodName']").first
+                if await sel.count():
+                    # force 点击仍落在盖在上面的「货号」上 → 用 dispatch_event 把 click 直接派发到该元素(无视遮挡)
+                    await sel.dispatch_event("click")
+                    await page.wait_for_timeout(900)
+                else:
+                    res.not_found.append(jan)  # 全 JAN 查无 = 新品（自动建后续迭代）
+                    continue
                 if i == 0:
                     await shot(page, "item1_after_select")  # 诊断：看第1个商品有没有选上
                 q = page.locator(f"[id='{rowid}_unitQuantity']")
