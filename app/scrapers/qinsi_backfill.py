@@ -129,118 +129,171 @@ async def backfill_draft(
                 res.error = "新单表单未打开（见截图）"
                 return res
 
-            # 2b. 供应商：选「WMS回填」（点供应商选择器→搜索框输入→点结果）。仓库仍用默认(北津守)。
-            #     供应商是第一个 mstxt_（供应商→仓库→结算账户顺序）。
-            # 订单表单的对方选择器（采购供应商=第一个 MsModel；销售客户=专属 id）。
-            # dispatch_event 打开，绕过橙色提示条遮挡。
-            sup = page.locator(_CP_SEL[direction]).first
-            if await sup.count():
-                await sup.dispatch_event("click")
-                await page.wait_for_timeout(800)
-                if not await page.locator(_SEARCH_SEL[direction]).count():  # picker 没开 → 真实点击/force 再试
-                    for how in ("click", "force"):
-                        try:
-                            await (sup.click(timeout=4000) if how == "click" else sup.click(force=True))
-                            await page.wait_for_timeout(800)
-                        except Exception:
-                            pass
-                        if await page.locator(_SEARCH_SEL[direction]).count():
-                            break
-                await shot(page, "supplier_picker")
-                # 诊断（点开后、填搜索前 dump）：picker 开没开 + 触发框结构/最近 ng-click 祖先，据此定开法
-                try:
-                    diag = await page.evaluate(
-                        "(sel) => { const q=s=>Array.from(document.querySelectorAll(s));"
-                        " const t=document.querySelector(sel); const h=t&&t.closest('[ng-click]');"
-                        " return { cp_val: t?t.value:null,"
-                        "  trigger_html: t?t.outerHTML.slice(0,260):null,"
-                        "  trigger_parent: t&&t.parentElement?t.parentElement.outerHTML.slice(0,500):null,"
-                        "  nearest_ngclick: h?h.outerHTML.slice(0,260):null,"
-                        "  searchKeys: q(\"input[ng-model='searchKey']\").map(e=>({ph:e.placeholder,val:e.value,vis:!!(e.offsetWidth||e.offsetHeight)})),"
-                        "  options: q(\"li[ng-click='selected(option)']\").map(e=>({txt:(e.textContent||'').trim().slice(0,20),vis:!!(e.offsetWidth||e.offsetHeight)})).slice(0,8),"
-                        " }; }", _CP_SEL[direction])
-                    (debug_dir / "diag_picker.json").write_text(json.dumps(diag, ensure_ascii=False, indent=2), encoding="utf-8")
-                except Exception:
-                    pass
-                si = page.locator(_SEARCH_SEL[direction]).first
-                if await si.count():
+            # 2b. 对方（供应商/客户）选「WMS回填」。这是 mulselect 自定义指令，三个死穴（全面读页面后确认）：
+            #   ① 开下拉靠【容器 .ms_container 的 ng-click="clickIn()"】——触发框 input 是 readonly，点它/dispatch 它都白搭！
+            #   ② 下拉里 <input ng-model="searchKey" ng-keydown="searchPress"> 搜、<li ng-click="selected(option)"><div title="…"> 选
+            #   ③ 页面有多个 mulselect（销售员筛选/供应商/客户…）都有 searchKey/selected，必须把搜和选【限定在对方这个容器内】
+            container = page.locator(f"div.ms_container:has({_CP_SEL[direction]})").first
+            cp_open = False
+            if await container.count():
+                await container.dispatch_event("click")   # 直接触发容器 clickIn() 开下拉（dispatch 绕过橙色提示条遮挡）
+                await page.wait_for_timeout(700)
+                si = container.locator("input[ng-model='searchKey']").first
+                if not (await si.count() and await si.is_visible()):   # 没开 → 真实点击容器兜底
+                    try:
+                        await container.click(timeout=4000)
+                    except Exception:
+                        await container.click(force=True)
+                    await page.wait_for_timeout(700)
+                    si = container.locator("input[ng-model='searchKey']").first
+                await shot(page, "cp_picker")
+                if await si.count() and await si.is_visible():
+                    cp_open = True
+                    await si.click()
                     await si.fill("WMS回填")
-                    await page.wait_for_timeout(1600)
-                    await shot(page, "supplier_search")
-                    # 结果项：<li ng-click="selected(option)">，内含 <div title="WMS回填">（文本被高亮拆开，
-                    # 故按 title 定位最稳）。点 li 触发 selected(option)。
-                    opt = page.locator("li[ng-click='selected(option)']:has([title='WMS回填'])").first
-                    if not await opt.count():
-                        opt = page.locator("li[ng-click='selected(option)']").filter(has_text="回填").first
+                    await page.wait_for_timeout(1600)          # 等 clientSelectJSON.ac / supplierSelectJSON.ac 返回
+                    await shot(page, "cp_search")
+                    # 选中：dispatch 到结果 li 直接触发 selected(option)（之前点不中=被遮挡/层级拦截，dispatch 绕过它）
+                    opt = container.locator("li[ng-click='selected(option)']:has([title='WMS回填'])").first
                     if await opt.count():
-                        try:
-                            await opt.click(timeout=5000)
-                        except Exception:
-                            await opt.dispatch_event("click")
-                        await page.wait_for_timeout(1200)
-            await shot(page, "after_supplier")
-
-            # 诊断 dump：客户框值 + 所有 searchKey(哪个被填) + 结果项 li，一次看全，不再盲猜
+                        await opt.dispatch_event("click")
+                        await page.wait_for_timeout(900)
+                    trg0 = page.locator(_CP_SEL[direction]).first
+                    v0 = await trg0.get_attribute("value") if await trg0.count() else None
+                    if not (v0 and "回填" in v0):               # 兜底：键盘 ↓ 高亮 + Enter（走搜索框自带 searchPress）
+                        await si.press("ArrowDown")
+                        await page.wait_for_timeout(300)
+                        await si.press("Enter")
+                        await page.wait_for_timeout(900)
+            # 诊断 dump（成败都留，彻底告别盲猜）：触发框值、容器有没有、各 searchKey、对方容器内的结果项
             try:
                 diag = await page.evaluate(
-                    "() => { const q = s => Array.from(document.querySelectorAll(s));"
-                    " return {"
-                    "  cp_out: (document.querySelector(\"#mstxt_saleClientSelectInput\")||{}).value,"
-                    "  cp_msmodel: q(\"input[ng-model='MsModel.text']\").map(e=>({id:e.id, val:e.value, vis:!!(e.offsetWidth||e.offsetHeight)})),"
-                    "  searchKeys: q(\"input[ng-model='searchKey']\").map(e=>({ph:e.placeholder, val:e.value, vis:!!(e.offsetWidth||e.offsetHeight)})),"
-                    "  options: q(\"li[ng-click='selected(option)']\").map(e=>({txt:(e.textContent||'').trim().slice(0,24), vis:!!(e.offsetWidth||e.offsetHeight)})).slice(0,12),"
-                    "  goodNameInputs: q(\"[id$='_goodName']\").map(e=>({id:e.id, tag:e.tagName})),"
-                    " }; }"
-                )
-                (debug_dir / "diag.json").write_text(json.dumps(diag, ensure_ascii=False, indent=2), encoding="utf-8")
+                    "(sel) => { const q=s=>Array.from(document.querySelectorAll(s));"
+                    " const trg=document.querySelector(sel); const c=trg&&trg.closest('.ms_container');"
+                    " const lis=c?Array.from(c.querySelectorAll(\"li[ng-click='selected(option)']\")):[];"
+                    " return { trigger_val: trg?trg.value:null, container_found: !!c,"
+                    "  searchKeys: q(\"input[ng-model='searchKey']\").map(e=>({ph:e.placeholder,val:e.value,vis:!!(e.offsetWidth||e.offsetHeight)})),"
+                    "  cp_options: lis.map(e=>({txt:(e.textContent||'').trim().slice(0,20),vis:!!(e.offsetWidth||e.offsetHeight)})).slice(0,10),"
+                    " }; }", _CP_SEL[direction])
+                (debug_dir / "diag_picker.json").write_text(json.dumps(diag, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 pass
-
-            # 按 Esc 关掉任何还开着的下拉/picker（防后续 JAN 串入搜索框）
-            await page.keyboard.press("Escape")
-            await page.wait_for_timeout(400)
-            cp = page.locator(_CP_SEL[direction]).first
-            cp_val = await cp.get_attribute("value") if await cp.count() else None
-            await shot(page, "cp_final", note=f"对方当前=「{cp_val}」")
-            # 对方没选上 WMS回填 也【不阻断】——用默认(匿名客户)继续，核心是把商品+草稿跑通，客户可后续在秦丝改
+            # 确认选中：触发框值必须含「回填」。没选上 → 【中止】（避免开着的 picker 把后续 JAN 串进搜索框，就是你截图那样）
+            trg = page.locator(_CP_SEL[direction]).first
+            cp_val = await trg.get_attribute("value") if await trg.count() else None
+            await shot(page, "cp_final", note=f"对方=「{cp_val}」 picker={cp_open}")
             if not (cp_val and "回填" in cp_val):
-                res.not_found.append(f"[对方未选WMS回填,当前={cp_val}]")
+                res.error = f"「WMS回填」未选中(当前=「{cp_val}」, picker={cp_open})——已中止避免污染。见 diag_picker.json"
+                await shot(page, "CP_NOT_SELECTED", ok=False, note=res.error)
+                return res
 
-            # 3. 逐个加货：往订单行 #{rowid}_goodName 输全 JAN → 下拉点第一个 → 填 #{rowid}_unitQuantity
-            for i, (jan, qty) in enumerate(items[:10]):
-                rowid = str(i + 1)
-                # 注意：id 以数字开头，CSS #1_goodName 非法，必须用属性选择器 [id="1_goodName"]
-                gn = page.locator(f"[id='{rowid}_goodName']")
-                if not await gn.count():
-                    # 行未进入编辑态：点该行商品格触发行内编辑
-                    cell = page.locator(f"tr[id='{rowid}'] td[aria-describedby$='_goodName']").first
-                    if await cell.count():
-                        await cell.click()   # 真实点击触发 jqGrid 进入编辑(销售是 td 点击式，dispatch 不触发)
-                        await page.wait_for_timeout(700)
-                        gn = page.locator(f"[id='{rowid}_goodName']")
-                if not await gn.count():
-                    res.not_found.append(jan)
-                    continue
-                await gn.click()
-                await gn.fill(jan)              # oninput=changAutoGoods → 弹出下拉
-                await page.wait_for_timeout(1600)
-                # 下拉两种实现：采购=Angular tr[ng-click=selAutoGood]；销售=jqGrid td[list4_goodName]「点击选择」
-                sel = page.locator("tr[ng-click='selAutoGood(good)']:visible").filter(has_text=jan).first
-                if not await sel.count():
-                    sel = page.locator("tr[ng-click='selAutoGood(good)']:visible").first
-                if not await sel.count():
-                    sel = page.locator("td[aria-describedby='list4_goodName']:visible").filter(has_text="点击选择").first
-                if await sel.count():
-                    await sel.dispatch_event("click")   # 触发选中
-                    await page.wait_for_timeout(900)
-                else:
-                    res.not_found.append(jan)  # 全 JAN 查无 = 新品（自动建后续迭代）
-                    continue
-                if i == 0:
-                    await shot(page, "item1_after_select")  # 诊断：看第1个商品有没有选上
-                q = page.locator(f"[id='{rowid}_unitQuantity']")
-                if await q.count():
-                    await q.fill(str(qty))
+            # 3. 加货：采购(in) 与 销售(out) 的商品网格【完全不同】——
+            #    采购=Angular 订单行内联输入 #{row}_goodName + 下拉 selAutoGood；
+            #    销售=jqGrid「点击选择」，商品要走【选择商品 modal】(selectGoodsClick → #input-control 搜 → 勾选 → 确认)加进 list4。
+            if direction == "in":
+                for i, (jan, qty) in enumerate(items[:10]):
+                    rowid = str(i + 1)
+                    # 注意：id 以数字开头，CSS #1_goodName 非法，必须用属性选择器 [id="1_goodName"]
+                    gn = page.locator(f"[id='{rowid}_goodName']")
+                    if not await gn.count():
+                        cell = page.locator(f"tr[id='{rowid}'] td[aria-describedby$='_goodName']").first
+                        if await cell.count():
+                            await cell.click()
+                            await page.wait_for_timeout(700)
+                            gn = page.locator(f"[id='{rowid}_goodName']")
+                    if not await gn.count():
+                        res.not_found.append(jan)
+                        continue
+                    await gn.click()
+                    await gn.fill(jan)              # oninput=changAutoGoods → 弹出下拉
+                    await page.wait_for_timeout(1600)
+                    sel = page.locator("tr[ng-click='selAutoGood(good)']:visible").filter(has_text=jan).first
+                    if not await sel.count():
+                        sel = page.locator("tr[ng-click='selAutoGood(good)']:visible").first
+                    if await sel.count():
+                        await sel.dispatch_event("click")
+                        await page.wait_for_timeout(900)
+                    else:
+                        res.not_found.append(jan)  # 查无 = 新品（自动建后续迭代）
+                        continue
+                    if i == 0:
+                        await shot(page, "item1_after_select")
+                    q = page.locator(f"[id='{rowid}_unitQuantity']")
+                    if await q.count():
+                        await q.fill(str(qty))
+            else:
+                # 销售：逐个 JAN → 点「选择商品」开 modal → #input-control 搜 → 勾选首行 → 确认 → 加进 list4
+                added: list[tuple[str, int]] = []
+                for i, (jan, qty) in enumerate(items[:10]):
+                    btn = page.locator("[ng-click='selectGoodsClick()']:visible").first
+                    if not await btn.count():
+                        btn = page.locator("[ng-click='selectGoodsClick()']").first
+                    if not await btn.count():
+                        res.not_found.append(jan)
+                        continue
+                    try:
+                        await btn.click()
+                    except Exception:
+                        await btn.dispatch_event("click")
+                    await page.wait_for_timeout(1200)
+                    search = page.locator("#input-control[ng-model='selectGoodsModalSearchKey']").first
+                    if not (await search.count() and await search.is_visible()):
+                        res.not_found.append(jan)
+                        await page.keyboard.press("Escape")
+                        await page.wait_for_timeout(400)
+                        continue
+                    await search.click()
+                    await search.fill(jan)
+                    await search.press("Enter")            # ng-keyup=searchGoodsKey → 过滤商品
+                    await page.wait_for_timeout(1800)       # 等 searchGoods AJAX
+                    if i == 0:
+                        await shot(page, "modal_search")    # 诊断：看搜索结果
+                    # 有的秦丝 modal 扫到唯一条码会自动加入并关闭 → 已关就算加好
+                    if not await search.is_visible():
+                        added.append((jan, qty))
+                        continue
+                    row = page.locator("#selectGoodsModalTable tr.jqgrow").first
+                    if not await row.count():
+                        res.not_found.append(jan)          # 查无 = 新品
+                        close = page.locator("[ng-click='closeSelectGoodsModal($event)']").first
+                        if await close.count():
+                            await close.dispatch_event("click")
+                        await page.wait_for_timeout(500)
+                        continue
+                    cb = row.locator("input[type='checkbox']").first
+                    if await cb.count():
+                        try:
+                            await cb.check()
+                        except Exception:
+                            await cb.dispatch_event("click")
+                    else:
+                        await row.click()
+                    await page.wait_for_timeout(500)
+                    await page.locator("[ng-click='confirmSelectGoodsDebounce($event)']").first.dispatch_event("click")
+                    await page.wait_for_timeout(1600)       # 商品加入 list4
+                    added.append((jan, qty))
+                await shot(page, "after_add_goods")
+                # 填数量：list4 数据行的 数量列(list4_unitQuantity)，按加入顺序对齐
+                rows = page.locator("#list4 tr.jqgrow")
+                nrows = await rows.count()
+                for idx in range(min(nrows, len(added))):
+                    row = rows.nth(idx)
+                    rid = await row.get_attribute("id")
+                    qcell = row.locator("td[aria-describedby='list4_unitQuantity']").first
+                    if not await qcell.count():
+                        continue
+                    try:
+                        await qcell.click()
+                        await page.wait_for_timeout(400)
+                        inp = page.locator(f"[id='{rid}_unitQuantity']").first
+                        if not await inp.count():
+                            inp = qcell.locator("input").first   # 数量格可能是常驻 input
+                        if await inp.count():
+                            await inp.fill(str(added[idx][1]))
+                            await inp.press("Tab")               # 提交编辑
+                            await page.wait_for_timeout(200)
+                    except Exception:
+                        pass
             await shot(page, "after_items")
 
             # 4. 保存草稿：按钮文案就是「草稿」(ng-click=saveOrder)，禁用条件含 supplierId/depotId/accountId/商品
