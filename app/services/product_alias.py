@@ -32,7 +32,7 @@ async def list_aliases(session: AsyncSession, canonical_jan: str) -> list[Produc
     return list(result.scalars().all())
 
 
-async def _validate_alias_pair(session: AsyncSession, canonical_jan: str, alias_jan: str) -> tuple[Product, Product]:
+async def _validate_alias_pair(session: AsyncSession, canonical_jan: str, alias_jan: str) -> tuple[Product, Product | None]:
     if alias_jan == canonical_jan:
         raise ValueError("别名JAN不能与主JAN相同")
 
@@ -40,9 +40,8 @@ async def _validate_alias_pair(session: AsyncSession, canonical_jan: str, alias_
     if canonical_product is None:
         raise ValueError(f"主JAN {canonical_jan} 不存在")
 
+    # 别名 JAN 允许"无记录"（商品目录里还没有该 JAN）——建别名后扫到它会自动归一到主JAN。
     alias_product = await session.get(Product, alias_jan)
-    if alias_product is None:
-        raise ValueError(f"别名JAN {alias_jan} 不存在")
 
     if await session.get(ProductJanAlias, canonical_jan) is not None:
         raise ValueError(f"{canonical_jan} 本身是别名，请使用它的主JAN")
@@ -97,7 +96,7 @@ async def preview_alias_merge(session: AsyncSession, canonical_jan: str, alias_j
         canonical_jan=canonical_jan,
         alias_jan=alias_jan,
         canonical_name=canonical_product.name_zh or canonical_product.name_jp,
-        alias_name=alias_product.name_zh or alias_product.name_jp,
+        alias_name=(alias_product.name_zh or alias_product.name_jp) if alias_product else "(无记录商品)",
         warehouses=diffs,
     )
 

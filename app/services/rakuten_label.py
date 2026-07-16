@@ -211,8 +211,9 @@ def generate_courier_files(csv_bytes: bytes, store: str = "1") -> RakutenLabelRe
             ref_col="お客様管理番号", mgmt_prefix=f"{store}S", mapping=mapping,
         )
         exp = exp.sort_values(by="品名２")
-    result.files["sagawa"] = _to_cp932_csv(exp)
     result.counts["sagawa"] = len(exp) if not d.empty else 0
+    if result.counts["sagawa"] > 0:  # 无该快递订单则不生成空 CSV
+        result.files["sagawa"] = _to_cp932_csv(exp)
 
     # ---- Yamato ----
     d = df[df["快递公司"] == "yamato"].copy()
@@ -250,8 +251,9 @@ def generate_courier_files(csv_bytes: bytes, store: str = "1") -> RakutenLabelRe
             ref_col="検索キー1", mgmt_prefix=f"{store}Y", mapping=mapping,
         )
         exp = exp.sort_values(by="品名１")
-    result.files["yamato"] = _to_cp932_csv(exp)
     result.counts["yamato"] = len(exp) if not d.empty else 0
+    if result.counts["yamato"] > 0:  # 无该快递订单则不生成空 CSV
+        result.files["yamato"] = _to_cp932_csv(exp)
 
     # ---- Post（无合单、无 mgmt_no 桥；模板无引用字段，回填暂人工）----
     d = df[df["快递公司"] == "post"].copy()
@@ -274,8 +276,9 @@ def generate_courier_files(csv_bytes: bytes, store: str = "1") -> RakutenLabelRe
         exp["内容品"] = d["商品内容"]
         exp["お届け先敬称"] = "様"
         exp = exp.sort_values(by="内容品")
-    result.files["post"] = _to_cp932_csv(exp)
     result.counts["post"] = len(exp) if not d.empty else 0
+    if result.counts["post"] > 0:  # 无该快递订单则不生成空 CSV
+        result.files["post"] = _to_cp932_csv(exp)
 
     result.err_rows = err_rows
     result.mapping = mapping

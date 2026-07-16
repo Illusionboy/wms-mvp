@@ -1095,6 +1095,7 @@ tr:hover td { background: var(--accent-bg); }
             <div class="input-scan"><input type="text" id="count-jan" placeholder="JAN…" onkeydown="if(event.key==='Enter')countAddManual()"><button type="button" class="scan-btn" title="扫码" onclick="countScan()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button></div>
           </div>
           <div class="form-row" style="margin:0;width:90px"><label>数量</label><input type="number" id="count-qty" min="1" value="1"></div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;white-space:nowrap" title="勾选后扫/加同一 JAN = 累加箱数（按商品箱入数换算）；不勾 = 累加件数"><input type="checkbox" id="count-bybox"> 以箱为单位</label>
           <button class="btn btn-primary" style="margin-bottom:0" onclick="countAddManual()">加入</button>
         </div>
         <div id="count-items" style="margin-top:12px"></div>
@@ -4793,9 +4794,18 @@ async function _countAddCode(code, qty) {
     }
   } catch {}
   if (!jan) { jan = String(code).replace(/\D/g, '') || String(code).trim(); is_new = true; }
-  const ex = _count.items.find(it => it.jan_code === jan && !it.whole_case);
-  if (ex) ex.quantity = (+ex.quantity || 0) + qty;
-  else _count.items.push({ jan_code: jan, quantity: qty, whole_case: false, case_size: units, case_count: null, name_zh, is_new });
+  const byBox = document.getElementById('count-bybox')?.checked;
+  if (byBox) {
+    // 以箱为单位：同 JAN 的整箱行 → 箱数 +qty；无则新建整箱行（数量=箱入数×箱数）
+    const ex = _count.items.find(it => it.jan_code === jan && it.whole_case);
+    if (ex) { ex.case_count = (+ex.case_count || 0) + qty; ex.quantity = (+ex.case_size || 0) * (+ex.case_count); }
+    else _count.items.push({ jan_code: jan, quantity: (+units || 0) * qty, whole_case: true, case_size: units, case_count: qty, name_zh, is_new });
+  } else {
+    // 按件：同 JAN 的非整箱行 → 数量 +qty；无则新建
+    const ex = _count.items.find(it => it.jan_code === jan && !it.whole_case);
+    if (ex) ex.quantity = (+ex.quantity || 0) + qty;
+    else _count.items.push({ jan_code: jan, quantity: qty, whole_case: false, case_size: units, case_count: null, name_zh, is_new });
+  }
   _countAfterChange();
   if (is_new) toast('新品(未登记)已加入，可就地登记', 'info');
 }
