@@ -148,23 +148,22 @@ async def backfill_draft(
                     await q.fill(str(qty))
             await shot(page, "after_items")
 
-            # 4. 保存草稿（尝试点「保存草稿」；找不到就截图看有哪些按钮）
-            saved = False
-            for t in ("保存草稿", "存草稿", "保 存 草 稿"):
-                b = page.locator(f"button:has-text('{t}'), a:has-text('{t}')").first
-                if await b.count():
-                    await b.click()
-                    saved = True
-                    break
-            await page.wait_for_timeout(3000)
-            await shot(page, "after_save" if saved else "save_btn_NOT_FOUND", ok=saved,
-                       note="" if saved else "没找到保存草稿按钮——截图看页面上有哪些按钮")
-            if saved and not res.not_found:
-                res.success = True
-            elif not saved:
-                res.error = "商品/数量已填，但没找到保存草稿按钮（见截图，把按钮文案告我）"
+            # 4. 保存草稿：按钮文案就是「草稿」(ng-click=saveOrder)，禁用条件含 supplierId/depotId/accountId/商品
+            btn = page.locator("button.btn-normal:text-is('草稿'), button:text-is('草稿')").first
+            if not await btn.count():
+                await shot(page, "save_btn_NOT_FOUND", ok=False, note="没找到「草稿」按钮")
+                res.error = "没找到「草稿」保存按钮（见截图）"
+            elif await btn.is_disabled():
+                await shot(page, "save_btn_DISABLED", ok=False,
+                           note="「草稿」按钮禁用——供应商/仓库/结算账户/商品 有一项没齐")
+                res.error = "「草稿」按钮禁用：供应商/仓库/结算账户/商品 有一项没齐（见截图）"
             else:
-                res.error = f"部分完成：{len(res.not_found)} 个 JAN 查无(新品待建)：{', '.join(res.not_found[:5])}"
+                await btn.click()
+                await page.wait_for_timeout(3500)
+                await shot(page, "after_save")
+                res.success = not res.not_found
+                res.error = (f"已存草稿，但 {len(res.not_found)} 个 JAN 查无(新品待建)：{', '.join(res.not_found[:5])}"
+                             if res.not_found else None)
         except Exception as exc:  # noqa: BLE001
             try:
                 await shot(page, "EXCEPTION", ok=False, note=str(exc)[:200])
