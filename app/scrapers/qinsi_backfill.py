@@ -141,8 +141,11 @@ async def backfill_draft(
                     await si.fill("WMS回填")
                     await page.wait_for_timeout(1600)
                     await shot(page, "supplier_search")
-                    # 结果是带人像图标的可点项，文本正好"WMS回填"。真实点击(下拉项不被遮挡)，兜底 dispatch。
-                    opt = page.get_by_text("WMS回填", exact=True).first
+                    # 结果项：<li ng-click="selected(option)">，内含 <div title="WMS回填">（文本被高亮拆开，
+                    # 故按 title 定位最稳）。点 li 触发 selected(option)。
+                    opt = page.locator("li[ng-click='selected(option)']:has([title='WMS回填'])").first
+                    if not await opt.count():
+                        opt = page.locator("li[ng-click='selected(option)']").filter(has_text="回填").first
                     if await opt.count():
                         try:
                             await opt.click(timeout=5000)
