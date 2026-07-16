@@ -135,17 +135,22 @@ async def backfill_draft(
                     continue
                 await gn.click()
                 await gn.fill(jan)
-                await page.wait_for_timeout(1600)  # 等 list4 搜索下拉
-                sel = page.locator("td[aria-describedby='list4_goodName']").filter(has_text="点击选择").first
-                if not await sel.count():
-                    sel = page.locator("#list4 tr.jqgrow td[aria-describedby='list4_goodName']").first
-                if await sel.count():
-                    # 相邻「货号」子树/tooltip 会拦截 pointer → force 强制点击绕过遮挡
-                    await sel.click(force=True)
+                await page.wait_for_timeout(1500)   # 等搜索下拉 list4
+                # 选中：先按 Enter（全 JAN 单结果多按扫码逻辑自动选中），兜底点 list4 整行
+                await gn.press("Enter")
+                await page.wait_for_timeout(1000)
+                row = page.locator("#list4 tr.jqgrow").first
+                if await row.count() and await row.is_visible():
+                    try:
+                        await row.click(force=True)
+                    except Exception:
+                        try:
+                            await row.dispatch_event("click")
+                        except Exception:
+                            pass
                     await page.wait_for_timeout(800)
-                else:
-                    res.not_found.append(jan)  # 全 JAN 查无 = 新品（自动建后续迭代）
-                    continue
+                if i == 0:
+                    await shot(page, "item1_after_select")  # 诊断：看第1个商品有没有选上
                 q = page.locator(f"[id='{rowid}_unitQuantity']")
                 if await q.count():
                     await q.fill(str(qty))
