@@ -93,7 +93,8 @@ async def backfill_draft(
             await browser.close()
             return res
         page = await context.new_page()
-        page.set_default_timeout(30000)
+        page.set_default_timeout(12000)             # 动作超时 12s（失败更快，便于调试）
+        page.set_default_navigation_timeout(30000)  # 导航仍留 30s
 
         try:
             # 1. 打开列表页（带 session 应已登录）
