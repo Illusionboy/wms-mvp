@@ -28,8 +28,31 @@ from app.services.inventory import (
     stock_out_item,
 )
 from app.schemas.inventory import StockInCreate, StockOutCreate
+from app.scrapers.qinsi_backfill import backfill_draft
+
+import re
+from pathlib import Path
+from typing import Annotated, Literal
+
+from fastapi import HTTPException, Query
+from fastapi.responses import FileResponse
+from pydantic import Field
 
 router = APIRouter()
+
+_BF_DEBUG_DIR = Path("app/data/qinsi_backfill_debug")
+_BF_SHOT_RE = re.compile(r"^\d{2}_[\w.]+\.png$")
+
+
+class BackfillItem(BaseModel):
+    jan_code: Annotated[str, Field(min_length=5, max_length=32)]
+    quantity: Annotated[int, Field(ge=1)]
+
+
+class BackfillRequest(BaseModel):
+    items: Annotated[list[BackfillItem], Field(min_length=1)]
+    direction: Literal["in", "out"] = "in"
+    warehouse_name: str = "普通仓库"
 
 
 class AuthStatus(BaseModel):
@@ -311,3 +334,31 @@ async def apply_scraped_records(
         await session.commit()
 
     return ApplyResult(applied=applied, skipped=skipped, duplicate=duplicate, errors=errors)
+
+
+# ── 反向回填（Playwright 填表存草稿）─────────────────────────────────────────
+@router.post("/backfill")
+async def backfill(
+    payload: BackfillRequest,
+    current_user: CurrentUser = Depends(require_auth),
+) -> dict:
+    """把点数结果(JAN+数量)存成秦丝采购(入库)/批发(出库)**草稿**。首版：监督调试，返回每步日志/截图。"""
+    res = await backfill_draft(
+        [(it.jan_code, it.quantity) for it in payload.items],
+        direction=payload.direction,
+        warehouse_name=payload.warehouse_name,
+    )
+    return {
+        "success": res.success, "error": res.error, "steps": res.steps, "shots": res.shots,
+        "created_new": res.created_new, "not_found": res.not_found, "direction": payload.direction,
+    }
+
+
+@router.get("/backfill/shot/{direction}/{name}", dependencies=[Depends(require_auth)])
+async def backfill_shot(direction: str, name: str) -> FileResponse:
+    if direction not in ("in", "out") or not _BF_SHOT_RE.match(name):
+        raise HTTPException(status_code=400, detail="非法参数")
+    p = _BF_DEBUG_DIR / direction / name
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="截图不存在")
+    return FileResponse(str(p), media_type="image/png")

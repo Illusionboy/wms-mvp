@@ -1155,6 +1155,18 @@ tr:hover td { background: var(--accent-bg); }
         <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="countPalletCheck()">对账</button>
         <div id="count-pallet-result" style="margin-top:12px"></div>
       </div>
+
+      <!-- 秦丝反向回填（Playwright 存草稿）· 调试迭代中 -->
+      <div class="card" style="margin-top:12px;border:1px dashed var(--accent)">
+        <div class="card-title">回填秦丝草稿（调试中）</div>
+        <div class="section-sub" style="margin-bottom:10px">把当前点数按 JAN+数量 存成秦丝采购(入库)/批发(出库)<b>草稿</b>（只存草稿、不提交）。复用秦丝会话。<b>首版监督调试</b>，下面显示每步截图。</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-row" style="margin:0"><label>方向</label><select id="qbf-dir"><option value="in">入库(采购)</option><option value="out">出库(批发)</option></select></div>
+          <div class="form-row" style="margin:0"><label>仓库</label><select id="qbf-wh"><option>普通仓库</option><option>乐天仓库</option></select></div>
+          <button class="btn btn-primary btn-sm" style="margin-bottom:0" onclick="qinsiBackfill()">存秦丝草稿（调试）</button>
+        </div>
+        <div id="qbf-result" style="margin-top:12px"></div>
+      </div>
     </div>
 
     <div class="section" id="section-qinsi">
@@ -4960,6 +4972,33 @@ async function countCopy(id) {
   const el = document.getElementById(id); const text = el.value;
   try { await navigator.clipboard.writeText(text); toast('已复制', 'ok'); }
   catch { el.focus(); el.select(); try { document.execCommand('copy'); toast('已复制', 'ok'); } catch { toast('复制失败，请手动选择', 'err'); } }
+}
+// 秦丝反向回填（调试）：把点数存成秦丝草稿，展示每步截图（复用 _authImg）
+async function qinsiBackfill() {
+  const items = _count.items.map(it => ({ jan_code: it.jan_code, quantity: _countQty(it) })).filter(x => x.quantity > 0);
+  if (!items.length) { toast('还没有点数', 'err'); return; }
+  const dir = document.getElementById('qbf-dir').value;
+  const wh = document.getElementById('qbf-wh').value;
+  const out = document.getElementById('qbf-result');
+  out.innerHTML = '<p class="loading">正在开秦丝浏览器填草稿…（约 20–60 秒）</p>';
+  try {
+    const r = await api('POST', '/qinsi/backfill', { items, direction: dir, warehouse_name: wh });
+    let html = r.success ? '<div style="color:#16a34a;font-weight:600;margin-bottom:6px">✓ 已存草稿</div>'
+      : `<div style="color:var(--danger);font-weight:600;margin-bottom:6px">✗ 未完成：${esc(r.error || '见步骤截图')}</div>`;
+    if (r.not_found && r.not_found.length) html += `<div style="color:var(--warn)">查无商品(新品待建)：${r.not_found.map(esc).join(', ')}</div>`;
+    html += '<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">';
+    (r.steps || []).forEach((s, i) => {
+      const shot = (r.shots || [])[i];
+      const dot = s.ok ? '<span style="color:#16a34a">●</span>' : '<span style="color:var(--danger)">●</span>';
+      html += `<div style="border:1px solid var(--border);border-radius:6px;padding:8px">
+        <div style="font-size:13px">${dot} <b>${esc(s.step)}</b>${s.note ? (' <span style="color:var(--muted)">— ' + esc(s.note) + '</span>') : ''}</div>
+        <div style="font-size:11px;color:var(--muted);word-break:break-all">${esc(s.url || '')}</div>
+        ${shot ? `<img data-shot="${esc(dir)}/${esc(shot)}" style="max-width:100%;margin-top:6px;border:1px solid var(--border);border-radius:4px;cursor:pointer" onclick="window.open(this.src)">` : ''}
+      </div>`;
+    });
+    html += '</div>'; out.innerHTML = html;
+    out.querySelectorAll('img[data-shot]').forEach(img => _authImg(img, '/qinsi/backfill/shot/' + img.dataset.shot));
+  } catch (e) { out.innerHTML = resultCard('err', e.message); }
 }
 function goToAdd(code) {
   const btn = document.querySelector('.nav-item[data-section="container-add"]');
