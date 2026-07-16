@@ -141,14 +141,14 @@ async def backfill_draft(
                     await si.fill("WMS回填")
                     await page.wait_for_timeout(1600)
                     await shot(page, "supplier_search")
-                    opt = page.locator(
-                        ":is(li,tr,a,div,span)[ng-click]:visible"
-                    ).filter(has_text="WMS回填").first
-                    if not await opt.count():
-                        opt = page.get_by_text("WMS回填", exact=False).last
+                    # 结果是带人像图标的可点项，文本正好"WMS回填"。真实点击(下拉项不被遮挡)，兜底 dispatch。
+                    opt = page.get_by_text("WMS回填", exact=True).first
                     if await opt.count():
-                        await opt.dispatch_event("click")
-                        await page.wait_for_timeout(900)
+                        try:
+                            await opt.click(timeout=5000)
+                        except Exception:
+                            await opt.dispatch_event("click")
+                        await page.wait_for_timeout(1200)
             await shot(page, "after_supplier")
 
             # 3. 逐个加货：往订单行 #{rowid}_goodName 输全 JAN → 下拉点第一个 → 填 #{rowid}_unitQuantity
