@@ -21,7 +21,7 @@ _URLS = {
     "in": "https://web.syt.qinsilk.com/gis/template/nadmin/inner/orders/purchaseList.html?mid=2&version=6.84.0",
     "out": "https://web.syt.qinsilk.com/gis/template/nadmin/inner/sale/wholesaleOrdersList.html?mid=4&version=6.84.0",
 }
-_NEW_BTN = {"in": "新增采购单", "out": "新增销售单"}
+_NEW_BTN = {"in": "新增采购单", "out": "新增"}  # 销售页打开即是新单表单，点「新增」保险起见
 # 新品自动建（后续迭代用）：商品管理 → 新增商品，只填 名称 + 货号=JAN + 条码=JAN
 _ADD_GOODS_URL = "https://web.syt.qinsilk.com/gis/static/view#/setting/goods/goodsList?mid=108&type=addGoods"
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -109,16 +109,21 @@ async def backfill_draft(
                 res.error = "秦丝 session 失效（跳到登录页），请刷新会话"
                 return res
 
-            # 2. 新增草稿
+            # 2. 打开新单：采购点「新增采购单」；销售页加载即是新单表单。点得到就点(找不到不报错，用已开表单)。
             nb = page.locator(f"text={_NEW_BTN[direction]}").first
             if await nb.count():
-                await nb.click()
-            else:
-                await shot(page, "NEW_BTN_NOT_FOUND", ok=False, note=f"没找到「{_NEW_BTN[direction]}」按钮")
-                res.error = f"没找到「{_NEW_BTN[direction]}」按钮（见截图）"
-                return res
-            await page.wait_for_timeout(2500)
+                try:
+                    await nb.click()
+                    await page.wait_for_timeout(2500)
+                except Exception:
+                    pass
             await shot(page, "new_draft_form")
+            # 表单就绪判定：有商品行输入框 或「选择商品」按钮；否则报错
+            form_ready = await page.locator("[id='1_goodName']").count() or await page.locator("text=选择商品").count()
+            if not form_ready:
+                await shot(page, "FORM_NOT_READY", ok=False, note="新单表单未就绪(无商品行/选择商品)")
+                res.error = "新单表单未打开（见截图）"
+                return res
 
             # 2b. 供应商：选「WMS回填」（点供应商选择器→搜索框输入→点结果）。仓库仍用默认(北津守)。
             #     供应商是第一个 mstxt_（供应商→仓库→结算账户顺序）。
@@ -178,7 +183,8 @@ async def backfill_draft(
             await shot(page, "after_items")
 
             # 4. 保存草稿：按钮文案就是「草稿」(ng-click=saveOrder)，禁用条件含 supplierId/depotId/accountId/商品
-            btn = page.locator("button.btn-normal:text-is('草稿'), button:text-is('草稿')").first
+            # 采购按钮=「草稿」，销售=「草稿 (Ctrl+D)」→ 用包含匹配 + :visible（排除隐藏的"复制草稿")
+            btn = page.locator("button:visible:has-text('草稿')").first
             if not await btn.count():
                 await shot(page, "save_btn_NOT_FOUND", ok=False, note="没找到「草稿」按钮")
                 res.error = "没找到「草稿」保存按钮（见截图）"
