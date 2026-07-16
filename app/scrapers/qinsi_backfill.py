@@ -127,9 +127,11 @@ async def backfill_draft(
 
             # 2b. 供应商：选「WMS回填」（点供应商选择器→搜索框输入→点结果）。仓库仍用默认(北津守)。
             #     供应商是第一个 mstxt_（供应商→仓库→结算账户顺序）。
-            sup = page.locator("[id='mstxt_']").first
+            # 订单表单的对方(供应商/客户)选择器是 ng-model="MsModel.text"（第一个）；左侧筛选不是。
+            # dispatch_event 打开，绕过橙色提示条遮挡。
+            sup = page.locator("input[ng-model='MsModel.text']").first
             if await sup.count():
-                await sup.click()
+                await sup.dispatch_event("click")
                 await page.wait_for_timeout(1200)
                 await shot(page, "supplier_picker")
                 si = page.locator("input[ng-model='searchKey']:visible").first
@@ -156,8 +158,8 @@ async def backfill_draft(
                     # 行未进入编辑态：点该行商品格触发行内编辑
                     cell = page.locator(f"tr[id='{rowid}'] td[aria-describedby$='_goodName']").first
                     if await cell.count():
-                        await cell.click()
-                        await page.wait_for_timeout(500)
+                        await cell.dispatch_event("click")   # 派发 click 进入行内编辑（绕过货号遮挡）
+                        await page.wait_for_timeout(600)
                         gn = page.locator(f"[id='{rowid}_goodName']")
                 if not await gn.count():
                     res.not_found.append(jan)
