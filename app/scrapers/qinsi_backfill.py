@@ -24,6 +24,8 @@ _URLS = {
 _NEW_BTN = {"in": "新增采购单", "out": "新增"}  # 销售页打开即是新单表单，点「新增」保险起见
 # 订单表单的对方选择器（按方向）：采购供应商=第一个 MsModel；销售客户有专属 id。
 _CP_SEL = {"in": "input[ng-model='MsModel.text']", "out": "#mstxt_saleClientSelectInput"}
+# 对方 picker 里的搜索框（避免命中左侧列表筛选）：销售客户 picker 有专属 placeholder。
+_SEARCH_SEL = {"in": "input[ng-model='searchKey']:visible", "out": "input[placeholder*='客户名称']"}
 # 新品自动建（后续迭代用）：商品管理 → 新增商品，只填 名称 + 货号=JAN + 条码=JAN
 _ADD_GOODS_URL = "https://web.syt.qinsilk.com/gis/static/view#/setting/goods/goodsList?mid=108&type=addGoods"
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -136,7 +138,7 @@ async def backfill_draft(
                 await sup.dispatch_event("click")
                 await page.wait_for_timeout(1200)
                 await shot(page, "supplier_picker")
-                si = page.locator("input[ng-model='searchKey']:visible").first
+                si = page.locator(_SEARCH_SEL[direction]).first
                 if await si.count():
                     await si.fill("WMS回填")
                     await page.wait_for_timeout(1600)
@@ -154,6 +156,30 @@ async def backfill_draft(
                         await page.wait_for_timeout(1200)
             await shot(page, "after_supplier")
 
+            # 诊断 dump：客户框值 + 所有 searchKey(哪个被填) + 结果项 li，一次看全，不再盲猜
+            try:
+                diag = await page.evaluate(
+                    "() => { const q = s => Array.from(document.querySelectorAll(s));"
+                    " return {"
+                    "  cp_out: (document.querySelector(\"#mstxt_saleClientSelectInput\")||{}).value,"
+                    "  cp_msmodel: q(\"input[ng-model='MsModel.text']\").map(e=>({id:e.id, val:e.value, vis:!!(e.offsetWidth||e.offsetHeight)})),"
+                    "  searchKeys: q(\"input[ng-model='searchKey']\").map(e=>({ph:e.placeholder, val:e.value, vis:!!(e.offsetWidth||e.offsetHeight)})),"
+                    "  options: q(\"li[ng-click='selected(option)']\").map(e=>({txt:(e.textContent||'').trim().slice(0,24), vis:!!(e.offsetWidth||e.offsetHeight)})).slice(0,12),"
+                    "  goodNameInputs: q(\"[id$='_goodName']\").map(e=>({id:e.id, tag:e.tagName})),"
+                    " }; }"
+                )
+                (debug_dir / "diag.json").write_text(json.dumps(diag, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
+            # 校验对方已选中「WMS回填」——没选中就中止（否则后续 JAN 会串进还开着的搜索框）
+            cp = page.locator(_CP_SEL[direction]).first
+            cp_val = await cp.get_attribute("value") if await cp.count() else None
+            if not cp_val or "回填" not in cp_val:
+                await shot(page, "CP_NOT_SELECTED", ok=False, note=f"对方(WMS回填)未选中，当前=「{cp_val}」")
+                res.error = f"对方(WMS回填)未选中，当前为「{cp_val}」——已中止避免污染（见截图）"
+                return res
+
             # 3. 逐个加货：往订单行 #{rowid}_goodName 输全 JAN → 下拉点第一个 → 填 #{rowid}_unitQuantity
             for i, (jan, qty) in enumerate(items[:10]):
                 rowid = str(i + 1)
@@ -163,8 +189,8 @@ async def backfill_draft(
                     # 行未进入编辑态：点该行商品格触发行内编辑
                     cell = page.locator(f"tr[id='{rowid}'] td[aria-describedby$='_goodName']").first
                     if await cell.count():
-                        await cell.dispatch_event("click")   # 派发 click 进入行内编辑（绕过货号遮挡）
-                        await page.wait_for_timeout(600)
+                        await cell.click()   # 真实点击触发 jqGrid 进入编辑(销售是 td 点击式，dispatch 不触发)
+                        await page.wait_for_timeout(700)
                         gn = page.locator(f"[id='{rowid}_goodName']")
                 if not await gn.count():
                     res.not_found.append(jan)
