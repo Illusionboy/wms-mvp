@@ -22,6 +22,8 @@ _URLS = {
     "out": "https://web.syt.qinsilk.com/gis/template/nadmin/inner/sale/wholesaleOrdersList.html?mid=4&version=6.84.0",
 }
 _NEW_BTN = {"in": "新增采购单", "out": "新增"}  # 销售页打开即是新单表单，点「新增」保险起见
+# 订单表单的对方选择器（按方向）：采购供应商=第一个 MsModel；销售客户有专属 id。
+_CP_SEL = {"in": "input[ng-model='MsModel.text']", "out": "#mstxt_saleClientSelectInput"}
 # 新品自动建（后续迭代用）：商品管理 → 新增商品，只填 名称 + 货号=JAN + 条码=JAN
 _ADD_GOODS_URL = "https://web.syt.qinsilk.com/gis/static/view#/setting/goods/goodsList?mid=108&type=addGoods"
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -127,9 +129,9 @@ async def backfill_draft(
 
             # 2b. 供应商：选「WMS回填」（点供应商选择器→搜索框输入→点结果）。仓库仍用默认(北津守)。
             #     供应商是第一个 mstxt_（供应商→仓库→结算账户顺序）。
-            # 订单表单的对方(供应商/客户)选择器是 ng-model="MsModel.text"（第一个）；左侧筛选不是。
+            # 订单表单的对方选择器（采购供应商=第一个 MsModel；销售客户=专属 id）。
             # dispatch_event 打开，绕过橙色提示条遮挡。
-            sup = page.locator("input[ng-model='MsModel.text']").first
+            sup = page.locator(_CP_SEL[direction]).first
             if await sup.count():
                 await sup.dispatch_event("click")
                 await page.wait_for_timeout(1200)
@@ -167,12 +169,14 @@ async def backfill_draft(
                 await gn.click()
                 await gn.fill(jan)              # oninput=changAutoGoods → 弹出下拉
                 await page.wait_for_timeout(1600)
-                # 下拉是普通 Angular 表格：结果行 <tr ng-click="selAutoGood(good)">，取含本 JAN 的可见行
+                # 下拉两种实现：采购=Angular tr[ng-click=selAutoGood]；销售=jqGrid td[list4_goodName]「点击选择」
                 sel = page.locator("tr[ng-click='selAutoGood(good)']:visible").filter(has_text=jan).first
                 if not await sel.count():
                     sel = page.locator("tr[ng-click='selAutoGood(good)']:visible").first
+                if not await sel.count():
+                    sel = page.locator("td[aria-describedby='list4_goodName']:visible").filter(has_text="点击选择").first
                 if await sel.count():
-                    await sel.dispatch_event("click")   # 触发 Angular selAutoGood(good) 选中
+                    await sel.dispatch_event("click")   # 触发选中
                     await page.wait_for_timeout(900)
                 else:
                     res.not_found.append(jan)  # 全 JAN 查无 = 新品（自动建后续迭代）
