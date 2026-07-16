@@ -134,14 +134,14 @@ async def backfill_draft(
                     res.not_found.append(jan)
                     continue
                 await gn.click()
-                await gn.fill(jan)
-                await page.wait_for_timeout(1600)   # 等搜索下拉 list4
-                sel = page.locator("td[aria-describedby='list4_goodName']").filter(has_text="点击选择").first
+                await gn.fill(jan)              # oninput=changAutoGoods → 弹出下拉
+                await page.wait_for_timeout(1600)
+                # 下拉是普通 Angular 表格：结果行 <tr ng-click="selAutoGood(good)">，取含本 JAN 的可见行
+                sel = page.locator("tr[ng-click='selAutoGood(good)']:visible").filter(has_text=jan).first
                 if not await sel.count():
-                    sel = page.locator("#list4 tr.jqgrow td[aria-describedby='list4_goodName']").first
+                    sel = page.locator("tr[ng-click='selAutoGood(good)']:visible").first
                 if await sel.count():
-                    # force 点击仍落在盖在上面的「货号」上 → 用 dispatch_event 把 click 直接派发到该元素(无视遮挡)
-                    await sel.dispatch_event("click")
+                    await sel.dispatch_event("click")   # 触发 Angular selAutoGood(good) 选中
                     await page.wait_for_timeout(900)
                 else:
                     res.not_found.append(jan)  # 全 JAN 查无 = 新品（自动建后续迭代）
