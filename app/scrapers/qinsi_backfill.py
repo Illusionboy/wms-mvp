@@ -117,8 +117,29 @@ async def backfill_draft(
             await page.wait_for_timeout(2500)
             await shot(page, "new_draft_form")
 
-            # 供应商 + 仓库：都用秦丝默认（仓库默认=北津守仓库，供应商默认亦可）——不改。
-            # 3. 逐个加货：往订单行 #{rowid}_goodName 输全 JAN → list4 下拉点第一个 → 填 #{rowid}_unitQuantity
+            # 2b. 供应商：选「WMS回填」（点供应商选择器→搜索框输入→点结果）。仓库仍用默认(北津守)。
+            #     供应商是第一个 mstxt_（供应商→仓库→结算账户顺序）。
+            sup = page.locator("[id='mstxt_']").first
+            if await sup.count():
+                await sup.click()
+                await page.wait_for_timeout(1200)
+                await shot(page, "supplier_picker")
+                si = page.locator("input[ng-model='searchKey']:visible").first
+                if await si.count():
+                    await si.fill("WMS回填")
+                    await page.wait_for_timeout(1600)
+                    await shot(page, "supplier_search")
+                    opt = page.locator(
+                        ":is(li,tr,a,div,span)[ng-click]:visible"
+                    ).filter(has_text="WMS回填").first
+                    if not await opt.count():
+                        opt = page.get_by_text("WMS回填", exact=False).last
+                    if await opt.count():
+                        await opt.dispatch_event("click")
+                        await page.wait_for_timeout(900)
+            await shot(page, "after_supplier")
+
+            # 3. 逐个加货：往订单行 #{rowid}_goodName 输全 JAN → 下拉点第一个 → 填 #{rowid}_unitQuantity
             for i, (jan, qty) in enumerate(items[:10]):
                 rowid = str(i + 1)
                 # 注意：id 以数字开头，CSS #1_goodName 非法，必须用属性选择器 [id="1_goodName"]
