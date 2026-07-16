@@ -139,7 +139,8 @@ async def backfill_draft(
                 if not await sel.count():
                     sel = page.locator("#list4 tr.jqgrow td[aria-describedby='list4_goodName']").first
                 if await sel.count():
-                    await sel.click()
+                    # 相邻「货号」子树/tooltip 会拦截 pointer → force 强制点击绕过遮挡
+                    await sel.click(force=True)
                     await page.wait_for_timeout(800)
                 else:
                     res.not_found.append(jan)  # 全 JAN 查无 = 新品（自动建后续迭代）
