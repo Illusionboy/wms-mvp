@@ -1536,11 +1536,13 @@ tr:hover td { background: var(--accent-bg); }
         <div id="ar-list"><p class="loading">加载中…</p></div>
         <div style="display:flex;gap:8px;margin-top:10px">
           <button class="btn btn-ghost btn-sm" onclick="loadAutoRuns()">刷新</button>
-          <button class="btn btn-ghost btn-sm" onclick="runAutoAll()">立即跑两店（测试）</button>
+          <!-- 调试用，暂隐藏（需调试时去掉 display:none）-->
+          <button class="btn btn-ghost btn-sm" onclick="runAutoAll()" style="display:none">立即跑两店（测试）</button>
         </div>
       </div>
-      <hr class="divider">
-      <div class="card" style="border:1px dashed var(--accent)">
+      <!-- 调试用整块，暂隐藏（需调试时去掉这段的 display:none）-->
+      <hr class="divider" style="display:none">
+      <div class="card" style="border:1px dashed var(--accent);display:none">
         <div class="card-title">🤖 自动下载订单（P2b · 监督首跑）</div>
         <div class="section-sub" style="margin-bottom:10px">用「设置→乐天账号」里的凭据自动登录 RMS 下载近 N 天「発送待ち」CSV。<b>第一次请盯着看下面的每步截图</b>，确认能过登录（若被风控拦，我们改走本机刷 session）。成功后可直接下 CSV 或喂给下方快递单生成。</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
@@ -5155,7 +5157,7 @@ async function loadAutoRuns() {
   if (!box) return;
   try {
     const runs = await api('GET', '/rakuten/auto-runs');
-    if (!runs.length) { box.innerHTML = '<p class="loading">还没有自动运行记录（定时未跑过，或点「立即跑两店」测试）</p>'; return; }
+    if (!runs.length) { box.innerHTML = '<p class="loading">还没有自动运行记录（定时 Mon–Sat 08:50 跑完后这里显示）</p>'; return; }
     box.innerHTML = '<div class="table-wrap"><table><thead><tr><th>店铺</th><th>状态</th><th>订单数</th><th>快递单(佐/ヤ/郵)</th><th>时间</th><th></th></tr></thead><tbody>'
       + runs.map(r => {
         const ok = r.status === 'success';
