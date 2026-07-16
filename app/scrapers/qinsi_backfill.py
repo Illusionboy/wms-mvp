@@ -120,14 +120,15 @@ async def backfill_draft(
             # 3. 逐个加货：往订单行 #{rowid}_goodName 输全 JAN → list4 下拉点第一个 → 填 #{rowid}_unitQuantity
             for i, (jan, qty) in enumerate(items[:10]):
                 rowid = str(i + 1)
-                gn = page.locator(f"#{rowid}_goodName")
+                # 注意：id 以数字开头，CSS #1_goodName 非法，必须用属性选择器 [id="1_goodName"]
+                gn = page.locator(f"[id='{rowid}_goodName']")
                 if not await gn.count():
                     # 行未进入编辑态：点该行商品格触发行内编辑
-                    cell = page.locator(f"tr#{rowid} td[aria-describedby$='_goodName']").first
+                    cell = page.locator(f"tr[id='{rowid}'] td[aria-describedby$='_goodName']").first
                     if await cell.count():
                         await cell.click()
                         await page.wait_for_timeout(500)
-                        gn = page.locator(f"#{rowid}_goodName")
+                        gn = page.locator(f"[id='{rowid}_goodName']")
                 if not await gn.count():
                     res.not_found.append(jan)
                     continue
@@ -143,7 +144,7 @@ async def backfill_draft(
                 else:
                     res.not_found.append(jan)  # 全 JAN 查无 = 新品（自动建后续迭代）
                     continue
-                q = page.locator(f"#{rowid}_unitQuantity")
+                q = page.locator(f"[id='{rowid}_unitQuantity']")
                 if await q.count():
                     await q.fill(str(qty))
             await shot(page, "after_items")
