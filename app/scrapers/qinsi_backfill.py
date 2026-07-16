@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -95,6 +96,8 @@ async def backfill_draft(
         page = await context.new_page()
         page.set_default_timeout(12000)             # 动作超时 12s（失败更快，便于调试）
         page.set_default_navigation_timeout(30000)  # 导航仍留 30s
+        # 出库库存不足会弹原生 confirm（"库存将为负…是否确认"）→ 自动接受（与按钮文案无关，各浏览器通用）
+        page.on("dialog", lambda dialog: asyncio.ensure_future(dialog.accept()))
 
         try:
             # 1. 打开列表页（带 session 应已登录）
