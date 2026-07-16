@@ -116,21 +116,55 @@ async def backfill_draft(
             await page.wait_for_timeout(2500)
             await shot(page, "new_draft_form")
 
-            # 3. 逐个扫码加货（扫码框 placeholder=请扫描商品条形码）
-            scan = page.locator("input[placeholder*='扫描商品条形码'], input[placeholder*='请扫描商品条形码']").first
-            if not await scan.count():
-                await shot(page, "SCAN_INPUT_NOT_FOUND", ok=False, note="没找到扫码输入框（可能要先点『扫码录入』）")
-                res.error = "没找到扫码输入框（见截图，待补开扫码的步骤）"
-                return res
-            for jan, qty in items[:5]:  # 首版最多试 5 个
-                await scan.fill(jan)
-                await scan.press("Enter")
-                await page.wait_for_timeout(1500)
-            await shot(page, "after_scan")
+            # 供应商 + 仓库：都用秦丝默认（仓库默认=北津守仓库，供应商默认亦可）——不改。
+            # 3. 逐个加货：往订单行 #{rowid}_goodName 输全 JAN → list4 下拉点第一个 → 填 #{rowid}_unitQuantity
+            for i, (jan, qty) in enumerate(items[:10]):
+                rowid = str(i + 1)
+                gn = page.locator(f"#{rowid}_goodName")
+                if not await gn.count():
+                    # 行未进入编辑态：点该行商品格触发行内编辑
+                    cell = page.locator(f"tr#{rowid} td[aria-describedby$='_goodName']").first
+                    if await cell.count():
+                        await cell.click()
+                        await page.wait_for_timeout(500)
+                        gn = page.locator(f"#{rowid}_goodName")
+                if not await gn.count():
+                    res.not_found.append(jan)
+                    continue
+                await gn.click()
+                await gn.fill(jan)
+                await page.wait_for_timeout(1600)  # 等 list4 搜索下拉
+                sel = page.locator("td[aria-describedby='list4_goodName']").filter(has_text="点击选择").first
+                if not await sel.count():
+                    sel = page.locator("#list4 tr.jqgrow td[aria-describedby='list4_goodName']").first
+                if await sel.count():
+                    await sel.click()
+                    await page.wait_for_timeout(800)
+                else:
+                    res.not_found.append(jan)  # 全 JAN 查无 = 新品（自动建后续迭代）
+                    continue
+                q = page.locator(f"#{rowid}_unitQuantity")
+                if await q.count():
+                    await q.fill(str(qty))
+            await shot(page, "after_items")
 
-            # 4. 保存草稿（待定位确切按钮，先截图看有哪些按钮）
-            await shot(page, "before_save")
-            res.error = "首版跑到『已扫码』，保存草稿按钮/数量填写/供应商仓库 待按截图补下一步"
+            # 4. 保存草稿（尝试点「保存草稿」；找不到就截图看有哪些按钮）
+            saved = False
+            for t in ("保存草稿", "存草稿", "保 存 草 稿"):
+                b = page.locator(f"button:has-text('{t}'), a:has-text('{t}')").first
+                if await b.count():
+                    await b.click()
+                    saved = True
+                    break
+            await page.wait_for_timeout(3000)
+            await shot(page, "after_save" if saved else "save_btn_NOT_FOUND", ok=saved,
+                       note="" if saved else "没找到保存草稿按钮——截图看页面上有哪些按钮")
+            if saved and not res.not_found:
+                res.success = True
+            elif not saved:
+                res.error = "商品/数量已填，但没找到保存草稿按钮（见截图，把按钮文案告我）"
+            else:
+                res.error = f"部分完成：{len(res.not_found)} 个 JAN 查无(新品待建)：{', '.join(res.not_found[:5])}"
         except Exception as exc:  # noqa: BLE001
             try:
                 await shot(page, "EXCEPTION", ok=False, note=str(exc)[:200])
