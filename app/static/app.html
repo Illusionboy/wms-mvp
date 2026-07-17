@@ -4975,12 +4975,16 @@ async function countCopy(id) {
 }
 // 秦丝反向回填（调试）：把点数存成秦丝草稿，展示每步截图（复用 _authImg）
 async function qinsiBackfill() {
+  if (qinsiBackfill._running) { toast('回填正在进行，请等它结束再点（每次只跑一个，避免占满秦丝服务器内存）', 'err'); return; }
   const items = _count.items.map(it => ({ jan_code: it.jan_code, quantity: _countQty(it) })).filter(x => x.quantity > 0);
   if (!items.length) { toast('还没有点数', 'err'); return; }
   const dir = document.getElementById('qbf-dir').value;
   const wh = document.getElementById('qbf-wh').value;
   const out = document.getElementById('qbf-result');
-  out.innerHTML = '<p class="loading">正在开秦丝浏览器填草稿…（约 20–60 秒）</p>';
+  const btn = document.querySelector('button[onclick="qinsiBackfill()"]');
+  qinsiBackfill._running = true;
+  if (btn) { btn.disabled = true; btn.dataset.t = btn.textContent; btn.textContent = '回填中…请勿重复点击'; }
+  out.innerHTML = '<p class="loading">正在开秦丝浏览器填草稿…（约 30–90 秒，请勿重复点击）</p>';
   try {
     const r = await api('POST', '/qinsi/backfill', { items, direction: dir, warehouse_name: wh });
     let html = r.success ? '<div style="color:#16a34a;font-weight:600;margin-bottom:6px">✓ 已存草稿</div>'
@@ -4999,6 +5003,10 @@ async function qinsiBackfill() {
     html += '</div>'; out.innerHTML = html;
     out.querySelectorAll('img[data-shot]').forEach(img => _authImg(img, '/qinsi/backfill/shot/' + img.dataset.shot));
   } catch (e) { out.innerHTML = resultCard('err', e.message); }
+  finally {
+    qinsiBackfill._running = false;
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset.t || '存秦丝草稿（调试）'; }
+  }
 }
 function goToAdd(code) {
   const btn = document.querySelector('.nav-item[data-section="container-add"]');
