@@ -4984,7 +4984,7 @@ async function qinsiBackfill() {
   const btn = document.querySelector('button[onclick="qinsiBackfill()"]');
   qinsiBackfill._running = true;
   if (btn) { btn.disabled = true; btn.dataset.t = btn.textContent; btn.textContent = '回填中…请勿重复点击'; }
-  out.innerHTML = '<p class="loading">正在开秦丝浏览器填草稿…（约 30–90 秒，请勿重复点击）</p>';
+  out.innerHTML = '<p class="loading">正在提交秦丝草稿…（约几秒）</p>';
   try {
     const r = await api('POST', '/qinsi/backfill', { items, direction: dir, warehouse_name: wh });
     let html = r.success ? '<div style="color:#16a34a;font-weight:600;margin-bottom:6px">✓ 已存草稿</div>'

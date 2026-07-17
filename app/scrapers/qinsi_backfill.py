@@ -55,19 +55,22 @@ _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 # 直接 POST wholesaleOrdersSaveDraft.ac 建草稿(实测通)。以下账号级常量来自抓包，此秦丝账号稳定；
 # 后续可改为动态获取(getUserConfig.ac / accountByStoreIdGet.ac)或 .env 配置。
 _QS_BASE = "https://web.syt.qinsilk.com"
-_QS_SALE_SAVE_DRAFT = _QS_BASE + "/gis/admin/inner/sale/wholesaleOrdersSaveDraft.ac"
+_QS_SALE_SAVE_DRAFT = _QS_BASE + "/gis/admin/inner/sale/wholesaleOrdersSaveDraft.ac"        # 出库(批发)
+_QS_PURCHASE_SAVE_DRAFT = _QS_BASE + "/gis/admin/inner/orders/purchase/purchaseSaveDraft.ac"  # 入库(采购)
 _QS_SEARCH_GOODS = _QS_BASE + "/gis/admin/inner/goods/es/searchGoods.ac"
 _QS_SALER_ID = 1417501          # 耿哥仓管（登录操作员，销售员/经手人共用）
 _QS_SALER_NAME = "耿哥仓管"
 _QS_ACCOUNT_ID = 248211         # 默认账户
 _QS_ACCOUNT_NAME = "默认账户"
-_QS_DELIVERY_ID = 225573        # 顺丰速递（占位配送方式，草稿不影响库存）
+_QS_DELIVERY_ID = 225573        # 顺丰速递（出库占位配送方式，草稿不影响库存）
 _QS_DELIVERY_NAME = "顺丰速递"
-_QS_WMS_CLIENT_ID = 52535444    # WMS回填 客户
-# 前端仓库名(WMS) → 秦丝 depot。乐天仓库 depotId 待补(选它会明确报错)。
+_QS_WMS_CLIENT_ID = 52535444    # WMS回填 客户（出库对方）
+_QS_WMS_SUPPLIER_ID = 3810010   # WMS回填 供应商（入库对方，与客户id不同）
+# 前端仓库名(WMS/秦丝均可) → 秦丝 depot（id + 秦丝名）。
 _QS_DEPOT = {
     "普通仓库": {"id": 283425, "name": "北津守仓库"},
     "北津守仓库": {"id": 283425, "name": "北津守仓库"},
+    "乐天仓库": {"id": 1348869, "name": "乐天仓库"},
 }
 _QS_API_HEADERS = {
     "Origin": _QS_BASE, "qs-pcversion": "3.6.5",
@@ -100,14 +103,16 @@ async def _qs_goods_name_if_exists(client: httpx.AsyncClient, jan: str, depot_id
     return None
 
 
-async def _sales_backfill_api(items: list[tuple[str, int]], warehouse_name: str) -> "BackfillResult":
-    """出库(批发)回填：httpx 直接 POST wholesaleOrdersSaveDraft.ac 建草稿。不用浏览器。"""
+async def _api_backfill(items: list[tuple[str, int]], warehouse_name: str, direction: str) -> "BackfillResult":
+    """回填草稿：httpx 直接调秦丝接口。出库=wholesaleOrdersSaveDraft.ac，入库=purchaseSaveDraft.ac。不用浏览器。
+    草稿不校验库存（实测超库存也能存），对方统一 WMS回填。新品(searchGoods 查无)记入 not_found 不入单。"""
     res = BackfillResult()
     depot = _QS_DEPOT.get(warehouse_name)
     if depot is None:
         res.error = f"暂不支持仓库「{warehouse_name}」（缺秦丝 depotId，目前仅：{'/'.join(_QS_DEPOT)}）"
         return res
     depot_id, depot_name = depot["id"], depot["name"]
+    is_sale = direction == "out"
     try:
         cookies = _load_cookie_dict()
         assert cookies
@@ -124,67 +129,92 @@ async def _sales_backfill_api(items: list[tuple[str, int]], warehouse_name: str)
             if name is None:
                 res.not_found.append(jan)
                 continue
-            idx = len(goods)
             q = str(qty)
-            goods.append({
+            g = {
                 "goodsSn": jan, "quantity": q, "price": "0.00", "truePrice": "0.00",
-                "amount": "0.00", "trueAmount": "0.00", "discount": "100.00", "remark": "",
-                "unitId": "", "unitQuantity": q, "unit": "", "showOrder": idx, "isGift": "0",
+                "amount": "0.00", "trueAmount": "0.00", "discount": "100.00" if is_sale else "100",
+                "remark": "", "unitId": "", "unitQuantity": q, "unit": "",
+                "showOrder": len(goods),
                 "batchOrder": {"goodsSn": jan, "storehouseId": depot_id, "number": q},
-            })
+            }
+            if is_sale:
+                g["isGift"] = "0"
+            goods.append(g)
         if not goods:
             res.error = f"没有可回填的商品（{len(res.not_found)} 个 JAN 秦丝里查无，需先在秦丝建商品）"
             return res
 
         now = int(time.time() * 1000)
         total_qty = sum(int(g["quantity"]) for g in goods)
-        order = {
-            "otherCost": 0, "itemType": 1,
-            "salerName": _QS_SALER_NAME, "salerId": _QS_SALER_ID,
-            "handlerName": _QS_SALER_NAME, "handlerId": _QS_SALER_ID,
-            "clientName": "WMS回填", "clientId": _QS_WMS_CLIENT_ID,
-            "client": {"val": _QS_WMS_CLIENT_ID, "text": "WMS回填"},
-            "accountName": _QS_ACCOUNT_NAME, "accountId": _QS_ACCOUNT_ID,
-            "depotId": depot_id, "depotName": depot_name, "storehouseId": depot_id,
-            "depot": {"val": depot_id, "text": depot_name},
-            "discount": 100, "businessTime": now,
-            "isAssociationWout": "false", "trueTotalAmount": "0.00",
-            "receiptFinished": 0, "optimisticLockVersion": 0, "finalAmount": 0,
-            "state": 1, "printCounts": 0, "storehouseStoreId": 0,
-            "originalDebt": 0, "sourceTerminal": 1, "alreadyPaid": 0,
-            "frontSn": "", "rejectTotalCount": 0, "totalAmount": "0.00",
-            "deliveryPrintCounts": 0, "deliveryDesc": "自提",
-            "wipeZero": 0, "promotionAmount": 0, "receiptStatus": 1,
-            "finalTotalAmount": 0, "saleTotalCount": total_qty, "totalAvailableRows": len(goods),
-            "promotion": [], "promotionMessage": "无",
-        }
-        delivery = {
-            "deliveryCompanyId": _QS_DELIVERY_ID, "deliveryId": _QS_DELIVERY_ID,
-            "optimisticLockVersion": 0, "contact": "WMS回填", "deliveryType": 1,
-            "deliveryName": _QS_DELIVERY_NAME, "recipientCountyId": None,
-        }
-        data = {
-            "order": json.dumps(order, ensure_ascii=False),
-            "goods": json.dumps(goods, ensure_ascii=False),
-            "delivery": json.dumps(delivery, ensure_ascii=False),
-            "isWout": "false", "synClientDelivery": "false",
-            "saleCombinedPays": json.dumps(
-                [{"amount": 0, "type": "cash", "accountId": _QS_ACCOUNT_ID}], ensure_ascii=False),
-            "goodsActivityId": "",
-        }
+        if is_sale:
+            order = {
+                "otherCost": 0, "itemType": 1,
+                "salerName": _QS_SALER_NAME, "salerId": _QS_SALER_ID,
+                "handlerName": _QS_SALER_NAME, "handlerId": _QS_SALER_ID,
+                "clientName": "WMS回填", "clientId": _QS_WMS_CLIENT_ID,
+                "client": {"val": _QS_WMS_CLIENT_ID, "text": "WMS回填"},
+                "accountName": _QS_ACCOUNT_NAME, "accountId": _QS_ACCOUNT_ID,
+                "depotId": depot_id, "depotName": depot_name, "storehouseId": depot_id,
+                "depot": {"val": depot_id, "text": depot_name},
+                "discount": 100, "businessTime": now,
+                "isAssociationWout": "false", "trueTotalAmount": "0.00",
+                "receiptFinished": 0, "optimisticLockVersion": 0, "finalAmount": 0,
+                "state": 1, "printCounts": 0, "storehouseStoreId": 0,
+                "originalDebt": 0, "sourceTerminal": 1, "alreadyPaid": 0,
+                "frontSn": "", "rejectTotalCount": 0, "totalAmount": "0.00",
+                "deliveryPrintCounts": 0, "deliveryDesc": "自提",
+                "wipeZero": 0, "promotionAmount": 0, "receiptStatus": 1,
+                "finalTotalAmount": 0, "saleTotalCount": total_qty, "totalAvailableRows": len(goods),
+                "promotion": [], "promotionMessage": "无",
+            }
+            delivery = {
+                "deliveryCompanyId": _QS_DELIVERY_ID, "deliveryId": _QS_DELIVERY_ID,
+                "optimisticLockVersion": 0, "contact": "WMS回填", "deliveryType": 1,
+                "deliveryName": _QS_DELIVERY_NAME, "recipientCountyId": None,
+            }
+            data = {
+                "order": json.dumps(order, ensure_ascii=False),
+                "goods": json.dumps(goods, ensure_ascii=False),
+                "delivery": json.dumps(delivery, ensure_ascii=False),
+                "isWout": "false", "synClientDelivery": "false",
+                "saleCombinedPays": json.dumps(
+                    [{"amount": 0, "type": "cash", "accountId": _QS_ACCOUNT_ID}], ensure_ascii=False),
+                "goodsActivityId": "",
+            }
+            url = _QS_SALE_SAVE_DRAFT
+        else:  # 入库(采购)
+            order = {
+                "otherCost": 0, "wipeZero": 0, "alreadyPaid": 0, "discount": 100,
+                "totalAmount": "0.00", "handlerName": _QS_SALER_NAME, "state": 1, "itemType": 1,
+                "businessTime": now,
+                "supplier": {"supplierName": "WMS回填", "id": _QS_WMS_SUPPLIER_ID,
+                             "val": _QS_WMS_SUPPLIER_ID, "text": "WMS回填", "status": 1,
+                             "discount": 100, "balance": 0, "showOrder": 100},
+                "supplierId": _QS_WMS_SUPPLIER_ID,
+                "depot": {"val": depot_id, "text": depot_name}, "depotId": depot_id, "storeId": 0,
+                "trueTotalAmount": "0.00", "finalTotalAmount": 0,
+                "totalAvailableRows": len(goods), "accountId": _QS_ACCOUNT_ID,
+            }
+            data = {
+                "order": json.dumps(order, ensure_ascii=False),
+                "goods": json.dumps(goods, ensure_ascii=False),
+                "isWin": "false",
+            }
+            url = _QS_PURCHASE_SAVE_DRAFT
         try:
-            r = await client.post(_QS_SALE_SAVE_DRAFT, data=data)
+            r = await client.post(url, data=data)
             j = r.json()
         except Exception as exc:  # noqa: BLE001
             res.error = f"秦丝存草稿请求失败：{type(exc).__name__}: {exc}"
             return res
 
     if j.get("statusCode") == 1:
-        sn = ((j.get("object") or {}).get("ordersSn")
-              or (j.get("orderDelivery") or {}).get("orderSn") or "")
+        obj = j.get("object") or {}
+        sn = obj.get("ordersSn") or obj.get("purchaseSn") or (j.get("orderDelivery") or {}).get("orderSn") or ""
+        kind = "出库(批发)" if is_sale else "入库(采购)"
         res.success = not res.not_found
         res.steps.append({"step": "存草稿成功", "ok": True,
-                          "note": f"草稿号 {sn}，仓库 {depot_name}，{len(goods)} 个商品"})
+                          "note": f"{kind}草稿 {sn}，仓库 {depot_name}，{len(goods)} 个商品"})
         if res.not_found:
             res.error = (f"已存草稿({len(goods)}个)，但 {len(res.not_found)} 个 JAN 秦丝查无(新品待建)："
                          + ", ".join(res.not_found[:8]))
@@ -213,10 +243,10 @@ async def backfill_draft(
     headless: bool = True,
 ) -> BackfillResult:
     """items=[(jan, qty)]；direction='in'(采购入库)/'out'(批发出库)。
-    出库走 API 回放(httpx 直接建草稿，不用浏览器)；入库暂用 Playwright 填表。"""
-    if direction == "out":
-        return await _sales_backfill_api(items, warehouse_name)
+    出/入库都走 API 回放(httpx 直接建草稿，不用浏览器)——无离线弹窗、无 OOM。"""
+    return await _api_backfill(items, warehouse_name, direction)
 
+    # ↓↓↓ 以下 Playwright 填表路径已弃用（API 回放替代），保留备查，不再执行 ↓↓↓
     from playwright.async_api import TimeoutError as PWTimeout  # noqa: F401
     from playwright.async_api import async_playwright
 
