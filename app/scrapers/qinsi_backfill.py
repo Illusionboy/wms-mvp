@@ -11,8 +11,11 @@ import asyncio
 import json
 import logging
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,149 @@ _ADD_GOODS_URL = "https://web.syt.qinsilk.com/gis/static/view#/setting/goods/goo
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
+# ── 出库(销售批发)走 API 回放，不用浏览器 ──────────────────────────────────
+# 直接 POST wholesaleOrdersSaveDraft.ac 建草稿(实测通)。以下账号级常量来自抓包，此秦丝账号稳定；
+# 后续可改为动态获取(getUserConfig.ac / accountByStoreIdGet.ac)或 .env 配置。
+_QS_BASE = "https://web.syt.qinsilk.com"
+_QS_SALE_SAVE_DRAFT = _QS_BASE + "/gis/admin/inner/sale/wholesaleOrdersSaveDraft.ac"
+_QS_SEARCH_GOODS = _QS_BASE + "/gis/admin/inner/goods/es/searchGoods.ac"
+_QS_SALER_ID = 1417501          # 耿哥仓管（登录操作员，销售员/经手人共用）
+_QS_SALER_NAME = "耿哥仓管"
+_QS_ACCOUNT_ID = 248211         # 默认账户
+_QS_ACCOUNT_NAME = "默认账户"
+_QS_DELIVERY_ID = 225573        # 顺丰速递（占位配送方式，草稿不影响库存）
+_QS_DELIVERY_NAME = "顺丰速递"
+_QS_WMS_CLIENT_ID = 52535444    # WMS回填 客户
+# 前端仓库名(WMS) → 秦丝 depot。乐天仓库 depotId 待补(选它会明确报错)。
+_QS_DEPOT = {
+    "普通仓库": {"id": 283425, "name": "北津守仓库"},
+    "北津守仓库": {"id": 283425, "name": "北津守仓库"},
+}
+_QS_API_HEADERS = {
+    "Origin": _QS_BASE, "qs-pcversion": "3.6.5",
+    "Referer": _QS_BASE + "/gis/template/nadmin/inner/sale/wholesaleOrdersList.html?mid=4&version=6.84.1",
+    "User-Agent": _UA, "Accept": "application/json, text/plain, */*",
+    "X-Requested-With": "XMLHttpRequest",
+}
+
+
+def _load_cookie_dict() -> dict:
+    cks = json.loads(_SESSION_FILE.read_text())
+    return {c["name"]: c["value"] for c in cks if "name" in c and "value" in c}
+
+
+async def _qs_goods_name_if_exists(client: httpx.AsyncClient, jan: str, depot_id: int) -> str | None:
+    """按条码在秦丝搜商品；存在返回商品名，不存在返回 None（=新品，待建）。"""
+    try:
+        r = await client.post(
+            _QS_SEARCH_GOODS,
+            params={"page": 1, "dimensions": "number,name,code,specs",
+                    "orderType": "wholesaleOrders", "searchAllStoreFlag": "true",
+                    "searchKey": jan, "storehouseId": depot_id},
+            json={},
+        )
+        for o in r.json().get("optionList", []) or []:
+            if str(o.get("goodsSn") or o.get("barCode") or "") == jan:
+                return o.get("name") or ""
+    except Exception:
+        pass
+    return None
+
+
+async def _sales_backfill_api(items: list[tuple[str, int]], warehouse_name: str) -> "BackfillResult":
+    """出库(批发)回填：httpx 直接 POST wholesaleOrdersSaveDraft.ac 建草稿。不用浏览器。"""
+    res = BackfillResult()
+    depot = _QS_DEPOT.get(warehouse_name)
+    if depot is None:
+        res.error = f"暂不支持仓库「{warehouse_name}」（缺秦丝 depotId，目前仅：{'/'.join(_QS_DEPOT)}）"
+        return res
+    depot_id, depot_name = depot["id"], depot["name"]
+    try:
+        cookies = _load_cookie_dict()
+        assert cookies
+    except Exception:
+        res.error = "秦丝 session 未就绪——先刷新秦丝会话"
+        return res
+
+    async with httpx.AsyncClient(cookies=cookies, headers=_QS_API_HEADERS, timeout=30,
+                                 follow_redirects=False) as client:
+        # 逐个校验 JAN 是否为秦丝已有商品；新品(查无)记入 not_found，不塞进草稿避免整单失败
+        goods: list[dict] = []
+        for jan, qty in items[:50]:
+            name = await _qs_goods_name_if_exists(client, jan, depot_id)
+            if name is None:
+                res.not_found.append(jan)
+                continue
+            idx = len(goods)
+            q = str(qty)
+            goods.append({
+                "goodsSn": jan, "quantity": q, "price": "0.00", "truePrice": "0.00",
+                "amount": "0.00", "trueAmount": "0.00", "discount": "100.00", "remark": "",
+                "unitId": "", "unitQuantity": q, "unit": "", "showOrder": idx, "isGift": "0",
+                "batchOrder": {"goodsSn": jan, "storehouseId": depot_id, "number": q},
+            })
+        if not goods:
+            res.error = f"没有可回填的商品（{len(res.not_found)} 个 JAN 秦丝里查无，需先在秦丝建商品）"
+            return res
+
+        now = int(time.time() * 1000)
+        total_qty = sum(int(g["quantity"]) for g in goods)
+        order = {
+            "otherCost": 0, "itemType": 1,
+            "salerName": _QS_SALER_NAME, "salerId": _QS_SALER_ID,
+            "handlerName": _QS_SALER_NAME, "handlerId": _QS_SALER_ID,
+            "clientName": "WMS回填", "clientId": _QS_WMS_CLIENT_ID,
+            "client": {"val": _QS_WMS_CLIENT_ID, "text": "WMS回填"},
+            "accountName": _QS_ACCOUNT_NAME, "accountId": _QS_ACCOUNT_ID,
+            "depotId": depot_id, "depotName": depot_name, "storehouseId": depot_id,
+            "depot": {"val": depot_id, "text": depot_name},
+            "discount": 100, "businessTime": now,
+            "isAssociationWout": "false", "trueTotalAmount": "0.00",
+            "receiptFinished": 0, "optimisticLockVersion": 0, "finalAmount": 0,
+            "state": 1, "printCounts": 0, "storehouseStoreId": 0,
+            "originalDebt": 0, "sourceTerminal": 1, "alreadyPaid": 0,
+            "frontSn": "", "rejectTotalCount": 0, "totalAmount": "0.00",
+            "deliveryPrintCounts": 0, "deliveryDesc": "自提",
+            "wipeZero": 0, "promotionAmount": 0, "receiptStatus": 1,
+            "finalTotalAmount": 0, "saleTotalCount": total_qty, "totalAvailableRows": len(goods),
+            "promotion": [], "promotionMessage": "无",
+        }
+        delivery = {
+            "deliveryCompanyId": _QS_DELIVERY_ID, "deliveryId": _QS_DELIVERY_ID,
+            "optimisticLockVersion": 0, "contact": "WMS回填", "deliveryType": 1,
+            "deliveryName": _QS_DELIVERY_NAME, "recipientCountyId": None,
+        }
+        data = {
+            "order": json.dumps(order, ensure_ascii=False),
+            "goods": json.dumps(goods, ensure_ascii=False),
+            "delivery": json.dumps(delivery, ensure_ascii=False),
+            "isWout": "false", "synClientDelivery": "false",
+            "saleCombinedPays": json.dumps(
+                [{"amount": 0, "type": "cash", "accountId": _QS_ACCOUNT_ID}], ensure_ascii=False),
+            "goodsActivityId": "",
+        }
+        try:
+            r = await client.post(_QS_SALE_SAVE_DRAFT, data=data)
+            j = r.json()
+        except Exception as exc:  # noqa: BLE001
+            res.error = f"秦丝存草稿请求失败：{type(exc).__name__}: {exc}"
+            return res
+
+    if j.get("statusCode") == 1:
+        sn = ((j.get("object") or {}).get("ordersSn")
+              or (j.get("orderDelivery") or {}).get("orderSn") or "")
+        res.success = not res.not_found
+        res.steps.append({"step": "存草稿成功", "ok": True,
+                          "note": f"草稿号 {sn}，仓库 {depot_name}，{len(goods)} 个商品"})
+        if res.not_found:
+            res.error = (f"已存草稿({len(goods)}个)，但 {len(res.not_found)} 个 JAN 秦丝查无(新品待建)："
+                         + ", ".join(res.not_found[:8]))
+    else:
+        msg = j.get("content") or j
+        res.error = f"秦丝存草稿失败：{msg}"
+        res.steps.append({"step": "存草稿失败", "ok": False, "note": str(msg)[:200]})
+    return res
+
 
 @dataclass
 class BackfillResult:
@@ -66,7 +212,11 @@ async def backfill_draft(
     warehouse_name: str = "普通仓库",
     headless: bool = True,
 ) -> BackfillResult:
-    """items=[(jan, qty)]；direction='in'(采购入库)/'out'(批发出库)。首版：登录→开草稿→逐个扫码→存草稿，全程截图。"""
+    """items=[(jan, qty)]；direction='in'(采购入库)/'out'(批发出库)。
+    出库走 API 回放(httpx 直接建草稿，不用浏览器)；入库暂用 Playwright 填表。"""
+    if direction == "out":
+        return await _sales_backfill_api(items, warehouse_name)
+
     from playwright.async_api import TimeoutError as PWTimeout  # noqa: F401
     from playwright.async_api import async_playwright
 
