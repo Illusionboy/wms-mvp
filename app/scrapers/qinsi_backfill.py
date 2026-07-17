@@ -10,10 +10,22 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _kill_orphan_chromium() -> None:
+    """回填用无头 chromium 是重资源，VPS 内存小。启动前清掉上次残留的孤儿浏览器进程，防堆积把内存占满(OOM)。
+    (被取消的请求会让 browser.close() 来不及执行而泄漏 chromium；每次启动先清一遍，把累积上限约束在一次的量。)"""
+    for pat in ("headless_shell", "chrome_crashpad_handler"):
+        try:
+            subprocess.run(["pkill", "-9", "-f", pat], timeout=10,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
 _SESSION_FILE = Path("app/data/qinsi_session.json")
 _DEBUG_DIR = Path("app/data/qinsi_backfill_debug")
@@ -64,6 +76,8 @@ async def backfill_draft(
     for old in debug_dir.glob("*.png"):
         old.unlink()
 
+    _kill_orphan_chromium()   # 启动前清掉上次残留的孤儿 chromium，防堆积 OOM
+
     try:
         cookies = json.loads(_SESSION_FILE.read_text())
         assert isinstance(cookies, list) and cookies
@@ -90,7 +104,9 @@ async def backfill_draft(
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
             headless=headless,
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+            # --no-zygote/--disable-gpu 减少子进程与显存占用（VPS 内存小，防多进程堆积）
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled",
+                  "--no-zygote", "--disable-gpu", "--disable-extensions", "--disable-background-networking"],
         )
         context = await browser.new_context(
             locale="zh-CN", timezone_id="Asia/Tokyo", viewport={"width": 1440, "height": 900}, user_agent=_UA,
@@ -349,7 +365,11 @@ async def backfill_draft(
                 pass
             res.error = f"{type(exc).__name__}: {exc}"
         finally:
-            await context.close()
-            await browser.close()
+            try:
+                await context.close()
+                await browser.close()
+            except Exception:
+                pass
+            _kill_orphan_chromium()   # 兜底：即便 close 失败/被取消，也清掉本次的 chromium 进程
 
     return res
