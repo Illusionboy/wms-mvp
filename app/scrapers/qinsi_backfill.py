@@ -120,24 +120,26 @@ async def backfill_draft(
             # 离线提示弹窗：cookie 注入式自动化下，秦丝 SPA 常弹「您已处于离线状态」——这【不是会话失效】
             # (秦丝同步/httpx 抓取仍可用即证明 cookie 有效)，只是浏览器实时通道没建起。它是【阻断性弹窗】，
             # 点「确定」关掉即可继续；不影响后续填表/存草稿（读写走 HTTP，cookie 仍认）。
-            for _ in range(3):  # 可能连弹多个提示，最多关 3 次
+            for attempt in range(4):  # 可能连弹多个/反复弹，最多关 4 次
                 offline = page.locator("text=离线状态").first
                 if not (await offline.count() and await offline.is_visible()):
                     break
-                await shot(page, "offline_prompt", note="离线弹窗→点确定关闭")
-                dismissed = False
-                for sel in ("[ng-click='confirmDialog()']", "button:has-text('确定')", "text=确定"):
-                    b = page.locator(sel).first
-                    if await b.count() and await b.is_visible():
-                        try:
-                            await b.click(timeout=3000)
-                        except Exception:
-                            await b.dispatch_event("click")
-                        dismissed = True
-                        break
-                await page.wait_for_timeout(1000)
-                if not dismissed:
-                    break
+                await shot(page, "offline_prompt", note=f"离线弹窗 第{attempt+1}次")
+                # 弹窗是动态生成、不在保存的HTML里 → 用JS按文本精准找到"确定"叶子元素直接点，并dump候选结构
+                info = await page.evaluate(
+                    "() => {"
+                    " const vis=e=>!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length);"
+                    " const cand=Array.from(document.querySelectorAll('button,a,div,span,input'))"
+                    "   .filter(e=>vis(e) && (e.children.length<=1) &&"
+                    "     (/^确\\s*定$/.test((e.textContent||'').replace(/\\s/g,'')) ||"
+                    "      /^确\\s*定$/.test((e.value||'').replace(/\\s/g,''))));"
+                    " const dump=cand.slice(0,8).map(e=>({tag:e.tagName,cls:e.className,ng:e.getAttribute('ng-click'),oc:e.getAttribute('onclick'),html:e.outerHTML.slice(0,160)}));"
+                    " if(cand[0]){ cand[0].click(); }"
+                    " return {clicked:!!cand[0], count:cand.length, cand:dump}; }"
+                )
+                if attempt == 0:
+                    (debug_dir / "diag_offline.json").write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
+                await page.wait_for_timeout(1200)
             await shot(page, "after_offline_check")
 
             # 2. 打开新单：采购点「新增采购单」；销售页加载即是新单表单。点得到就点(找不到不报错，用已开表单)。
