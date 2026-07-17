@@ -23,9 +23,14 @@ _URLS = {
 }
 _NEW_BTN = {"in": "新增采购单", "out": "新增"}  # 销售页打开即是新单表单，点「新增」保险起见
 # 订单表单的对方选择器（按方向）：采购供应商=第一个 MsModel；销售客户有专属 id。
-_CP_SEL = {"in": "input[ng-model='MsModel.text']", "out": "#mstxt_saleClientSelectInput"}
-# 对方 picker 里的搜索框（避免命中左侧列表筛选）：销售客户 picker 有专属 placeholder。
-_SEARCH_SEL = {"in": "input[ng-model='searchKey']:visible", "out": "input[placeholder*='客户名称']:visible"}
+# 对方 mulselect 定位靠【容器 .ms_container】(其 ng-click=clickIn 开下拉)。实测 live 页触发框 id 与保存的 HTML 不同
+# (#mstxt_saleClientSelectInput 在 live 页不存在)，故用稳定锚点找容器：
+#   出库(客户)=下拉搜索框 placeholder 含"客户名称"(全页唯一)；入库(供应商)=第一个 MsModel.text 的容器(实测可用)。
+# 容器内触发框统一 input[ng-model='MsModel.text']（读值判定是否选中）。
+_CP_CONTAINER = {
+    "in":  "div.ms_container:has(input[ng-model='MsModel.text'])",
+    "out": "div.ms_container:has(input[ng-model='searchKey'][placeholder*='客户名称'])",
+}
 # 新品自动建（后续迭代用）：商品管理 → 新增商品，只填 名称 + 货号=JAN + 条码=JAN
 _ADD_GOODS_URL = "https://web.syt.qinsilk.com/gis/static/view#/setting/goods/goodsList?mid=108&type=addGoods"
 _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -112,6 +117,28 @@ async def backfill_draft(
                 await shot(page, "NEED_LOGIN", ok=False, note="被要求登录——秦丝 session 失效，请刷新")
                 res.error = "秦丝 session 失效（跳到登录页），请刷新会话"
                 return res
+            # 离线提示弹窗：cookie 注入式自动化下，秦丝 SPA 常弹「您已处于离线状态」——这【不是会话失效】
+            # (秦丝同步/httpx 抓取仍可用即证明 cookie 有效)，只是浏览器实时通道没建起。它是【阻断性弹窗】，
+            # 点「确定」关掉即可继续；不影响后续填表/存草稿（读写走 HTTP，cookie 仍认）。
+            for _ in range(3):  # 可能连弹多个提示，最多关 3 次
+                offline = page.locator("text=离线状态").first
+                if not (await offline.count() and await offline.is_visible()):
+                    break
+                await shot(page, "offline_prompt", note="离线弹窗→点确定关闭")
+                dismissed = False
+                for sel in ("[ng-click='confirmDialog()']", "button:has-text('确定')", "text=确定"):
+                    b = page.locator(sel).first
+                    if await b.count() and await b.is_visible():
+                        try:
+                            await b.click(timeout=3000)
+                        except Exception:
+                            await b.dispatch_event("click")
+                        dismissed = True
+                        break
+                await page.wait_for_timeout(1000)
+                if not dismissed:
+                    break
+            await shot(page, "after_offline_check")
 
             # 2. 打开新单：采购点「新增采购单」；销售页加载即是新单表单。点得到就点(找不到不报错，用已开表单)。
             nb = page.locator(f"text={_NEW_BTN[direction]}").first
@@ -133,7 +160,8 @@ async def backfill_draft(
             #   ① 开下拉靠【容器 .ms_container 的 ng-click="clickIn()"】——触发框 input 是 readonly，点它/dispatch 它都白搭！
             #   ② 下拉里 <input ng-model="searchKey" ng-keydown="searchPress"> 搜、<li ng-click="selected(option)"><div title="…"> 选
             #   ③ 页面有多个 mulselect（销售员筛选/供应商/客户…）都有 searchKey/selected，必须把搜和选【限定在对方这个容器内】
-            container = page.locator(f"div.ms_container:has({_CP_SEL[direction]})").first
+            container = page.locator(_CP_CONTAINER[direction]).first
+            trg = container.locator("input[ng-model='MsModel.text']").first   # 容器内触发框(读值判定是否选中)
             cp_open = False
             if await container.count():
                 await container.dispatch_event("click")   # 直接触发容器 clickIn() 开下拉（dispatch 绕过橙色提示条遮挡）
@@ -158,8 +186,7 @@ async def backfill_draft(
                     if await opt.count():
                         await opt.dispatch_event("click")
                         await page.wait_for_timeout(900)
-                    trg0 = page.locator(_CP_SEL[direction]).first
-                    v0 = await trg0.get_attribute("value") if await trg0.count() else None
+                    v0 = await trg.get_attribute("value") if await trg.count() else None
                     if not (v0 and "回填" in v0):               # 兜底：键盘 ↓ 高亮 + Enter（走搜索框自带 searchPress）
                         await si.press("ArrowDown")
                         await page.wait_for_timeout(300)
@@ -168,18 +195,18 @@ async def backfill_draft(
             # 诊断 dump（成败都留，彻底告别盲猜）：触发框值、容器有没有、各 searchKey、对方容器内的结果项
             try:
                 diag = await page.evaluate(
-                    "(sel) => { const q=s=>Array.from(document.querySelectorAll(s));"
-                    " const trg=document.querySelector(sel); const c=trg&&trg.closest('.ms_container');"
+                    "(csel) => { const q=s=>Array.from(document.querySelectorAll(s));"
+                    " const c=document.querySelector(csel);"
+                    " const trg=c&&c.querySelector(\"input[ng-model='MsModel.text']\");"
                     " const lis=c?Array.from(c.querySelectorAll(\"li[ng-click='selected(option)']\")):[];"
                     " return { trigger_val: trg?trg.value:null, container_found: !!c,"
                     "  searchKeys: q(\"input[ng-model='searchKey']\").map(e=>({ph:e.placeholder,val:e.value,vis:!!(e.offsetWidth||e.offsetHeight)})),"
                     "  cp_options: lis.map(e=>({txt:(e.textContent||'').trim().slice(0,20),vis:!!(e.offsetWidth||e.offsetHeight)})).slice(0,10),"
-                    " }; }", _CP_SEL[direction])
+                    " }; }", _CP_CONTAINER[direction])
                 (debug_dir / "diag_picker.json").write_text(json.dumps(diag, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 pass
             # 确认选中：触发框值必须含「回填」。没选上 → 【中止】（避免开着的 picker 把后续 JAN 串进搜索框，就是你截图那样）
-            trg = page.locator(_CP_SEL[direction]).first
             cp_val = await trg.get_attribute("value") if await trg.count() else None
             await shot(page, "cp_final", note=f"对方=「{cp_val}」 picker={cp_open}")
             if not (cp_val and "回填" in cp_val):
