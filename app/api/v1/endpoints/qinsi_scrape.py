@@ -47,6 +47,7 @@ _BF_SHOT_RE = re.compile(r"^\d{2}_[\w.]+\.png$")
 class BackfillItem(BaseModel):
     jan_code: Annotated[str, Field(min_length=5, max_length=32)]
     quantity: Annotated[int, Field(ge=1)]
+    name: str = ""   # name_jp，新品自动建商品时用作商品名（兜底 JAN）
 
 
 class BackfillRequest(BaseModel):
@@ -344,7 +345,7 @@ async def backfill(
 ) -> dict:
     """把点数结果(JAN+数量)存成秦丝采购(入库)/批发(出库)**草稿**。首版：监督调试，返回每步日志/截图。"""
     res = await backfill_draft(
-        [(it.jan_code, it.quantity) for it in payload.items],
+        [(it.jan_code, it.quantity, it.name) for it in payload.items],
         direction=payload.direction,
         warehouse_name=payload.warehouse_name,
     )

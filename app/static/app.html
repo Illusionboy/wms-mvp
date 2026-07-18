@@ -4975,8 +4975,8 @@ async function countCopy(id) {
 }
 // 秦丝反向回填（调试）：把点数存成秦丝草稿，展示每步截图（复用 _authImg）
 async function qinsiBackfill() {
-  if (qinsiBackfill._running) { toast('回填正在进行，请等它结束再点（每次只跑一个，避免占满秦丝服务器内存）', 'err'); return; }
-  const items = _count.items.map(it => ({ jan_code: it.jan_code, quantity: _countQty(it) })).filter(x => x.quantity > 0);
+  if (qinsiBackfill._running) { toast('回填正在进行，请等它结束再点', 'err'); return; }
+  const items = _count.items.map(it => ({ jan_code: it.jan_code, quantity: _countQty(it), name: it.name_jp || it.name_zh || it.jan_code })).filter(x => x.quantity > 0);
   if (!items.length) { toast('还没有点数', 'err'); return; }
   const dir = document.getElementById('qbf-dir').value;
   const wh = document.getElementById('qbf-wh').value;
@@ -4989,7 +4989,8 @@ async function qinsiBackfill() {
     const r = await api('POST', '/qinsi/backfill', { items, direction: dir, warehouse_name: wh });
     let html = r.success ? '<div style="color:#16a34a;font-weight:600;margin-bottom:6px">✓ 已存草稿</div>'
       : `<div style="color:var(--danger);font-weight:600;margin-bottom:6px">✗ 未完成：${esc(r.error || '见步骤截图')}</div>`;
-    if (r.not_found && r.not_found.length) html += `<div style="color:var(--warn)">查无商品(新品待建)：${r.not_found.map(esc).join(', ')}</div>`;
+    if (r.created_new && r.created_new.length) html += `<div style="color:#16a34a">🆕 自动新建商品(${r.created_new.length})：${r.created_new.map(esc).join(', ')}</div>`;
+    if (r.not_found && r.not_found.length) html += `<div style="color:var(--warn)">建商品失败/查无：${r.not_found.map(esc).join(', ')}</div>`;
     html += '<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">';
     (r.steps || []).forEach((s, i) => {
       const shot = (r.shots || [])[i];

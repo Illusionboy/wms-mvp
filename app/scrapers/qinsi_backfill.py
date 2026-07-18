@@ -58,6 +58,12 @@ _QS_BASE = "https://web.syt.qinsilk.com"
 _QS_SALE_SAVE_DRAFT = _QS_BASE + "/gis/admin/inner/sale/wholesaleOrdersSaveDraft.ac"        # 出库(批发)
 _QS_PURCHASE_SAVE_DRAFT = _QS_BASE + "/gis/admin/inner/orders/purchase/purchaseSaveDraft.ac"  # 入库(采购)
 _QS_SEARCH_GOODS = _QS_BASE + "/gis/admin/inner/goods/es/searchGoods.ac"
+_QS_GOODS_INSERT = _QS_BASE + "/gis/admin/inner/v2/goods/goodsSkuInsert.ac"  # 新建商品
+_QS_UNIT_GE_ID = 2288808        # "个" 单位 id（全局）
+_QS_ALL_STORES = [              # 建商品时挂到的仓库（两个实体仓）
+    {"storehouseName": "乐天仓库", "storehouseId": 1348869, "storageLocationNames": []},
+    {"storehouseName": "北津守仓库", "storehouseId": 283425, "storageLocationNames": []},
+]
 _QS_SALER_ID = 1417501          # 耿哥仓管（登录操作员，销售员/经手人共用）
 _QS_SALER_NAME = "耿哥仓管"
 _QS_ACCOUNT_ID = 248211         # 默认账户
@@ -103,9 +109,47 @@ async def _qs_goods_name_if_exists(client: httpx.AsyncClient, jan: str, depot_id
     return None
 
 
-async def _api_backfill(items: list[tuple[str, int]], warehouse_name: str, direction: str) -> "BackfillResult":
+async def _qs_create_goods(client: httpx.AsyncClient, jan: str, name: str) -> bool:
+    """在秦丝新建商品：名称 + 货号=JAN + 条码=JAN + 单位「个」+ 挂两仓库。成功返回 True。
+    (POST v2/goods/goodsSkuInsert.ac，JSON。实测通。)"""
+    nm = (name or "").strip()[:100] or jan
+    gm = {
+        "name": nm, "goodsSn": jan, "isOnSale": 1, "showOrder": 100,
+        "categoryId2": "1", "categoryId3": "1", "serialnoEnable": 0,
+        "skuEnable": 0, "skuPriceEnable": 0, "skuSysAttrEnable": 0, "weight": "",
+        "storageLocationNames": "", "storageLocationList": _QS_ALL_STORES,
+        "blandId": "", "warnNumberTop": "", "warnNumberLow": "", "spuBarCode": "",
+        "description": "", "barCode": jan, "unit": "个",
+    }
+    dto = {
+        "imgs": [], "videos": [], "previewImg": {}, "goodModel": gm,
+        "clientItemPriceList": [], "goodsStoredList": [], "goodsSerialnoList": None,
+        "unitList": [{"barCode": jan, "factoryPrice": "0.00", "hasEdit": "", "main": 1,
+                      "operate": None, "rate": 1, "salePrice": "0.00", "lowestTradePrice": "",
+                      "unitId": _QS_UNIT_GE_ID, "unitName": "个", "goodsSn": jan}],
+        "goodsUnitRelatedList": [],
+        "goodsExtra": {"goodsSn": jan, "id": None, "shelfLife": None, "shelfLifeType": 3,
+                       "originAddress": None, "startingAge": None, "endAge": None, "batchEnable": 0,
+                       "expiredWarning": None, "expiredWarningType": 1, "wechatShopOnsaleStatus": 0},
+        "storageLocationList": _QS_ALL_STORES,
+    }
+    body = {
+        "name": nm, "defaultGoodsSn": jan, "isOnSale": 1, "skuEnable": 0, "skuPriceEnable": 0,
+        "description": "", "showOrder": 100, "skuSysAttrEnable": 0,
+        "spuPropertyVOList": [], "spuPropertyValueVOList": [], "spuSkuPropertyVOList": [],
+        "spuSkuRelationList": [], "goodsSkuInsertDTOList": [dto],
+    }
+    try:
+        r = await client.post(_QS_GOODS_INSERT, json=body)
+        return r.json().get("statusCode") == 1
+    except Exception:
+        return False
+
+
+async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str) -> "BackfillResult":
     """回填草稿：httpx 直接调秦丝接口。出库=wholesaleOrdersSaveDraft.ac，入库=purchaseSaveDraft.ac。不用浏览器。
-    草稿不校验库存（实测超库存也能存），对方统一 WMS回填。新品(searchGoods 查无)记入 not_found 不入单。"""
+    items=[(jan, qty)] 或 [(jan, qty, name_jp)]。草稿不校验库存（实测超库存也能存），对方统一 WMS回填。
+    JAN 秦丝查无 → 自动建商品（名称取 name_jp，兜底 JAN；记入 created_new），再入单；建失败才记 not_found。"""
     res = BackfillResult()
     depot = _QS_DEPOT.get(warehouse_name)
     if depot is None:
@@ -122,13 +166,17 @@ async def _api_backfill(items: list[tuple[str, int]], warehouse_name: str, direc
 
     async with httpx.AsyncClient(cookies=cookies, headers=_QS_API_HEADERS, timeout=30,
                                  follow_redirects=False) as client:
-        # 逐个校验 JAN 是否为秦丝已有商品；新品(查无)记入 not_found，不塞进草稿避免整单失败
+        # 逐个校验 JAN；秦丝查无 → 自动建商品(名称=name_jp,兜底JAN)后入单，建失败才记 not_found
         goods: list[dict] = []
-        for jan, qty in items[:50]:
-            name = await _qs_goods_name_if_exists(client, jan, depot_id)
-            if name is None:
-                res.not_found.append(jan)
-                continue
+        for it in items[:50]:
+            jan, qty = it[0], it[1]
+            name_jp = it[2] if len(it) > 2 else ""
+            if await _qs_goods_name_if_exists(client, jan, depot_id) is None:
+                if await _qs_create_goods(client, jan, name_jp):
+                    res.created_new.append(jan)
+                else:
+                    res.not_found.append(jan)
+                    continue
             q = str(qty)
             g = {
                 "goodsSn": jan, "quantity": q, "price": "0.00", "truePrice": "0.00",
@@ -213,10 +261,12 @@ async def _api_backfill(items: list[tuple[str, int]], warehouse_name: str, direc
         sn = obj.get("ordersSn") or obj.get("purchaseSn") or (j.get("orderDelivery") or {}).get("orderSn") or ""
         kind = "出库(批发)" if is_sale else "入库(采购)"
         res.success = not res.not_found
-        res.steps.append({"step": "存草稿成功", "ok": True,
-                          "note": f"{kind}草稿 {sn}，仓库 {depot_name}，{len(goods)} 个商品"})
+        note = f"{kind}草稿 {sn}，仓库 {depot_name}，{len(goods)} 个商品"
+        if res.created_new:
+            note += f"（其中 {len(res.created_new)} 个新品已自动建）"
+        res.steps.append({"step": "存草稿成功", "ok": True, "note": note})
         if res.not_found:
-            res.error = (f"已存草稿({len(goods)}个)，但 {len(res.not_found)} 个 JAN 秦丝查无(新品待建)："
+            res.error = (f"已存草稿({len(goods)}个)，但 {len(res.not_found)} 个 JAN 建商品失败/查无："
                          + ", ".join(res.not_found[:8]))
     else:
         msg = j.get("content") or j
