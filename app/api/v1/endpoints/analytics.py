@@ -8,7 +8,7 @@
 - GET /analytics/safety-stock-recommendations — 动态安全库存/再订货点预警
 - GET /analytics/system-logs            — 系统异常日志（负库存、预留冲突等）
 """
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Date, cast, func, select
@@ -244,6 +244,69 @@ async def product_summary(
         "name_zh": product.name_zh if product else None,
         "summary": summary,
     }
+
+
+@router.get("/dormant-products")
+async def dormant_products(
+    days: int = Query(30, ge=1, le=3650),
+    warehouse_id: int | None = Query(default=None),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[dict]:
+    """最近 N 天内【没有任何出库(OUT)】的在库商品——呆滞/滞销库存报表。
+    只算 OUT 事务（不算 ADJUST 调整、不算入库）；只统计当前库存 > 0 的商品；可选按仓库。
+    返回 JAN、名称、当前库存、最后出库日期、距今天数（从未出库者 last_out_date 为空、排最前）。"""
+    cutoff = date.today() - timedelta(days=days)
+
+    # 1) 当前有库存(>0)的商品，可选按仓库
+    stock_stmt = (
+        select(InventoryRecord.product_jan, func.sum(InventoryRecord.quantity).label("stock"))
+        .group_by(InventoryRecord.product_jan)
+        .having(func.sum(InventoryRecord.quantity) > 0)
+    )
+    if warehouse_id is not None:
+        stock_stmt = stock_stmt.where(InventoryRecord.warehouse_id == warehouse_id)
+    stock_map = {jan: int(s) for jan, s in (await session.execute(stock_stmt)).all()}
+    if not stock_map:
+        return []
+
+    # 2) 每个商品最后一次 OUT 的业务日期（可选按仓库）
+    out_stmt = (
+        select(InventoryRecord.product_jan, func.max(_effective_date()).label("last_out"))
+        .select_from(StockTransaction)
+        .join(InventoryRecord, InventoryRecord.id == StockTransaction.inventory_record_id)
+        .where(StockTransaction.transaction_type == StockTransactionType.out)
+        .group_by(InventoryRecord.product_jan)
+    )
+    if warehouse_id is not None:
+        out_stmt = out_stmt.where(InventoryRecord.warehouse_id == warehouse_id)
+    last_out_map = {jan: d for jan, d in (await session.execute(out_stmt)).all()}
+
+    # 3) 商品名
+    name_map = {
+        p.jan_code: p
+        for p in (await session.execute(
+            select(Product).where(Product.jan_code.in_(list(stock_map.keys())))
+        )).scalars().all()
+    }
+
+    today = date.today()
+    result: list[dict] = []
+    for jan, stock in stock_map.items():
+        last_out = last_out_map.get(jan)
+        if last_out is not None and last_out >= cutoff:
+            continue  # 近 N 天内出过库 → 不算滞销
+        p = name_map.get(jan)
+        result.append({
+            "jan_code": jan,
+            "product_name": p.name_jp if p else None,
+            "product_name_zh": p.name_zh if p else None,
+            "current_stock": stock,
+            "last_out_date": last_out.isoformat() if last_out else None,
+            "days_since_out": (today - last_out).days if last_out else None,
+        })
+    # 从未出库者最前，其余按距今天数降序（最久没动的在上）
+    result.sort(key=lambda r: (r["last_out_date"] is None, r["days_since_out"] or 0), reverse=True)
+    return result
 
 
 @router.get("/safety-stock-recommendations", response_model=list[SafetyStockRecommendation])

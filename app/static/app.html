@@ -391,6 +391,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="system-log" onclick="nav(this)">
         <span class="icon">⚠</span> 日志查看
       </button>
+      <button class="nav-item" data-section="dormant" onclick="nav(this)">
+        <span class="icon">🐌</span> 滞销品统计
+      </button>
     </div>
 
     <div class="nav-group" data-workspace="ops">
@@ -1412,6 +1415,38 @@ tr:hover td { background: var(--accent-bg); }
       </div>
     </div>
 
+    <!-- Dormant / 滞销品统计 -->
+    <div class="section" id="section-dormant">
+      <div class="section-title">滞销品统计</div>
+      <div class="section-sub">最近 N 天内没有任何出库(OUT)的在库商品；只算真实出库，不含调整(ADJUST)；库存为 0 不计入</div>
+      <div class="card">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+          <div class="form-row" style="margin:0">
+            <label>天数（近 N 天无出库）</label>
+            <input type="number" id="dm-days" value="30" min="1" max="3650" style="width:110px">
+          </div>
+          <div class="form-row" style="margin:0">
+            <label>仓库</label>
+            <select id="dm-wh"><option value="">全部仓库</option></select>
+          </div>
+          <button class="btn btn-primary" onclick="loadDormant()" style="margin-bottom:0">查询</button>
+          <span id="dm-count" style="color:var(--muted);font-size:13px"></span>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="table" id="dormant-table">
+            <thead><tr>
+              <th>JAN</th>
+              <th>商品名</th>
+              <th style="text-align:right">当前库存</th>
+              <th>最后出库</th>
+              <th style="text-align:right">距今</th>
+            </tr></thead>
+            <tbody id="dm-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- Products -->
     <div class="section" id="section-products">
       <div class="section-title">商品管理</div>
@@ -1859,6 +1894,7 @@ function nav(btn) {
   if (btn.dataset.section === 'qinsi') checkQinsiAuth();
   if (btn.dataset.section === 'alloc') loadConflictLogs();
   if (btn.dataset.section === 'system-log') loadSystemLogs();
+  if (btn.dataset.section === 'dormant') loadDormant();
   if (btn.dataset.section === 'container-pallets') loadPalletList();
   if (btn.dataset.section === 'stock-transfer') loadLastTransfer();
   if (btn.dataset.section === 'rakuten-label') loadAutoRuns();
@@ -3073,6 +3109,39 @@ async function loadSystemLogs() {
     </tr>`;
     }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--muted)">暂无日志</td></tr>';
   } catch (e) { toast('查询系统日志失败: ' + e.message, 'err'); }
+}
+
+async function loadDormant() {
+  const whSel = document.getElementById('dm-wh');
+  if (whSel && whSel.options.length <= 1) {
+    whSel.innerHTML = '<option value="">全部仓库</option>' +
+      _warehouses.map(w => `<option value="${w.id}">${esc(w.name)}</option>`).join('');
+  }
+  const days = +document.getElementById('dm-days').value || 30;
+  const wh = whSel ? whSel.value : '';
+  const tbody = document.getElementById('dm-tbody');
+  const cnt = document.getElementById('dm-count');
+  tbody.innerHTML = '<tr><td colspan="5" class="loading">查询中…</td></tr>';
+  cnt.textContent = '';
+  try {
+    let url = `/analytics/dormant-products?days=${days}`;
+    if (wh) url += `&warehouse_id=${encodeURIComponent(wh)}`;
+    const rows = await api('GET', url);
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">该范围内所有在库商品都有出库</td></tr>';
+      return;
+    }
+    cnt.textContent = `共 ${rows.length} 个滞销 SKU（近 ${days} 天无出库）`;
+    tbody.innerHTML = rows.map(r => `<tr>
+      <td>${esc(r.jan_code)}</td>
+      <td>${esc(r.product_name || '—')}${r.product_name_zh ? '<br><small style="color:var(--muted)">' + esc(r.product_name_zh) + '</small>' : ''}</td>
+      <td style="text-align:right">${r.current_stock}</td>
+      <td>${r.last_out_date || '<span style="color:var(--danger)">从未出库</span>'}</td>
+      <td style="text-align:right">${r.days_since_out != null ? r.days_since_out + ' 天' : '—'}</td>
+    </tr>`).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger)">${esc(e.message)}</td></tr>`;
+  }
 }
 
 async function allocReserve(id) {
