@@ -281,7 +281,18 @@ async def dormant_products(
         out_stmt = out_stmt.where(InventoryRecord.warehouse_id == warehouse_id)
     last_out_map = {jan: d for jan, d in (await session.execute(out_stmt)).all()}
 
-    # 3) 商品名
+    # 3) 每个商品最早一次入库/建档的业务日期（任意事务的最早日）——用于判断是不是"新上架"
+    first_stmt = (
+        select(InventoryRecord.product_jan, func.min(_effective_date()).label("first_seen"))
+        .select_from(StockTransaction)
+        .join(InventoryRecord, InventoryRecord.id == StockTransaction.inventory_record_id)
+        .group_by(InventoryRecord.product_jan)
+    )
+    if warehouse_id is not None:
+        first_stmt = first_stmt.where(InventoryRecord.warehouse_id == warehouse_id)
+    first_seen_map = {jan: d for jan, d in (await session.execute(first_stmt)).all()}
+
+    # 4) 商品名
     name_map = {
         p.jan_code: p
         for p in (await session.execute(
@@ -295,6 +306,9 @@ async def dormant_products(
         last_out = last_out_map.get(jan)
         if last_out is not None and last_out >= cutoff:
             continue  # 近 N 天内出过库 → 不算滞销
+        first_seen = first_seen_map.get(jan)
+        if first_seen is not None and first_seen > cutoff:
+            continue  # 首次入库不足 N 天 → 新上架，还没到该卖的时候，不算滞销
         p = name_map.get(jan)
         result.append({
             "jan_code": jan,
@@ -303,6 +317,8 @@ async def dormant_products(
             "current_stock": stock,
             "last_out_date": last_out.isoformat() if last_out else None,
             "days_since_out": (today - last_out).days if last_out else None,
+            "first_in_date": first_seen.isoformat() if first_seen else None,
+            "days_in_stock": (today - first_seen).days if first_seen else None,
         })
     # 从未出库者最前，其余按距今天数降序（最久没动的在上）
     result.sort(key=lambda r: (r["last_out_date"] is None, r["days_since_out"] or 0), reverse=True)

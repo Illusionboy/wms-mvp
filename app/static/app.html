@@ -1418,7 +1418,7 @@ tr:hover td { background: var(--accent-bg); }
     <!-- Dormant / 滞销品统计 -->
     <div class="section" id="section-dormant">
       <div class="section-title">滞销品统计</div>
-      <div class="section-sub">最近 N 天内没有任何出库(OUT)的在库商品；只算真实出库，不含调整(ADJUST)；库存为 0 不计入</div>
+      <div class="section-sub">最近 N 天内没有任何出库(OUT)的在库商品；只算真实出库，不含调整(ADJUST)；库存为 0 不计入；首次入库不足 N 天的新上架商品自动排除</div>
       <div class="card">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
           <div class="form-row" style="margin:0">
@@ -1440,6 +1440,7 @@ tr:hover td { background: var(--accent-bg); }
               <th style="text-align:right">当前库存</th>
               <th>最后出库</th>
               <th style="text-align:right">距今</th>
+              <th style="text-align:right">在库天数</th>
             </tr></thead>
             <tbody id="dm-tbody"></tbody>
           </table>
@@ -3121,26 +3122,27 @@ async function loadDormant() {
   const wh = whSel ? whSel.value : '';
   const tbody = document.getElementById('dm-tbody');
   const cnt = document.getElementById('dm-count');
-  tbody.innerHTML = '<tr><td colspan="5" class="loading">查询中…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="6" class="loading">查询中…</td></tr>';
   cnt.textContent = '';
   try {
     let url = `/analytics/dormant-products?days=${days}`;
     if (wh) url += `&warehouse_id=${encodeURIComponent(wh)}`;
     const rows = await api('GET', url);
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">该范围内所有在库商品都有出库</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted)">该范围内没有滞销商品（在库满 N 天且无出库的）</td></tr>';
       return;
     }
-    cnt.textContent = `共 ${rows.length} 个滞销 SKU（近 ${days} 天无出库）`;
+    cnt.textContent = `共 ${rows.length} 个滞销 SKU（在库满 ${days} 天且无出库；已排除新上架）`;
     tbody.innerHTML = rows.map(r => `<tr>
       <td>${esc(r.jan_code)}</td>
       <td>${esc(r.product_name || '—')}${r.product_name_zh ? '<br><small style="color:var(--muted)">' + esc(r.product_name_zh) + '</small>' : ''}</td>
       <td style="text-align:right">${r.current_stock}</td>
       <td>${r.last_out_date || '<span style="color:var(--danger)">从未出库</span>'}</td>
       <td style="text-align:right">${r.days_since_out != null ? r.days_since_out + ' 天' : '—'}</td>
+      <td style="text-align:right">${r.days_in_stock != null ? r.days_in_stock + ' 天' : '—'}</td>
     </tr>`).join('');
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--danger)">${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--danger)">${esc(e.message)}</td></tr>`;
   }
 }
 
