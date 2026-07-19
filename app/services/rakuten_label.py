@@ -89,6 +89,36 @@ def _merge_address(row) -> str:
     return _clean(row["送付先住所都道府県"]) + _clean(row["送付先住所郡市区"]) + _clean(row["送付先住所それ以降の住所"])
 
 
+def _cwidth(ch: str) -> int:
+    """字符宽度：全角(East Asian F/W/A)=2，半角=1。对应 Yamato「全角/半角」字数预算。"""
+    return 2 if unicodedata.east_asian_width(ch) in ("F", "W", "A") else 1
+
+
+# Yamato 送达地址四栏宽度预算（半角单位，来自官方 newb2web 模板）：
+#   お届け先住所=全角32(半角64)、アパートマンション名=全角16(32)、会社・部門１/２=各全角25(50)。
+# 地址超长时依次溢出到下一栏，直到装完；四栏合计全角98，足够任何日本地址。
+_YAMATO_ADDR_BUDGETS = (64, 32, 50, 50)
+
+
+def _split_by_width(s: str, budgets: tuple[int, ...]) -> list[str]:
+    """按各栏宽度预算(半角单位)依次切分字符串，不切断多字节字符；返回与 budgets 等长的段列表。
+    若总长超过所有预算之和（极罕见），多余部分被截断。"""
+    s = _clean(s)
+    parts: list[str] = []
+    i, n = 0, len(s)
+    for b in budgets:
+        seg, w = [], 0
+        while i < n:
+            cw = _cwidth(s[i])
+            if w + cw > b:
+                break
+            seg.append(s[i])
+            w += cw
+            i += 1
+        parts.append("".join(seg))
+    return parts
+
+
 def _merge_products(row, product_dict, err_rows: list) -> list[str]:
     """返回 ['JAN-数量', ...]；套装多元素；无法解析记入 err_rows 并返回 ['']。"""
     p2 = _clean(row["商品番号"])
@@ -231,7 +261,12 @@ def generate_courier_files(csv_bytes: bytes, store: str = "1") -> RakutenLabelRe
         exp["お届け先電話番号"] = d["_tel"]
         exp["お届け先郵便番号"] = d["_zip"]
         exp["お届け先名"] = d["_name"]
-        exp["お届け先住所"] = d["_addr"]
+        # 地址按官方模板字数上限拆分：住所→アパートマンション名→会社・部門１→会社・部門２（超长依次溢出，不再报"地址过长"）
+        _ap = d["_addr"].apply(lambda a: _split_by_width(a, _YAMATO_ADDR_BUDGETS))
+        exp["お届け先住所"] = _ap.apply(lambda p: p[0])
+        exp["お届け先アパートマンション名"] = _ap.apply(lambda p: p[1])
+        exp["お届け先会社・部門１"] = _ap.apply(lambda p: p[2])
+        exp["お届け先会社・部門２"] = _ap.apply(lambda p: p[3])
         exp["品名１"] = d["商品内容"]
         exp["お届け予定日"] = d["お届け日指定"]
         exp["お客様管理番号"] = "0649633212"
