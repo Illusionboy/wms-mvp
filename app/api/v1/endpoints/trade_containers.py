@@ -1,11 +1,11 @@
-"""贸易集装箱模块端点（P1）。查询只读免认证；变动加 require_auth。"""
+"""贸易集装箱模块端点（P1）。查询只读免认证；变动加 require_admin。"""
 from datetime import date
 from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 from app.db.session import get_db_session
 from app.schemas.trade_container import (
     DailyCustomerRead,
@@ -105,7 +105,7 @@ async def pallet_candidates(
 
 
 # ── 变动（需认证）───────────────────────────────────────────────────────────
-@router.post("/pallets", response_model=PalletRead, dependencies=[Depends(require_auth)])
+@router.post("/pallets", response_model=PalletRead, dependencies=[Depends(require_admin)])
 async def create_pallet(
     payload: PalletCreate,
     session: AsyncSession = Depends(get_db_session),
@@ -121,7 +121,7 @@ async def create_pallet(
         _raise(exc)
 
 
-@router.post("/pallets/place", response_model=PalletPlaceResult, dependencies=[Depends(require_auth)])
+@router.post("/pallets/place", response_model=PalletPlaceResult, dependencies=[Depends(require_admin)])
 async def place_pallet(
     payload: PalletPlaceLocation,
     session: AsyncSession = Depends(get_db_session),
@@ -135,7 +135,7 @@ async def place_pallet(
         _raise(exc)
 
 
-@router.post("/pallets/{pallet_id}/items", response_model=PalletRead, dependencies=[Depends(require_auth)])
+@router.post("/pallets/{pallet_id}/items", response_model=PalletRead, dependencies=[Depends(require_admin)])
 async def add_items(
     pallet_id: int,
     payload: PalletAddItems,
@@ -152,7 +152,7 @@ async def add_items(
 @router.post(
     "/pallets/{pallet_id}/subtract-items",
     response_model=PalletRead,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def subtract_items(
     pallet_id: int,
@@ -171,7 +171,7 @@ async def subtract_items(
 @router.patch(
     "/pallets/{pallet_id}/items/{jan_code}",
     response_model=PalletRead,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def set_item_quantity(
     pallet_id: int,

@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin, require_auth
 from app.core.config import settings
 from app.db.session import get_db_session
 from app.models.user import User
@@ -23,6 +23,7 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user_id: int
     username: str
+    is_admin: bool = False
 
 
 class UserCreate(BaseModel):
@@ -34,6 +35,7 @@ class UserRead(BaseModel):
     id: int
     username: str
     is_active: bool
+    is_admin: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -52,14 +54,14 @@ async def login(
         secret=settings.jwt_secret_key,
         expire_days=settings.jwt_expire_days,
     )
-    return TokenResponse(access_token=token, user_id=user.id, username=user.username)
+    return TokenResponse(access_token=token, user_id=user.id, username=user.username, is_admin=user.is_admin)
 
 
 @router.post("/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def add_user(
     payload: UserCreate,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> UserRead:
     try:
         user = await create_user(session, payload.username, payload.password)
@@ -85,7 +87,7 @@ async def get_me(
 @router.get("/users", response_model=list[UserRead])
 async def list_users(
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> list[UserRead]:
     rows = await session.scalars(select(User).order_by(User.id))
     return [UserRead.model_validate(u) for u in rows.all()]

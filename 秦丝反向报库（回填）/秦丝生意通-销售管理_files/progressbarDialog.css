@@ -1,0 +1,40 @@
+.execl-progress-dialog {
+  min-height: 70px !important;
+}
+.execl-progress-dialog .ui-dialog-titlebar {
+  display: none;
+}
+.progressbar-dialog-main .progressbar-box {
+  width: 100%;
+}
+.progressbar-dialog-main .progressbar-content {
+  position: relative;
+  border: none;
+  border-radius: 15px;
+  overflow: hidden;
+  background: #dddddd;
+}
+.progressbar-dialog-main .progressbar-text {
+  padding-bottom: 5px;
+}
+.progressbar-dialog-main .progressbar-close {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  cursor: pointer;
+}
+.progressbar-dialog-main .progressbar-content .ui-corner-left, .progressbar-dialog-main .progressbar-content .ui-corner-right {
+  border-radius: 15px !important;
+}
+.progressbar-dialog-main .progressbar-content .progressbar-label {
+  position: absolute;
+  color: #fff;
+  font-weight: bold;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  -webkit-transform: translateY(-50%);
+  -ms-transform: translateY(-50%);
+  -moz-transform: translateY(-50%);
+  -o-transform: translateY(-50%);
+}

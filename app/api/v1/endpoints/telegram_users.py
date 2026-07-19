@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 from app.db.session import get_db_session
 from app.models.telegram_allowed_user import TelegramAllowedUser
 from app.services.auth import CurrentUser
@@ -29,7 +29,7 @@ class TelegramUserCreate(BaseModel):
 @router.get("", response_model=list[TelegramUserRead])
 async def list_telegram_users(
     session: AsyncSession = Depends(get_db_session),
-    _: CurrentUser = Depends(require_auth),
+    _: CurrentUser = Depends(require_admin),
 ) -> list[TelegramAllowedUser]:
     rows = await session.scalars(
         select(TelegramAllowedUser).order_by(TelegramAllowedUser.id)
@@ -41,7 +41,7 @@ async def list_telegram_users(
 async def add_telegram_user(
     body: TelegramUserCreate,
     session: AsyncSession = Depends(get_db_session),
-    _: CurrentUser = Depends(require_auth),
+    _: CurrentUser = Depends(require_admin),
 ) -> TelegramAllowedUser:
     existing = await session.scalar(
         select(TelegramAllowedUser).where(
@@ -68,7 +68,7 @@ async def add_telegram_user(
 async def remove_telegram_user(
     telegram_user_id: int,
     session: AsyncSession = Depends(get_db_session),
-    _: CurrentUser = Depends(require_auth),
+    _: CurrentUser = Depends(require_admin),
 ) -> None:
     user = await session.scalar(
         select(TelegramAllowedUser).where(

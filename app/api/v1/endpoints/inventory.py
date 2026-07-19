@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import select
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 from app.db.session import get_db_session
 from app.models.inventory_record import InventoryRecord
 from app.models.product import Product
@@ -198,7 +198,7 @@ async def update_product(
     jan_code: str,
     payload: ProductUpdate,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> Product:
     product = await session.scalar(select(Product).where(Product.jan_code == jan_code))
     if product is None:
@@ -220,7 +220,7 @@ async def update_product(
 async def create_product(
     payload: ProductCreate,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> Product:
     existing = await session.scalar(select(Product).where(Product.jan_code == payload.jan_code))
     if existing:
@@ -262,7 +262,7 @@ async def preview_product_alias(
 @router.post(
     "/products/{jan_code}/aliases",
     response_model=ProductJanAliasRead,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def add_product_alias(
     jan_code: str,
@@ -279,7 +279,7 @@ async def add_product_alias(
 @router.delete(
     "/products/aliases/{alias_jan}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def delete_product_alias(
     alias_jan: str,
@@ -315,7 +315,7 @@ async def check_missing_products(
 async def parse_chat_report(
     payload: ChatReportParseRequest,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> ChatReportDraftRead:
     try:
         draft = await create_chat_report_draft(session=session, payload=payload)
@@ -334,7 +334,7 @@ async def parse_chat_report(
 async def apply_chat_report_draft(
     draft_id: int,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> ChatReportApplyResult:
     draft = await get_chat_report_draft(session=session, draft_id=draft_id, with_for_update=True)
     if draft is None:
@@ -356,7 +356,7 @@ async def apply_chat_report_draft(
 async def apply_parsed_chat_report(
     payload: ChatReportDocument,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> ChatReportApplyResult:
     result = await apply_chat_report(session=session, document=payload, user_id=current_user.id)
     if result.applied:
@@ -370,7 +370,7 @@ async def upload_rakuten_shipment_csv(
     warehouse_name: str = "乐天仓库",
     customer_name: str = "乐天",
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> RakutenShipmentImportResult:
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
@@ -389,7 +389,7 @@ async def create_rakuten_draft(
     warehouse_name: str = "乐天仓库",
     customer_name: str = "乐天",
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> RakutenDraftPreview:
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
@@ -409,7 +409,7 @@ async def apply_rakuten_draft(
     draft_id: int,
     body: RakutenApplyRequest = Body(default_factory=RakutenApplyRequest),
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> RakutenShipmentImportResult:
     draft = await get_rakuten_shipment_draft(session, draft_id, with_for_update=True)
     if draft is None:
@@ -429,7 +429,7 @@ async def create_trade_shipment_draft_excel(
     file: UploadFile = File(...),
     warehouse_name: str = DEFAULT_TRADE_WAREHOUSE,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> TradeShipmentDraftPreview:
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
@@ -449,7 +449,7 @@ async def create_trade_shipment_draft_image(
     files: list[UploadFile] = File(...),
     warehouse_name: str = DEFAULT_TRADE_WAREHOUSE,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> TradeShipmentDraftPreview:
     images: list[tuple[bytes, str]] = []
     for file in files:
@@ -473,7 +473,7 @@ async def create_trade_shipment_draft_image(
 async def get_trade_shipment_draft_preview(
     draft_id: int,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> TradeShipmentDraftPreview:
     draft = await get_trade_shipment_draft(session, draft_id)
     if draft is None:
@@ -486,7 +486,7 @@ async def update_trade_shipment_draft(
     draft_id: int,
     body: TradeShipmentDraftDocument,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> TradeShipmentDraftPreview:
     draft = await get_trade_shipment_draft(session, draft_id, with_for_update=True)
     if draft is None:
@@ -502,7 +502,7 @@ async def apply_trade_shipment_draft_endpoint(
     draft_id: int,
     body: TradeShipmentApplyRequest = Body(default_factory=TradeShipmentApplyRequest),
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> TradeShipmentImportResult:
     draft = await get_trade_shipment_draft(session, draft_id, with_for_update=True)
     if draft is None:
@@ -521,7 +521,7 @@ async def apply_trade_shipment_draft_endpoint(
 async def stock_in(
     payload: StockInCreate,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> StockInResult:
     products = await search_inventory_items(session=session, keyword=payload.sku, limit=6)
     if not products:
@@ -550,7 +550,7 @@ async def stock_in(
 async def stock_out(
     payload: StockOutCreate,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> StockOutResult:
     products = await search_inventory_items(session=session, keyword=payload.sku, limit=6)
     if not products:
@@ -583,7 +583,7 @@ async def stock_out(
 async def stock_adjust(
     payload: StockAdjustCreate,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> StockAdjustResult:
     products = await search_inventory_items(session=session, keyword=payload.sku, limit=6)
     if not products:
@@ -616,7 +616,7 @@ async def stock_adjust(
 async def stock_transfer(
     payload: StockTransferCreate,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> dict:
     products = await search_inventory_items(session=session, keyword=payload.sku, limit=6)
     if not products:
@@ -649,7 +649,7 @@ async def stock_transfer(
 async def upload_product_catalog(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> ProductCatalogImportResult:
     fname = (file.filename or "").lower()
     if not (fname.endswith(".xlsx") or fname.endswith(".xls")):

@@ -1,0 +1,28 @@
+.template-module {
+	background: url(../img/icon/printTemplate.png) center 10px no-repeat #FFF;
+	border: 1px solid #D7D7D7;
+	width: 130px;
+	height: 125px;
+	float: left;
+	margin: 0px 10px 10px 0px;
+	cursor: pointer;
+}
+
+.template-module .module-title {
+	margin-top: 25px;
+	text-align: center;
+	line-height: 32px;
+}
+
+.template-module .module-name {
+	margin-top: 25px;
+	text-align: center;
+	font-size: 10px;
+	line-height: 18px;
+}
+
+.template-module.sel {
+	border: 1px solid #1c7efb;
+	box-shadow: 0px 0px 3px #4d9afc;
+	background-color: #f3f6fa;
+}

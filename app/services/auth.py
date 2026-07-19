@@ -40,6 +40,7 @@ def decode_access_token(token: str, secret: str) -> dict | None:
 class CurrentUser:
     id: int | None
     username: str
+    is_admin: bool = False
 
 
 async def get_user_by_credentials(
@@ -55,8 +56,8 @@ async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
     return await session.scalar(select(User).where(User.id == user_id, User.is_active.is_(True)))
 
 
-async def create_user(session: AsyncSession, username: str, password: str) -> User:
-    user = User(username=username, password_hash=hash_password(password))
+async def create_user(session: AsyncSession, username: str, password: str, is_admin: bool = False) -> User:
+    user = User(username=username, password_hash=hash_password(password), is_admin=is_admin)
     session.add(user)
     await session.commit()
     await session.refresh(user)

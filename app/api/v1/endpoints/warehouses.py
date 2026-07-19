@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 from app.services.auth import CurrentUser
 from app.db.session import get_db_session
 from app.models.warehouse import Warehouse
@@ -12,7 +12,7 @@ from app.schemas.inventory import WarehouseCreate, WarehouseRead
 router = APIRouter()
 
 
-@router.post("", response_model=WarehouseRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_auth)])
+@router.post("", response_model=WarehouseRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
 async def create_warehouse(
     payload: WarehouseCreate,
     session: AsyncSession = Depends(get_db_session),
@@ -42,7 +42,7 @@ async def list_warehouses(
 @router.patch(
     "/{warehouse_id}/allow-negative",
     response_model=WarehouseRead,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def set_allow_negative_stock(
     warehouse_id: int,

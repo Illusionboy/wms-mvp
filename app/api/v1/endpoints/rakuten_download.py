@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy import select
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 from app.db.session import get_db_session
 from app.models.rakuten_auto_run import RakutenAutoRun
 from app.scrapers.rakuten_scraper import download_shipping_orders
@@ -25,7 +25,7 @@ _SHOT_RE = re.compile(r"^\d{2}_[\w.]+\.png$")
 _STORE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
-@router.post("/auto-download", dependencies=[Depends(require_auth)])
+@router.post("/auto-download", dependencies=[Depends(require_admin)])
 async def auto_download(
     store: str = Query(..., description="店铺标识（与凭据一致，如 1）"),
     days: int = Query(10, ge=1, le=60, description="下载近 N 天発送待ち（最多 60）"),
@@ -62,7 +62,7 @@ async def auto_download(
     }
 
 
-@router.get("/auto-download/shot/{store}/{name}", dependencies=[Depends(require_auth)])
+@router.get("/auto-download/shot/{store}/{name}", dependencies=[Depends(require_admin)])
 async def get_shot(store: str, name: str) -> FileResponse:
     """取某步截图（供前端内联显示调试）。"""
     if not _SHOT_RE.match(name) or "/" in store or ".." in store:
@@ -74,7 +74,7 @@ async def get_shot(store: str, name: str) -> FileResponse:
 
 
 # ── P2c 定时自动下载：结果面板 + 下载 + 手动触发 ─────────────────────────────
-@router.get("/auto-runs", dependencies=[Depends(require_auth)])
+@router.get("/auto-runs", dependencies=[Depends(require_admin)])
 async def auto_runs(session: AsyncSession = Depends(get_db_session)) -> list[dict]:
     """每店最新一次自动运行的状态 + 产物是否就绪（供「今日自动生成」面板）。"""
     rows = (await session.scalars(
@@ -97,7 +97,7 @@ async def auto_runs(session: AsyncSession = Depends(get_db_session)) -> list[dic
     return out
 
 
-@router.get("/auto-runs/{store}/{kind}", dependencies=[Depends(require_auth)])
+@router.get("/auto-runs/{store}/{kind}", dependencies=[Depends(require_admin)])
 async def download_auto_result(store: str, kind: str) -> FileResponse:
     """下载某店最新产物：kind=labels(快递单ZIP) / orders(订单CSV)。"""
     if not _STORE_RE.match(store):
@@ -113,7 +113,7 @@ async def download_auto_result(store: str, kind: str) -> FileResponse:
     return FileResponse(str(p), media_type=media, filename=fname)
 
 
-@router.post("/auto-run-now", dependencies=[Depends(require_auth)])
+@router.post("/auto-run-now", dependencies=[Depends(require_admin)])
 async def auto_run_now(
     days: int = Query(10, ge=1, le=60),
     session: AsyncSession = Depends(get_db_session),

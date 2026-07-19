@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 
 from fastapi import HTTPException
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 from app.services.rakuten_label import build_shipment_report, generate_courier_files
 
 router = APIRouter()
@@ -20,7 +20,7 @@ _MAX_BYTES = 30 * 1024 * 1024
 _COURIER_LABEL = {"sagawa": "佐川", "yamato": "yamato", "post": "郵便"}
 
 
-@router.post("/labels", dependencies=[Depends(require_auth)])
+@router.post("/labels", dependencies=[Depends(require_admin)])
 async def generate_labels(
     file: UploadFile = File(..., description="RMS 订单明细 CSV（全カラムダウンロード用, cp932）"),
     store: str = Query("1", description="店铺标识（用于文件名与 mgmt_no 前缀）"),
@@ -54,7 +54,7 @@ async def generate_labels(
     )
 
 
-@router.post("/shipment-report", dependencies=[Depends(require_auth)])
+@router.post("/shipment-report", dependencies=[Depends(require_admin)])
 async def shipment_report(
     result_file: UploadFile = File(..., description="快递出单结果文件（如佐川 出荷履歴，含 お客様管理番号 + お問い合せ送り状No.）"),
     mapping_file: UploadFile = File(..., description="P1 下载包里的 mapping.json"),

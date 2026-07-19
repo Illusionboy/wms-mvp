@@ -22,16 +22,27 @@ async def require_auth(
         if payload:
             user = await get_user_by_id(session, int(payload["sub"]))
             if user:
-                return CurrentUser(id=user.id, username=user.username)
+                return CurrentUser(id=user.id, username=user.username, is_admin=user.is_admin)
 
     if api_key and settings.api_key and api_key == settings.api_key:
-        return CurrentUser(id=None, username="api_key")
+        # 服务器级 API Key（CLI 工具/脚本）视为管理员，可执行变更。
+        return CurrentUser(id=None, username="api_key", is_admin=True)
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Authentication required. Provide Authorization: Bearer <token> or X-API-Key header.",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+async def require_admin(current_user: CurrentUser = Depends(require_auth)) -> CurrentUser:
+    """管理员专属：变更类端点（出入库/调整/调库/草稿/用户管理等）用它。非管理员一律 403。"""
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="需要管理员权限：当前账号为只读用户，无法执行此操作。",
+        )
+    return current_user
 
 
 async def require_api_key(api_key: str | None = Security(_api_key_header)) -> None:

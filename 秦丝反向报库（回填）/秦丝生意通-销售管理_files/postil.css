@@ -1,0 +1,33 @@
+.postil-delete {
+	display: none;
+}
+
+.postil-delete:hover {
+	cursor: pointer;
+	color: #F04124;
+}
+.postil-item{
+	font-size: 12px;
+}
+.postil-item:hover .postil-delete {
+	display: block;
+}
+
+.postil-simple-display {
+	color: #a6a6a6;
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.postil-simple-display:hover {
+	color: red;
+}
+
+.postil-list-close {
+	float: right;
+	cursor: pointer;
+}
+.postil-list-close:hover{
+	color: #00A0E9;
+}
+

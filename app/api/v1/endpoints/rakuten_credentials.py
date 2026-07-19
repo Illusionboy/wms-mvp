@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 from app.db.session import get_db_session
 from app.schemas.rakuten_credential import RakutenCredentialRead, RakutenCredentialUpsert
 from app.services import rakuten_credentials as svc
@@ -10,14 +10,14 @@ from app.services import rakuten_credentials as svc
 router = APIRouter()
 
 
-@router.get("/credentials", response_model=list[RakutenCredentialRead], dependencies=[Depends(require_auth)])
+@router.get("/credentials", response_model=list[RakutenCredentialRead], dependencies=[Depends(require_admin)])
 async def list_credentials(
     session: AsyncSession = Depends(get_db_session),
 ) -> list[RakutenCredentialRead]:
     return await svc.list_credentials(session)
 
 
-@router.put("/credentials", response_model=RakutenCredentialRead, dependencies=[Depends(require_auth)])
+@router.put("/credentials", response_model=RakutenCredentialRead, dependencies=[Depends(require_admin)])
 async def upsert_credential(
     payload: RakutenCredentialUpsert,
     session: AsyncSession = Depends(get_db_session),
@@ -25,7 +25,7 @@ async def upsert_credential(
     return await svc.upsert_credential(session, payload)
 
 
-@router.delete("/credentials/{store}", dependencies=[Depends(require_auth)])
+@router.delete("/credentials/{store}", dependencies=[Depends(require_admin)])
 async def delete_credential(
     store: str,
     session: AsyncSession = Depends(get_db_session),

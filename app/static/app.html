@@ -404,6 +404,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="settings" onclick="nav(this)">
         <span class="icon">◎</span> 设置
       </button>
+      <button class="nav-item" data-section="user-admin" onclick="nav(this)">
+        <span class="icon">◑</span> 用户管理
+      </button>
     </div>
 
     <div class="nav-group" data-workspace="container" style="display:none">
@@ -428,7 +431,7 @@ tr:hover td { background: var(--accent-bg); }
     <div class="sidebar-footer">
       <div class="user-chip">
         <span>👤</span>
-        <div><strong id="sidebar-username">—</strong><br><span style="font-size:11px">已登录</span></div>
+        <div><strong id="sidebar-username">—</strong><br><span style="font-size:11px">已登录 · <span id="role-badge"></span></span></div>
       </div>
       <button class="logout-btn" onclick="doLogout()">退出登录</button>
     </div>
@@ -1448,6 +1451,35 @@ tr:hover td { background: var(--accent-bg); }
       </div>
     </div>
 
+    <!-- User Admin / 用户管理（仅管理员）-->
+    <div class="section" id="section-user-admin">
+      <div class="section-title">用户管理</div>
+      <div class="section-sub">添加新用户。新用户默认为<b>只读账号</b>——只能查看在库信息，无法执行出入库/调整/调库/草稿等任何变更操作</div>
+      <div class="card">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-row" style="margin:0">
+            <label>用户名</label>
+            <input id="ua-username" type="text" autocomplete="off" style="width:180px">
+          </div>
+          <div class="form-row" style="margin:0">
+            <label>密码（至少 6 位）</label>
+            <input id="ua-password" type="password" autocomplete="new-password" style="width:180px">
+          </div>
+          <button class="btn btn-primary" onclick="addUser()" style="margin-bottom:0">添加只读用户</button>
+        </div>
+        <div id="ua-msg" style="margin-top:10px"></div>
+      </div>
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:8px">现有用户</div>
+        <div style="overflow-x:auto">
+          <table class="table">
+            <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>状态</th></tr></thead>
+            <tbody id="ua-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- Products -->
     <div class="section" id="section-products">
       <div class="section-title">商品管理</div>
@@ -1790,6 +1822,9 @@ tr:hover td { background: var(--accent-bg); }
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
 let _token = localStorage.getItem('wms_token') || '';
+let _isAdmin = localStorage.getItem('wms_admin') === '1';
+// 非管理员（只读）可见的页面；其余变更类页面对只读用户隐藏
+const READONLY_SECTIONS = ['dashboard', 'search', 'supplier-history', 'customer-history', 'product-history', 'system-log', 'dormant'];
 let _username = localStorage.getItem('wms_username') || '';
 let _warehouses = [], _customers = [];
 let _searchTimers = {}, _searchCache = {};
@@ -1817,9 +1852,39 @@ function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-shell').style.display = 'flex';
   document.getElementById('sidebar-username').textContent = _username;
+  applyRoleUI();        // 先按本地缓存的角色渲染
+  refreshRole();        // 再向后端确认最新角色
   loadGlobals();
   loadDashboard();
   if (!handleDeepLink()) initWorkspace();
+}
+
+// ── 角色权限（管理员 / 只读）──────────────────────────────────────────────────
+function applyRoleUI() {
+  document.querySelectorAll('.nav-item').forEach(b => {
+    const sec = b.dataset.section;
+    if (sec === 'user-admin') { b.style.display = _isAdmin ? '' : 'none'; return; }
+    b.style.display = (_isAdmin || READONLY_SECTIONS.includes(sec)) ? '' : 'none';
+  });
+  // 隐藏整组都被隐藏的分组标题
+  document.querySelectorAll('.nav-label').forEach(lbl => {
+    let n = lbl.nextElementSibling, anyVisible = false;
+    while (n && n.classList && n.classList.contains('nav-item')) {
+      if (n.style.display !== 'none') anyVisible = true;
+      n = n.nextElementSibling;
+    }
+    lbl.style.display = anyVisible ? '' : 'none';
+  });
+  const badge = document.getElementById('role-badge');
+  if (badge) badge.textContent = _isAdmin ? '管理员' : '只读';
+}
+async function refreshRole() {
+  try {
+    const me = await api('GET', '/auth/me');
+    _isAdmin = !!me.is_admin;
+    localStorage.setItem('wms_admin', _isAdmin ? '1' : '');
+  } catch {}
+  applyRoleUI();
 }
 
 // ── API helper ─────────────────────────────────────────────────────────────
@@ -1868,8 +1933,10 @@ async function doLogin() {
     const json = await data.json();
     _token = json.access_token;
     _username = json.username;
+    _isAdmin = !!json.is_admin;
     localStorage.setItem('wms_token', _token);
     localStorage.setItem('wms_username', _username);
+    localStorage.setItem('wms_admin', _isAdmin ? '1' : '');
     showApp();
   } catch (e) {
     errEl.textContent = e.message;
@@ -1877,9 +1944,10 @@ async function doLogin() {
   }
 }
 function doLogout() {
-  _token = ''; _username = '';
+  _token = ''; _username = ''; _isAdmin = false;
   localStorage.removeItem('wms_token');
   localStorage.removeItem('wms_username');
+  localStorage.removeItem('wms_admin');
   showLogin();
 }
 
@@ -1896,6 +1964,7 @@ function nav(btn) {
   if (btn.dataset.section === 'alloc') loadConflictLogs();
   if (btn.dataset.section === 'system-log') loadSystemLogs();
   if (btn.dataset.section === 'dormant') loadDormant();
+  if (btn.dataset.section === 'user-admin') loadUsers();
   if (btn.dataset.section === 'container-pallets') loadPalletList();
   if (btn.dataset.section === 'stock-transfer') loadLastTransfer();
   if (btn.dataset.section === 'rakuten-label') loadAutoRuns();
@@ -3143,6 +3212,41 @@ async function loadDormant() {
     </tr>`).join('');
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--danger)">${esc(e.message)}</td></tr>`;
+  }
+}
+
+// ── 用户管理（仅管理员）──────────────────────────────────────────────────────
+async function loadUsers() {
+  const tb = document.getElementById('ua-tbody');
+  tb.innerHTML = '<tr><td colspan="4" class="loading">加载中…</td></tr>';
+  try {
+    const users = await api('GET', '/auth/users');
+    tb.innerHTML = users.map(u => `<tr>
+      <td>${u.id}</td>
+      <td>${esc(u.username)}</td>
+      <td>${u.is_admin ? '<span style="color:var(--accent);font-weight:600">管理员</span>' : '只读'}</td>
+      <td>${u.is_active ? '启用' : '<span style="color:var(--muted)">停用</span>'}</td>
+    </tr>`).join('');
+  } catch (e) {
+    tb.innerHTML = `<tr><td colspan="4" style="color:var(--danger)">${esc(e.message)}</td></tr>`;
+  }
+}
+async function addUser() {
+  const u = document.getElementById('ua-username').value.trim();
+  const p = document.getElementById('ua-password').value;
+  const msg = document.getElementById('ua-msg');
+  if (!u || p.length < 6) {
+    msg.innerHTML = '<span style="color:var(--danger)">用户名必填，密码至少 6 位</span>';
+    return;
+  }
+  try {
+    await api('POST', '/auth/users', { username: u, password: p });
+    msg.innerHTML = `<span style="color:#16a34a">✓ 已添加只读用户「${esc(u)}」</span>`;
+    document.getElementById('ua-username').value = '';
+    document.getElementById('ua-password').value = '';
+    loadUsers();
+  } catch (e) {
+    msg.innerHTML = `<span style="color:var(--danger)">${esc(e.message)}</span>`;
   }
 }
 

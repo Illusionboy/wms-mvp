@@ -6,7 +6,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 from app.db.session import get_db_session
 from app.schemas.count_session import (
     CountSessionRead,
@@ -30,7 +30,7 @@ _MAX_BYTES = 20 * 1024 * 1024
 async def create_session(
     payload: CountSessionUpsert,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> CountSessionRead:
     return await svc.create_session(
         session,
@@ -44,7 +44,7 @@ async def create_session(
 @router.get("/sessions", response_model=list[CountSessionRead])
 async def list_sessions(
     session: AsyncSession = Depends(get_db_session),
-    _: CurrentUser = Depends(require_auth),
+    _: CurrentUser = Depends(require_admin),
 ) -> list[CountSessionRead]:
     return await svc.list_open_sessions(session)
 
@@ -53,7 +53,7 @@ async def list_sessions(
 async def get_session(
     session_id: int,
     session: AsyncSession = Depends(get_db_session),
-    _: CurrentUser = Depends(require_auth),
+    _: CurrentUser = Depends(require_admin),
 ) -> CountSessionRead:
     obj = await svc.get_session(session, session_id)
     if obj is None:
@@ -66,7 +66,7 @@ async def update_session(
     session_id: int,
     payload: CountSessionUpsert,
     session: AsyncSession = Depends(get_db_session),
-    _: CurrentUser = Depends(require_auth),
+    _: CurrentUser = Depends(require_admin),
 ) -> CountSessionRead:
     obj = await svc.update_session(
         session, session_id,
@@ -81,7 +81,7 @@ async def update_session(
 async def delete_session(
     session_id: int,
     session: AsyncSession = Depends(get_db_session),
-    _: CurrentUser = Depends(require_auth),
+    _: CurrentUser = Depends(require_admin),
 ) -> dict[str, bool]:
     ok = await svc.delete_session(session, session_id)
     if not ok:
@@ -93,7 +93,7 @@ async def delete_session(
 async def import_excel(
     file: UploadFile = File(..., description="报库 Excel（sheet=客户/供应商，含 JAN+数量）"),
     session: AsyncSession = Depends(get_db_session),
-    _: CurrentUser = Depends(require_auth),
+    _: CurrentUser = Depends(require_admin),
 ) -> ImportResult:
     content = await file.read(_MAX_BYTES + 1)
     if len(content) > _MAX_BYTES:

@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.params import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 from app.db.session import get_db_session
 from app.schemas.inventory import RakutenOrderAnalysisResult, RakutenOrderApplyResult
 from app.services.auth import CurrentUser
@@ -64,12 +64,12 @@ async def rakuten_order_analysis(
 @router.post(
     "/order-analysis/{draft_id}/apply",
     response_model=RakutenOrderApplyResult,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def apply_rakuten_order_analysis(
     draft_id: int,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> RakutenOrderApplyResult:
     """Deduct 乐天仓库 stock for `status=="ok"` lines in the draft.
 

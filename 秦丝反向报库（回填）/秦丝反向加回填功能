@@ -1,0 +1,15 @@
+秦丝反向加回填功能
+
+针对批量点数页面，可以快速点数的情况，我计划可以通过这个点数结果，直接回填到秦丝生意通中，从逻辑上来讲应该比较好实现
+
+步骤提示：
+我已经将采购页面保存到【秦丝生意通-采购页面.html】文件中，报入库的URL为“https://web.syt.qinsilk.com/gis/template/nadmin/inner/orders/purchaseList.html?mid=2&version=6.84.0”
+出库和入库页面类似，URL为“https://web.syt.qinsilk.com/gis/template/nadmin/inner/sale/wholesaleOrdersList.html?mid=4&version=6.84.0”
+
+问题以及初步思路
+1. 由于我们报库供应商或者客人都是用的简称，和秦丝通不完全对应，我想暂时用统一的（临时）客户（供应商），后续在秦丝通修改客户
+2. 当有新品时，报库可能出错，我们这边是将新品信息回填到秦丝的添加新品模块？还是其它推荐方式
+3. 日期默认当天
+4. 只保存草稿，不点【出售】/【采购】按钮
+5. 默认普通仓库，可选乐天
+

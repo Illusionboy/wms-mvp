@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.params import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 from app.db.session import get_db_session
 from app.schemas.inventory import (
     AllocationConflictLogRead,
@@ -41,7 +41,7 @@ MAX_BYTES = 20 * 1024 * 1024
 @router.post(
     "/allocations/upload",
     response_model=CustomerAllocationUploadResult,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def upload_allocation_excel(
     file: UploadFile = File(..., description="客户需求 Excel（每 sheet 为一个客户代码）"),
@@ -112,12 +112,12 @@ async def daily_allocation_overview(
 @router.patch(
     "/allocations/{allocation_id}/reserve",
     response_model=CustomerAllocationRead,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def manual_reserve(
     allocation_id: int,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> CustomerAllocationRead:
     """手动将 waiting 行调转为 reserved（库存不足时返回 409）。"""
     try:
@@ -132,13 +132,13 @@ async def manual_reserve(
 @router.patch(
     "/allocations/{allocation_id}/quantity",
     response_model=CustomerAllocationRead,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def adjust_allocation_quantity(
     allocation_id: int,
     quantity: int,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> CustomerAllocationRead:
     """手动修正预留数量（纠正重复上传/录入错误导致的多算或少算）。"""
     try:
@@ -152,12 +152,12 @@ async def adjust_allocation_quantity(
 @router.patch(
     "/allocations/{allocation_id}/revert",
     response_model=CustomerAllocationRead,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def revert_reservation(
     allocation_id: int,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> CustomerAllocationRead:
     """撤销 reserved → waiting，释放的库存量会重新评估其他 waiting 行。"""
     try:
@@ -170,12 +170,12 @@ async def revert_reservation(
 @router.patch(
     "/allocations/{allocation_id}/cancel",
     response_model=CustomerAllocationRead,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def cancel_reservation(
     allocation_id: int,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> CustomerAllocationRead:
     """取消预留（reserved/waiting → cancelled）。"""
     try:
@@ -188,12 +188,12 @@ async def cancel_reservation(
 @router.patch(
     "/allocations/{allocation_id}/ship",
     response_model=CustomerAllocationRead,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def mark_allocation_shipped(
     allocation_id: int,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> CustomerAllocationRead:
     """手动标记该预留对应的货已实际出库（reserved/waiting → shipped）。
 
@@ -212,13 +212,13 @@ async def mark_allocation_shipped(
 @router.post(
     "/allocations/bulk-cancel",
     response_model=BulkCancelAllocationResult,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def bulk_cancel_reservation(
     customer_name: str,
     planned_outbound_date: date,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> BulkCancelAllocationResult:
     """按客户名+计划出库日期批量取消（典型用途：上传时填错日期，整批撤销重传）。
 
@@ -235,13 +235,13 @@ async def bulk_cancel_reservation(
 @router.post(
     "/allocations/bulk-ship",
     response_model=BulkShipAllocationResult,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def bulk_ship_reservation(
     customer_name: str,
     planned_outbound_date: date,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> BulkShipAllocationResult:
     """按客户名+计划出库日期一键标记已出库（典型用途：整批货已交给客户，逐条点太慢）。
 
@@ -258,14 +258,14 @@ async def bulk_ship_reservation(
 @router.post(
     "/allocations/bulk-reschedule",
     response_model=BulkRescheduleAllocationResult,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_admin)],
 )
 async def bulk_reschedule_reservation(
     customer_name: str,
     from_date: date,
     to_date: date,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> BulkRescheduleAllocationResult:
     """按客户名把某计划出库日期的所有 waiting/reserved 预留整批改到新日期
     （典型用途：上传时填错日期，直接改期，免得整批撤销重传）。
@@ -296,7 +296,7 @@ async def list_allocation_conflicts(
     return await get_conflict_logs(session, jan_code=jan_code, customer_name=customer_name, limit=limit)
 
 
-@router.delete("/allocation-conflicts", dependencies=[Depends(require_auth)])
+@router.delete("/allocation-conflicts", dependencies=[Depends(require_admin)])
 async def delete_allocation_conflicts(
     jan_code: str | None = None,
     customer_name: str | None = None,

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 from app.core.config import settings
 from app.db.session import get_db_session
 from app.models.qinsi_scrape_cache import QinsiScrapeCache
@@ -68,7 +68,7 @@ class UploadSessionRequest(BaseModel):
 @router.post("/upload-session")
 async def upload_qinsi_session(
     payload: UploadSessionRequest,
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> dict:
     """
     接收从本地 Mac 上传的秦丝 session cookies，保存到服务器。
@@ -162,7 +162,7 @@ async def get_cache_status(
 async def trigger_scrape(
     payload: ScrapeRequest,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> ScrapeResult:
     """
     爬取秦丝生意通的出入库记录。
@@ -216,7 +216,7 @@ async def trigger_scrape(
 async def apply_scraped_records(
     payload: ApplyRequest,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> ApplyResult:
     """
     将用户勾选的爬取记录写入 WMS。
@@ -341,7 +341,7 @@ async def apply_scraped_records(
 @router.post("/backfill")
 async def backfill(
     payload: BackfillRequest,
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> dict:
     """把点数结果(JAN+数量)存成秦丝采购(入库)/批发(出库)**草稿**。首版：监督调试，返回每步日志/截图。"""
     res = await backfill_draft(
@@ -355,7 +355,7 @@ async def backfill(
     }
 
 
-@router.get("/backfill/shot/{direction}/{name}", dependencies=[Depends(require_auth)])
+@router.get("/backfill/shot/{direction}/{name}", dependencies=[Depends(require_admin)])
 async def backfill_shot(direction: str, name: str) -> FileResponse:
     if direction not in ("in", "out") or not _BF_SHOT_RE.match(name):
         raise HTTPException(status_code=400, detail="非法参数")

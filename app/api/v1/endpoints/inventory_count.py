@@ -5,7 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_auth
+from app.api.deps import require_admin
 from app.db.session import get_db_session
 from app.models.customer import Customer
 from app.models.warehouse import Warehouse
@@ -57,7 +57,7 @@ async def upload_count_file(
     session_index: int = Form(0),
     cover_uncovered: bool = Form(True),
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> InventoryCountDraftRead:
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
@@ -124,7 +124,7 @@ async def apply_draft(
     draft_id: int,
     force: bool = False,
     session: AsyncSession = Depends(get_db_session),
-    current_user: CurrentUser = Depends(require_auth),
+    current_user: CurrentUser = Depends(require_admin),
 ) -> InventoryCountApplyResult:
     draft = await get_inventory_count_draft(session, draft_id, with_for_update=True)
     if draft is None:

@@ -11,3 +11,5 @@ class User(TimestampMixin, Base):
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    # 管理员：可管理用户 + 执行所有变更（出入库/调整/调库/草稿等）。非管理员只读。
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)

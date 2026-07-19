@@ -1,0 +1,224 @@
+.export-template-dialog {
+  max-height: calc(100vh - 120px);
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  background-color: #FFF;
+  z-index: 1001;
+  transform: translate(-50%, -50%);
+  border-radius: 3px !important;
+  border: none !important;
+}
+.export-template-dialog .ui-dialog-titlebar {
+  display: none;
+}
+.export-template-dialog-main {
+  width: 100% !important;
+  position: relative !important;
+  padding: 0 !important;
+}
+.export-template-dialog-title {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0 5px;
+  border-bottom: 1px solid #cdcdcd;
+  height: 40px;
+}
+.export-template-dialog-title .title {
+  font-size: 16px;
+  font-weight: bold;
+  padding: 5px;
+  flex: 1;
+  overflow: hidden;
+}
+.export-template-dialog-main .close-icon {
+  color: #303030;
+  cursor: pointer;
+  font-size: 30px;
+  padding: 4px 6px;
+}
+.export-template-dialog-content {
+  padding: 10px;
+  font-size: 14px;
+  width: 100%;
+}
+.export-template-dialog-content .config-box {
+  width: 100%;
+  padding: 10px 0 0;
+  overflow: hidden;
+  display: flex;
+}
+.export-template-dialog-content .config-box .config-box-left {
+  max-width: 30%;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+}
+.export-template-dialog-content .config-box .config-box-right {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.export-template-dialog-content .config-box .config-box-title {
+  font-weight: bold;
+  padding-bottom: 10px;
+}
+.export-template-dialog-content .config-box .config-table {
+  width: 100%;
+  flex: 1;
+  overflow: hidden;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row:hover {
+  background: #ecf5ff !important;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row.drag-cursor {
+  cursor: move;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row.drag-cursor:hover .config-table-index.drag {
+  padding: 0 25px;
+}
+.export-template-dialog-content .config-box .config-table .config-table-body {
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 40vh;
+  min-height: 40vh;
+}
+.export-template-dialog-content .config-box .config-table .config-table-body::-webkit-scrollbar {
+  width: 4px;  /* 滚动条宽度 */
+  height: 4px; /* 滚动条高度 */
+}
+/* 滚动条滑块 */
+.export-template-dialog-content .config-box .config-table .config-table-body::-webkit-scrollbar-thumb  {
+  border-radius: 4px;
+}
+.export-template-dialog-content .config-box .config-table .config-table-cell {
+  padding: 8px 5px;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.export-template-dialog-content .config-box .config-table .config-table-cell label {
+  margin-bottom: 0;
+  cursor: pointer;
+}
+.export-template-dialog-main label {
+  margin-bottom: 0;
+  cursor: pointer;
+}
+.export-template-dialog-main label input[type=checkbox] {
+  margin: 0;
+  vertical-align: -1px;
+}
+.export-template-dialog-content .config-box .config-box-left .config-table {
+  border-right: 1px solid #cdcdcd;
+  padding-right: 10px;
+}
+.export-template-dialog-content .config-box .config-box-right .config-table {
+  padding-left: 10px;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row.config-table-header {
+  border: 1px solid #cdcdcd;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row.config-table-header .config-table-cell {
+  background: #e8e8e8;
+  border-right: 1px solid #cdcdcd;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row.config-table-header .config-table-cell:nth-last-child(1) {
+  border-right: none;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row .config-table-index {
+  width: 50px;
+  text-align: center;
+  justify-content: center;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row .config-table-index.drag {
+  width: 80px;
+  position: relative;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row .config-table-name {
+  flex: 1;
+  overflow: hidden;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row .config-table-op {
+  width: 220px;
+  text-align: center;
+  justify-content: center;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row .config-table-op .op-item {
+  cursor: pointer;
+  padding: 0 5px;
+}
+.export-template-dialog-content .config-box .config-table .config-table-row .config-table-business {
+  flex: 1;
+  overflow: hidden;
+}
+.export-template-dialog-main .export-template-dialog-main-footer {
+  width: 100%;
+  height: 50px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 0px 10px;
+  border-top: 1px solid #cdcdcd;
+  font-size: 14px;
+}
+.export-template-dialog-main .export-template-dialog-main-footer .btn-normal + .btn-normal {
+  margin-left: 10px;
+}
+.pl10 {
+  padding-left: 10px !important;
+}
+.pr5 {
+  padding-right: 5px !important;
+}
+.pr15 {
+  padding-right: 15px !important;
+}
+.text-nowrap {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lb-disabled-item {
+  color: #c0c4cc !important;
+  cursor: not-allowed !important;
+}
+.drag-img-item {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  left: 5px;
+}
+.footer-tip {
+  display: inline-block;
+  position: relative;
+}
+.footer-tip>.tip-content{
+  display:none;
+  position: absolute;
+  top: -15px;
+  right: 35px;
+  width: 350px;
+  border-radius: 5px;
+  font-size: 12px;
+  text-align: left;
+  padding: 5px 10px;
+  z-index: 1999;
+  font-size: 12px;
+  background-color: white;
+  border: 1px solid black;
+  line-height: 20px;
+}
+.footer-tip:hover>.tip-content{
+  display:block;
+}

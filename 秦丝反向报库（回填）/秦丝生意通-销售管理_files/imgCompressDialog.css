@@ -1,0 +1,39 @@
+.img-compress-dialog {
+  height: 300px !important;
+}
+.img-compress-dialog .ui-dialog-titlebar {
+  display: none;
+}
+.img-compress-dialog-main {
+  position: relative;
+  overflow: hidden;
+  height: 100% !important;
+  padding-bottom: 60px;
+}
+.img-compress-dialog-main, #imgCompressDialog .img-compress-dialog-select {
+  width: 100%;
+}
+.img-compress-dialog-main .progressbar-close {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  cursor: pointer;
+}
+.img-compress-dialog-main .img-compress-dialog-main-footer {
+  position: absolute;
+  bottom: 10px;
+  right: 15px;
+  cursor: pointer;
+}
+.img-compress-dialog-main .img-compress-dialog-text {
+  padding: 5px 0;
+  font-size: 15px;
+}
+.img-compress-dialog-main .img-compress-dialog-text.title {
+  font-weight: bold;
+  padding-bottom: 10px;
+  font-size: 16px;
+}
+.lb-compress-dialog-select .search {
+  display: none;
+}

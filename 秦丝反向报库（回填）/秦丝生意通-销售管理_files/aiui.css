@@ -1,0 +1,286 @@
+/**
+ * Created with JetBrains WebStorm.
+ * User: liuyong
+ * Date: 14-4-12
+ * Time: 上午12:28
+ * To change this template use File | Settings | File Templates.
+ */
+
+.clearfix:before, .clearfix:after {
+    content: "";
+    display: table;
+    line-height: 0;
+}
+.clearfix:after {
+    clear: both;
+}
+.clearfix:before, .clearfix:after {
+    content: "";
+    display: table;
+    line-height: 0;
+}
+
+.clearfix {
+}
+
+
+/**进度条*/
+.progress-steps {
+    font-size: 12px;
+    line-height: 1.3;
+    list-style-type: none;
+    margin: 0;
+    padding: 0;
+    
+}
+.progress-steps .step {
+    float: left;
+    padding: 0 0 5px;
+    text-align: center;
+    width: 75px;
+}
+
+.progress-steps {
+    font-size: 12px;
+    line-height: 1.3;
+    list-style-type: none;
+}
+.progress-status {
+    color: #AAB2BD;
+    background-color: #FFFFFF;
+}
+
+
+.progress-status .progress-steps .step-done .step-line {
+    background-position: 0 10px;
+}
+
+
+
+.progress-status .progress-steps .step-line {
+    background-image: url("images/icon-progress.png");
+    background-position: -78px 10px;
+    background-repeat: no-repeat;
+    height: 20px;
+    position: relative;
+}
+
+.progress-status .progress-steps {
+    font-size: 12px;
+    line-height: 1.3;
+    list-style-type: none;
+}
+
+.progress-status .progress-steps .step-first .step-dot, .progress-status .progress-steps .step-done .step-dot, .progress-status .progress-steps .step-now .step-dot {
+    background-position: -155px -50px;
+}
+
+.progress-status .progress-steps .step-now.step-first .step-line {
+    background-position: 55px -11px;
+}
+.progress-status .progress-steps .step-dot {
+    background-position: -155px -10px;
+    left: 15px;
+}
+.progress-status .progress-steps .step-dot {
+    background-image: url("images/icon-progress.png");
+    background-position: -155px -10px;
+    background-repeat: no-repeat;
+    height: 20px;
+    left: 38px;
+    position: absolute;
+    top: 0;
+    width: 80px;
+}
+.uc-tooltip {
+    position: relative;
+}
+.progress-status .progress-steps .step {
+    text-align: center;
+}
+
+
+.progress-status .progress-steps .step-last .step-line {
+    background-position: -102px 10px;
+}
+
+
+.progress-status .progress-steps span.btn-comment {
+    cursor: default;
+}
+.progress-status .progress-steps .btn-comment {
+    left: 21px;
+}
+.progress-status .progress-steps .btn-comment {
+    width: 68px;
+}
+.progress-status .progress-steps .btn-comment {
+    left: 44px;
+    position: absolute;
+    top: 30px;
+}
+
+.progress-status .progress-steps .step-now .step-line {
+    background-position: -15px 10px;
+}
+
+.progress-status .progress-steps .step-now.step-last .step-line {
+    background-position: -15px -32px;
+}
+.progress-status .progress-steps .step-first .step-line {
+    background-position: 60px 10px;
+}
+.progress-status .progress-steps .step-done.step-last .step-line {
+    background-position: -77px -45px;
+}
+.btn-round {
+    border-radius: 12px;
+    font-size: 12px;
+    height: 24px;
+    line-height: 24px;
+    width: 105px;
+}
+.btn-dakeLight {
+    background-color: #CCD0D8;
+    border: 0 none;
+    color: #FFFFFF;
+}
+.step-now  .btn-dakeLight
+{
+    background-color: #8fc31f;
+}
+
+/**进度条 end*/
+	
+/* 表单校验 */
+ .validate_input .error_container {
+    display: none;
+    line-height: 18px;
+}
+.validate_input .error_container .error_tip {
+    display: none;
+}
+.validate_input .error_container .error_tip .error_led {
+    display: none;
+}
+.validate_input .error_container .error_tip .error_led span {
+    display: none;
+}
+.validate_input:hover .error_container {
+    display: block;
+    height: 0;
+    position: relative;
+    width: 0;
+}
+
+/* 提示框在下方 */
+.validate_input:hover .error_container .error_tip {
+    background: none repeat scroll 0 0 #fffbd6;
+    border: 1px solid #d4c465;
+    border-radius: 5px;
+    color: #6b6559;
+    display: block;
+    font-size: 13px;
+    height: auto;
+    padding: 6px;
+    position: absolute;
+    top: 10px;
+    width: 189px;
+    z-index: 9999;
+}
+ .validate_input:hover .error_container .error_tip .error_led {
+    border-color: #ffffff transparent #d4c465;
+    border-style: solid;
+    border-width: 0 6px 10px;
+    display: block;
+    height: 0;
+    margin-left: 10px;
+    position: absolute;
+    top: -10px;
+    width: 0;
+    z-index: 9999;
+}
+.validate_input:hover .error_container .error_tip .error_led span {
+    border-color: #ffffff transparent #fffbd6;
+    border-style: solid;
+    border-width: 0 6px 10px;
+    display: block;
+    height: 0;
+    left: -6px;
+    position: absolute;
+    top: 2px;
+    width: 0;
+    z-index: 10000;
+} 
+
+/* 提示框在左边 */
+.validate_input:hover .error_container .error_tip_left {
+    background: none repeat scroll 0 0 #fffbd6;
+    border: 1px solid #d4c465;
+    border-radius: 5px;
+    color: #6b6559;
+    display: block;
+    font-size: 13px;
+    height: auto;
+    padding: 6px;
+    position: absolute;
+    right: 10px;
+    width: 150px;
+    z-index: 9999;
+}
+
+.validate_input:hover .error_container .error_tip_left .error_led_left {
+    border-color:#ffffff transparent #ffffff #d4c465;
+    border-style: solid;
+    border-width:6px 0 6px 10px;
+    display: block;
+    height: 0;
+    margin-left: 10px;
+    position: absolute;
+    right: -10px;
+    width: 0;
+    z-index: 9999;
+}
+.validate_input:hover .error_container .error_tip_left .error_led_left span {
+    border-color: transparent #ffffff  transparent  #fffbd6;
+    border-style: solid;
+    border-width:  6px 0 6px 10px;
+    display: block;
+    height: 0;
+    right: 2px;
+    top:-6px;
+    position: absolute;
+  /*   left: 2px; */
+    width: 0;
+    z-index: 10000;
+} 
+.required {
+    border-left: 2px solid red;
+    border-radius: 2px 0 0 2px;
+}
+input.ng-invalid.ng-dirty {
+    border: 1px solid #e50000;
+}
+
+.mulsel-invalid input {
+    border: 1px solid #e50000;
+}
+
+.select-invalid{
+    border: 1px solid #e50000;
+}
+
+.set-invalid button{
+	border: 1px solid #e50000;
+}
+
+.cursor-pointer
+{
+	cursor: pointer;
+}
+
+select.ng-invalid.ng-dirty {
+    border: 1px solid #e50000;
+}
+
+/* 表单校验  end*/

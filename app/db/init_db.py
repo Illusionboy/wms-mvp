@@ -56,6 +56,10 @@ async def init_db() -> None:
         await conn.execute(text(
             "ALTER TABLE rakuten_credentials ADD COLUMN IF NOT EXISTS member_password_enc VARCHAR(512) NOT NULL DEFAULT ''"
         ))
+        # 用户角色：is_admin。非管理员只读，无法执行任何变更。
+        await conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false"
+        ))
         # Partial unique index: prevents duplicate batch transactions at the DB level.
         # Includes transaction_type so that a transfer's paired OUT+IN rows (same reference_id,
         # different transaction_type) are allowed to coexist without violating the constraint.
@@ -185,5 +189,8 @@ async def _ensure_admin_user() -> None:
     async with AsyncSessionLocal() as session:
         existing = await session.scalar(select(User).where(User.username == username))
         if existing is None:
-            session.add(User(username=username, password_hash=hash_password(password)))
+            session.add(User(username=username, password_hash=hash_password(password), is_admin=True))
+            await session.commit()
+        elif not existing.is_admin:
+            existing.is_admin = True   # 确保配置的 ADMIN_USERNAME 始终是管理员
             await session.commit()

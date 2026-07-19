@@ -1,0 +1,1 @@
+!function(win){var date=new Date,year=date.getFullYear(),month=date.getMonth();month+=1,date.getDate(),date.getHours(),date.getMinutes(),date.getSeconds();win.ALiLogUtils={setAliSendLog:function(key,messageObject){},setAliSendLogSLS:function(key,messageObject){}}}(window);
