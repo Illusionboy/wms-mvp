@@ -5159,7 +5159,10 @@ function countBuildWx() {
   const dir = document.getElementById('count-dir').value === 'out' ? '出库' : '到库';
   const party = document.getElementById('count-wx-party').value.trim();
   const head = `${date} ${dir}${party ? ' ' + party : ''}`;
-  const lines = _count.items.map(it => `${it.name_zh || '?'} ${String(it.jan_code).slice(-6)}:${_countQty(it)}`);
+  const lines = _count.items.map(it => {
+    const nm = (it.name_zh || '').trim();
+    return `${nm ? nm + ' ' : ''}${String(it.jan_code).slice(-6)}:${_countQty(it)}`;
+  });
   document.getElementById('count-wx').value = [head].concat(lines).join('\n');
 }
 async function countSimulate() {
