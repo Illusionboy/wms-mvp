@@ -146,7 +146,8 @@ async def _qs_create_goods(client: httpx.AsyncClient, jan: str, name: str) -> bo
         return False
 
 
-async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str) -> "BackfillResult":
+async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str,
+                        cp_id: int | None = None, cp_name: str | None = None) -> "BackfillResult":
     """回填草稿：httpx 直接调秦丝接口。出库=wholesaleOrdersSaveDraft.ac，入库=purchaseSaveDraft.ac。不用浏览器。
     items=[(jan, qty)] 或 [(jan, qty, name_jp)]。草稿不校验库存（实测超库存也能存），对方统一 WMS回填。
     JAN 秦丝查无 → 自动建商品（名称取 name_jp，兜底 JAN；记入 created_new），再入单；建失败才记 not_found。"""
@@ -157,6 +158,9 @@ async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str)
         return res
     depot_id, depot_name = depot["id"], depot["name"]
     is_sale = direction == "out"
+    # 对方（供应商/客户）：用选中的秦丝对方；没选/没匹配上则回退 WMS回填
+    cp_name = (cp_name or "").strip() or "WMS回填"
+    cp_id = cp_id or (_QS_WMS_CLIENT_ID if is_sale else _QS_WMS_SUPPLIER_ID)
     try:
         cookies = _load_cookie_dict()
         assert cookies
@@ -199,8 +203,8 @@ async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str)
                 "otherCost": 0, "itemType": 1,
                 "salerName": _QS_SALER_NAME, "salerId": _QS_SALER_ID,
                 "handlerName": _QS_SALER_NAME, "handlerId": _QS_SALER_ID,
-                "clientName": "WMS回填", "clientId": _QS_WMS_CLIENT_ID,
-                "client": {"val": _QS_WMS_CLIENT_ID, "text": "WMS回填"},
+                "clientName": cp_name, "clientId": cp_id,
+                "client": {"val": cp_id, "text": cp_name},
                 "accountName": _QS_ACCOUNT_NAME, "accountId": _QS_ACCOUNT_ID,
                 "depotId": depot_id, "depotName": depot_name, "storehouseId": depot_id,
                 "depot": {"val": depot_id, "text": depot_name},
@@ -217,7 +221,7 @@ async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str)
             }
             delivery = {
                 "deliveryCompanyId": _QS_DELIVERY_ID, "deliveryId": _QS_DELIVERY_ID,
-                "optimisticLockVersion": 0, "contact": "WMS回填", "deliveryType": 1,
+                "optimisticLockVersion": 0, "contact": cp_name, "deliveryType": 1,
                 "deliveryName": _QS_DELIVERY_NAME, "recipientCountyId": None,
             }
             data = {
@@ -235,10 +239,10 @@ async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str)
                 "otherCost": 0, "wipeZero": 0, "alreadyPaid": 0, "discount": 100,
                 "totalAmount": "0.00", "handlerName": _QS_SALER_NAME, "state": 1, "itemType": 1,
                 "businessTime": now,
-                "supplier": {"supplierName": "WMS回填", "id": _QS_WMS_SUPPLIER_ID,
-                             "val": _QS_WMS_SUPPLIER_ID, "text": "WMS回填", "status": 1,
+                "supplier": {"supplierName": cp_name, "id": cp_id,
+                             "val": cp_id, "text": cp_name, "status": 1,
                              "discount": 100, "balance": 0, "showOrder": 100},
-                "supplierId": _QS_WMS_SUPPLIER_ID,
+                "supplierId": cp_id,
                 "depot": {"val": depot_id, "text": depot_name}, "depotId": depot_id, "storeId": 0,
                 "trueTotalAmount": "0.00", "finalTotalAmount": 0,
                 "totalAvailableRows": len(goods), "accountId": _QS_ACCOUNT_ID,
@@ -261,7 +265,8 @@ async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str)
         sn = obj.get("ordersSn") or obj.get("purchaseSn") or (j.get("orderDelivery") or {}).get("orderSn") or ""
         kind = "出库(批发)" if is_sale else "入库(采购)"
         res.success = not res.not_found
-        note = f"{kind}草稿 {sn}，仓库 {depot_name}，{len(goods)} 个商品"
+        cp_label = "供应商" if not is_sale else "客户"
+        note = f"{kind}草稿 {sn}，{cp_label} {cp_name}，仓库 {depot_name}，{len(goods)} 个商品"
         if res.created_new:
             note += f"（其中 {len(res.created_new)} 个新品已自动建）"
         res.steps.append({"step": "存草稿成功", "ok": True, "note": note})
@@ -290,11 +295,15 @@ async def backfill_draft(
     *,
     direction: str = "in",
     warehouse_name: str = "普通仓库",
+    counterparty_id: int | None = None,
+    counterparty_name: str | None = None,
     headless: bool = True,
 ) -> BackfillResult:
     """items=[(jan, qty)]；direction='in'(采购入库)/'out'(批发出库)。
+    counterparty_id/name：选中的秦丝供应商(入)/客户(出)；不传则回退 WMS回填。
     出/入库都走 API 回放(httpx 直接建草稿，不用浏览器)——无离线弹窗、无 OOM。"""
-    return await _api_backfill(items, warehouse_name, direction)
+    return await _api_backfill(items, warehouse_name, direction,
+                              cp_id=counterparty_id, cp_name=counterparty_name)
 
     # ↓↓↓ 以下 Playwright 填表路径已弃用（API 回放替代），保留备查，不再执行 ↓↓↓
     from playwright.async_api import TimeoutError as PWTimeout  # noqa: F401

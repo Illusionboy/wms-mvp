@@ -407,6 +407,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="user-admin" onclick="nav(this)">
         <span class="icon">◑</span> 用户管理
       </button>
+      <button class="nav-item" data-section="counterparty-admin" onclick="nav(this)">
+        <span class="icon">⇄</span> 对方管理
+      </button>
     </div>
 
     <div class="nav-group" data-workspace="container" style="display:none">
@@ -1130,7 +1133,10 @@ tr:hover td { background: var(--accent-bg); }
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
           <div class="form-row" style="margin:0"><label>日期</label><input type="date" id="count-wx-date"></div>
           <div class="form-row" style="margin:0"><label>方向</label><select id="count-wx-dir"><option value="到库">到库</option><option value="出库">出库</option></select></div>
-          <div class="form-row" style="margin:0;flex:1;min-width:120px"><label>供应商 / 客户</label><input type="text" id="count-wx-party" placeholder="手输…"></div>
+          <div class="form-row" style="margin:0;flex:1;min-width:160px;position:relative"><label>供应商 / 客户（输简体/日文/简称，自动匹配秦丝）</label>
+            <input type="text" id="count-wx-party" placeholder="输入自动匹配秦丝对方…" autocomplete="off" oninput="wxPartySearch()" onblur="setTimeout(wxPartyHide,200)">
+            <div id="wx-party-dd" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:var(--surface);border:1px solid var(--border);border-radius:6px;max-height:220px;overflow:auto;box-shadow:0 4px 12px rgba(0,0,0,.15)"></div>
+          </div>
           <button class="btn btn-ghost btn-sm" style="margin-bottom:0" onclick="countBuildWx()">生成</button>
         </div>
         <textarea id="count-wx" readonly rows="6" style="width:100%;box-sizing:border-box;margin-top:8px;font-size:13px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"></textarea>
@@ -1446,6 +1452,35 @@ tr:hover td { background: var(--accent-bg); }
               <th style="text-align:right">在库天数</th>
             </tr></thead>
             <tbody id="dm-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Counterparty Admin / 对方(供应商·客户)管理（仅管理员）-->
+    <div class="section" id="section-counterparty-admin">
+      <div class="section-title">对方管理（供应商 / 客户）</div>
+      <div class="section-sub">从秦丝同步供应商/客户到本地缓存（微信报库输入时自动匹配用）；可给每个对方加<b>简称</b>帮助匹配。支持简繁互匹、日文汉字/假名/发音、拼音</div>
+      <div class="card">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-row" style="margin:0">
+            <label>类型</label>
+            <select id="cp-kind" onchange="loadCpAdmin()">
+              <option value="supplier">供应商（入库）</option>
+              <option value="customer">客户（出库）</option>
+            </select>
+          </div>
+          <div class="form-row" style="margin:0;flex:1;min-width:160px">
+            <label>搜索（简体/日文/简称）</label>
+            <input type="text" id="cp-q" placeholder="过滤…" oninput="loadCpAdmin()">
+          </div>
+          <button class="btn btn-primary" onclick="cpSync()" style="margin-bottom:0">从秦丝同步</button>
+          <span id="cp-msg" style="color:var(--muted);font-size:13px"></span>
+        </div>
+        <div style="overflow-x:auto;margin-top:12px">
+          <table class="table">
+            <thead><tr><th>秦丝名称</th><th>简称（点×删）</th><th>加简称</th></tr></thead>
+            <tbody id="cp-tbody"></tbody>
           </table>
         </div>
       </div>
@@ -1967,6 +2002,7 @@ function nav(btn) {
   if (btn.dataset.section === 'system-log') loadSystemLogs();
   if (btn.dataset.section === 'dormant') loadDormant();
   if (btn.dataset.section === 'user-admin') loadUsers();
+  if (btn.dataset.section === 'counterparty-admin') loadCpAdmin();
   if (btn.dataset.section === 'container-pallets') loadPalletList();
   if (btn.dataset.section === 'stock-transfer') loadLastTransfer();
   if (btn.dataset.section === 'rakuten-label') loadAutoRuns();
@@ -3250,6 +3286,44 @@ async function addUser() {
   } catch (e) {
     msg.innerHTML = `<span style="color:var(--danger)">${esc(e.message)}</span>`;
   }
+}
+
+// ── 对方管理（供应商/客户 缓存 + 简称）──────────────────────────────────────────
+async function loadCpAdmin() {
+  const kind = document.getElementById('cp-kind').value;
+  const q = document.getElementById('cp-q').value.trim();
+  const tb = document.getElementById('cp-tbody');
+  tb.innerHTML = '<tr><td colspan="3" class="loading">加载中…</td></tr>';
+  try {
+    const rows = await api('GET', `/counterparty?kind=${kind}&q=${encodeURIComponent(q)}`);
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="3" style="color:var(--muted)">无数据，点「从秦丝同步」拉取</td></tr>'; return; }
+    tb.innerHTML = rows.map(c => `<tr>
+      <td>${esc(c.name)}</td>
+      <td>${(c.aliases || []).map(a => `<span style="display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1px 8px;margin:2px;font-size:12px">${esc(a.alias)} <span style="cursor:pointer;color:var(--danger)" onclick="cpDelAlias(${a.id})">×</span></span>`).join('') || '<span style="color:var(--muted);font-size:12px">—</span>'}</td>
+      <td style="white-space:nowrap"><input type="text" id="cp-alias-${c.id}" placeholder="简称…" style="width:110px" onkeydown="if(event.key==='Enter')cpAddAlias(${c.id})"><button class="btn btn-ghost btn-sm" onclick="cpAddAlias(${c.id})">加</button></td>
+    </tr>`).join('');
+  } catch (e) { tb.innerHTML = `<tr><td colspan="3" style="color:var(--danger)">${esc(e.message)}</td></tr>`; }
+}
+async function cpSync() {
+  const kind = document.getElementById('cp-kind').value;
+  const msg = document.getElementById('cp-msg');
+  msg.textContent = '同步中…（拉取秦丝全量，约几秒）';
+  try {
+    const r = await api('POST', `/counterparty/sync?kind=${kind}`);
+    msg.textContent = `✓ 已同步 ${r.count} 条`;
+    loadCpAdmin();
+  } catch (e) { msg.textContent = ''; toast('同步失败：' + e.message, 'err'); }
+}
+async function cpAddAlias(cpId) {
+  const inp = document.getElementById('cp-alias-' + cpId);
+  const alias = inp.value.trim();
+  if (!alias) return;
+  try { await api('POST', `/counterparty/${cpId}/alias`, { alias }); loadCpAdmin(); }
+  catch (e) { toast('加简称失败：' + e.message, 'err'); }
+}
+async function cpDelAlias(aliasId) {
+  try { await api('DELETE', `/counterparty/alias/${aliasId}`); loadCpAdmin(); }
+  catch (e) { toast('删简称失败：' + e.message, 'err'); }
 }
 
 async function allocReserve(id) {
@@ -5150,6 +5224,39 @@ async function countCopy(id) {
   try { await navigator.clipboard.writeText(text); toast('已复制', 'ok'); }
   catch { el.focus(); el.select(); try { document.execCommand('copy'); toast('已复制', 'ok'); } catch { toast('复制失败，请手动选择', 'err'); } }
 }
+// ── 微信报库 供应商/客户 自动匹配秦丝（简繁/日文发音/简称）──────────────────────
+let _wxParty = null;   // 已选中的秦丝对方 {qinsi_id, name, kind}
+let _wxHits = [];
+let _wxTimer = null;
+function _wxKind() { return document.getElementById('count-wx-dir').value === '出库' ? 'customer' : 'supplier'; }
+function wxPartyHide() { const dd = document.getElementById('wx-party-dd'); if (dd) dd.style.display = 'none'; }
+function wxPartySearch() {
+  _wxParty = null;   // 手动改动即视为取消已选（回填将回退 WMS回填）
+  clearTimeout(_wxTimer);
+  const q = document.getElementById('count-wx-party').value.trim();
+  const dd = document.getElementById('wx-party-dd');
+  if (!q) { dd.style.display = 'none'; return; }
+  _wxTimer = setTimeout(async () => {
+    try {
+      const kind = _wxKind();
+      const hits = await api('GET', `/counterparty/search?kind=${kind}&q=${encodeURIComponent(q)}`);
+      _wxHits = hits;
+      if (!hits.length) {
+        dd.innerHTML = '<div style="padding:8px;color:var(--muted);font-size:13px">无匹配，回填将用「WMS回填」（可去用户管理旁的对方管理同步/加简称）</div>';
+      } else {
+        dd.innerHTML = hits.map((h, i) => `<div style="padding:7px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border)" onmousedown="wxPartyPick(${i})">${esc(h.name)}<span style="color:var(--muted);font-size:11px"> · 匹配${h.score}</span></div>`).join('');
+      }
+      dd.style.display = 'block';
+    } catch (e) { dd.style.display = 'none'; }
+  }, 250);
+}
+function wxPartyPick(i) {
+  const h = _wxHits[i]; if (!h) return;
+  _wxParty = { qinsi_id: h.qinsi_id, name: h.name, kind: h.kind };
+  document.getElementById('count-wx-party').value = h.name;
+  wxPartyHide();
+}
+
 // 秦丝反向回填（调试）：把点数存成秦丝草稿，展示每步截图（复用 _authImg）
 async function qinsiBackfill() {
   if (qinsiBackfill._running) { toast('回填正在进行，请等它结束再点', 'err'); return; }
@@ -5163,7 +5270,10 @@ async function qinsiBackfill() {
   if (btn) { btn.disabled = true; btn.dataset.t = btn.textContent; btn.textContent = '回填中…请勿重复点击'; }
   out.innerHTML = '<p class="loading">正在提交秦丝草稿…（约几秒）</p>';
   try {
-    const r = await api('POST', '/qinsi/backfill', { items, direction: dir, warehouse_name: wh });
+    const body = { items, direction: dir, warehouse_name: wh };
+    const bfKind = dir === 'out' ? 'customer' : 'supplier';   // 入库→供应商，出库→客户
+    if (_wxParty && _wxParty.kind === bfKind) { body.counterparty_id = _wxParty.qinsi_id; body.counterparty_name = _wxParty.name; }
+    const r = await api('POST', '/qinsi/backfill', body);
     let html = r.success ? '<div style="color:#16a34a;font-weight:600;margin-bottom:6px">✓ 已存草稿</div>'
       : `<div style="color:var(--danger);font-weight:600;margin-bottom:6px">✗ 未完成：${esc(r.error || '见步骤截图')}</div>`;
     if (r.created_new && r.created_new.length) html += `<div style="color:#16a34a">🆕 自动新建商品(${r.created_new.length})：${r.created_new.map(esc).join(', ')}</div>`;

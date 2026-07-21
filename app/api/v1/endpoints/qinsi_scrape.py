@@ -54,6 +54,8 @@ class BackfillRequest(BaseModel):
     items: Annotated[list[BackfillItem], Field(min_length=1)]
     direction: Literal["in", "out"] = "in"
     warehouse_name: str = "普通仓库"
+    counterparty_id: int | None = None      # 选中的秦丝供应商(入)/客户(出) id；不传回退 WMS回填
+    counterparty_name: str | None = None
 
 
 class AuthStatus(BaseModel):
@@ -348,6 +350,8 @@ async def backfill(
         [(it.jan_code, it.quantity, it.name) for it in payload.items],
         direction=payload.direction,
         warehouse_name=payload.warehouse_name,
+        counterparty_id=payload.counterparty_id,
+        counterparty_name=payload.counterparty_name,
     )
     return {
         "success": res.success, "error": res.error, "steps": res.steps, "shots": res.shots,
