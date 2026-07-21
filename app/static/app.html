@@ -1860,9 +1860,11 @@ function showApp() {
 }
 
 // ── 角色权限（管理员 / 只读）──────────────────────────────────────────────────
+const ALWAYS_HIDDEN_SECTIONS = ['chat-report'];  // 侧边栏微信报库已废弃，统一用批量点数里的微信报库
 function applyRoleUI() {
   document.querySelectorAll('.nav-item').forEach(b => {
     const sec = b.dataset.section;
+    if (ALWAYS_HIDDEN_SECTIONS.includes(sec)) { b.style.display = 'none'; return; }
     if (sec === 'user-admin') { b.style.display = _isAdmin ? '' : 'none'; return; }
     b.style.display = (_isAdmin || READONLY_SECTIONS.includes(sec)) ? '' : 'none';
   });
