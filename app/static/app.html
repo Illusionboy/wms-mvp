@@ -5242,7 +5242,8 @@ function wxPartySearch() {
       const hits = await api('GET', `/counterparty/search?kind=${kind}&q=${encodeURIComponent(q)}`);
       _wxHits = hits;
       if (!hits.length) {
-        dd.innerHTML = '<div style="padding:8px;color:var(--muted);font-size:13px">无匹配，回填将用「WMS回填」（可去用户管理旁的对方管理同步/加简称）</div>';
+        const kl = kind === 'supplier' ? '供应商（因方向=到库）' : '客户（因方向=出库）';
+        dd.innerHTML = `<div style="padding:8px;color:var(--muted);font-size:13px">当前按【${kl}】搜无匹配。<b>若对方是另一类，请切换上方「方向」</b>（到库=供应商 / 出库=客户）；否则回填将用「WMS回填」</div>`;
       } else {
         dd.innerHTML = hits.map((h, i) => `<div style="padding:7px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border)" onmousedown="wxPartyPick(${i})">${esc(h.name)}<span style="color:var(--muted);font-size:11px"> · 匹配${h.score}</span></div>`).join('');
       }
