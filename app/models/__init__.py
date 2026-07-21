@@ -10,6 +10,7 @@ from app.models.inventory_import_job import InventoryImportJob
 from app.models.pallet import Pallet, PalletItem
 from app.models.product import Product
 from app.models.product_jan_alias import ProductJanAlias
+from app.models.qinsi_counterparty import QinsiCounterparty, QinsiCounterpartyAlias
 from app.models.qinsi_scrape_cache import QinsiScrapeCache
 from app.models.rakuten_auto_run import RakutenAutoRun
 from app.models.rakuten_credential import RakutenCredential
@@ -34,6 +35,8 @@ __all__ = [
     "PalletItem",
     "Product",
     "ProductJanAlias",
+    "QinsiCounterparty",
+    "QinsiCounterpartyAlias",
     "QinsiScrapeCache",
     "RakutenAutoRun",
     "RakutenCredential",
