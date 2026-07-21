@@ -1127,20 +1127,26 @@ tr:hover td { background: var(--accent-bg); }
         <button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="countCopy('count-json')">复制 JSON</button>
       </div>
 
-      <!-- 微信报库文本 -->
+      <!-- 微信报库 + 秦丝回填（合并，方向/对方/仓库只填一次）-->
       <div class="card" style="margin-top:12px">
-        <div class="card-title">微信报库文本</div>
+        <div class="card-title">微信报库 + 秦丝回填</div>
+        <div class="section-sub" style="margin-bottom:10px">按当前点数（JAN+数量）生成微信报库文本，并可一键存成秦丝<b>草稿</b>（只存草稿、不提交）。方向 / 对方 / 仓库 共用一次填写。</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-row" style="margin:0"><label>方向</label><select id="count-dir"><option value="in">到库 / 入库</option><option value="out">出库</option></select></div>
           <div class="form-row" style="margin:0"><label>日期</label><input type="date" id="count-wx-date"></div>
-          <div class="form-row" style="margin:0"><label>方向</label><select id="count-wx-dir"><option value="到库">到库</option><option value="出库">出库</option></select></div>
-          <div class="form-row" style="margin:0;flex:1;min-width:160px;position:relative"><label>供应商 / 客户（输简体/日文/简称，自动匹配秦丝）</label>
+          <div class="form-row" style="margin:0;flex:1;min-width:180px;position:relative"><label>供应商 / 客户（输简体/日文/简称，自动匹配秦丝）</label>
             <input type="text" id="count-wx-party" placeholder="输入自动匹配秦丝对方…" autocomplete="off" oninput="wxPartySearch()" onblur="setTimeout(wxPartyHide,200)">
             <div id="wx-party-dd" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:var(--surface);border:1px solid var(--border);border-radius:6px;max-height:220px;overflow:auto;box-shadow:0 4px 12px rgba(0,0,0,.15)"></div>
           </div>
-          <button class="btn btn-ghost btn-sm" style="margin-bottom:0" onclick="countBuildWx()">生成</button>
+          <div class="form-row" style="margin:0"><label>仓库（回填用）</label><select id="qbf-wh"><option>普通仓库</option><option>乐天仓库</option></select></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" style="margin:0" onclick="countBuildWx()">生成微信报库文本</button>
+          <button class="btn btn-primary btn-sm" style="margin:0" onclick="qinsiBackfill()">存秦丝草稿</button>
         </div>
         <textarea id="count-wx" readonly rows="6" style="width:100%;box-sizing:border-box;margin-top:8px;font-size:13px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"></textarea>
         <button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="countCopy('count-wx')">复制文本</button>
+        <div id="qbf-result" style="margin-top:12px"></div>
       </div>
 
       <!-- 库存模拟 -->
@@ -1168,17 +1174,6 @@ tr:hover td { background: var(--accent-bg); }
         <div id="count-pallet-result" style="margin-top:12px"></div>
       </div>
 
-      <!-- 秦丝反向回填（Playwright 存草稿）· 调试迭代中 -->
-      <div class="card" style="margin-top:12px;border:1px dashed var(--accent)">
-        <div class="card-title">回填秦丝草稿（调试中）</div>
-        <div class="section-sub" style="margin-bottom:10px">把当前点数按 JAN+数量 存成秦丝采购(入库)/批发(出库)<b>草稿</b>（只存草稿、不提交）。复用秦丝会话。<b>首版监督调试</b>，下面显示每步截图。</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-          <div class="form-row" style="margin:0"><label>方向</label><select id="qbf-dir"><option value="in">入库(采购)</option><option value="out">出库(批发)</option></select></div>
-          <div class="form-row" style="margin:0"><label>仓库</label><select id="qbf-wh"><option>普通仓库</option><option>乐天仓库</option></select></div>
-          <button class="btn btn-primary btn-sm" style="margin-bottom:0" onclick="qinsiBackfill()">存秦丝草稿（调试）</button>
-        </div>
-        <div id="qbf-result" style="margin-top:12px"></div>
-      </div>
     </div>
 
     <div class="section" id="section-qinsi">
@@ -5161,7 +5156,7 @@ async function countImportExcel() {
 }
 function countBuildWx() {
   const date = document.getElementById('count-wx-date').value || _todayStr();
-  const dir = document.getElementById('count-wx-dir').value;
+  const dir = document.getElementById('count-dir').value === 'out' ? '出库' : '到库';
   const party = document.getElementById('count-wx-party').value.trim();
   const head = `${date} ${dir}${party ? ' ' + party : ''}`;
   const lines = _count.items.map(it => `${it.name_zh || '?'} ${String(it.jan_code).slice(-6)}:${_countQty(it)}`);
@@ -5228,7 +5223,7 @@ async function countCopy(id) {
 let _wxParty = null;   // 已选中的秦丝对方 {qinsi_id, name, kind}
 let _wxHits = [];
 let _wxTimer = null;
-function _wxKind() { return document.getElementById('count-wx-dir').value === '出库' ? 'customer' : 'supplier'; }
+function _wxKind() { return document.getElementById('count-dir').value === 'out' ? 'customer' : 'supplier'; }
 function wxPartyHide() { const dd = document.getElementById('wx-party-dd'); if (dd) dd.style.display = 'none'; }
 function wxPartySearch() {
   _wxParty = null;   // 手动改动即视为取消已选（回填将回退 WMS回填）
@@ -5263,7 +5258,7 @@ async function qinsiBackfill() {
   if (qinsiBackfill._running) { toast('回填正在进行，请等它结束再点', 'err'); return; }
   const items = _count.items.map(it => ({ jan_code: it.jan_code, quantity: _countQty(it), name: it.name_jp || it.name_zh || it.jan_code })).filter(x => x.quantity > 0);
   if (!items.length) { toast('还没有点数', 'err'); return; }
-  const dir = document.getElementById('qbf-dir').value;
+  const dir = document.getElementById('count-dir').value;
   const wh = document.getElementById('qbf-wh').value;
   const out = document.getElementById('qbf-result');
   const btn = document.querySelector('button[onclick="qinsiBackfill()"]');
