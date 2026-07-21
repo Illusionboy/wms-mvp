@@ -2512,9 +2512,9 @@ function renderOATable(items) {
       : item.current_stock;
     const shortageDisplay = item.shortage > 0
       ? `<span style="color:${s.color};font-weight:700">-${item.shortage}</span>` : '—';
-    return `<tr style="background:${item.status !== 'ok' ? s.bg : ''}">
+    return `<tr style="${item.status !== 'ok' ? `background:${s.bg};color:#1f2937` : ''}">
       <td><span style="font-size:12px;padding:2px 6px;border-radius:4px;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span></td>
-      <td><code style="font-size:12px">${esc(item.jan_code)}</code></td>
+      <td><code style="font-size:12px;color:inherit">${esc(item.jan_code)}</code></td>
       <td style="font-size:13px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.product_name||'')}">${esc(item.product_name || '—')}</td>
       <td style="text-align:center">${item.ordered_qty}</td>
       <td style="text-align:center">${stockDisplay}</td>
