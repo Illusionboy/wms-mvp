@@ -4592,7 +4592,12 @@ async function startZxingScan(video, statusEl) {
   statusEl.textContent = '加载扫码组件…';
   await loadZxing();
   if (!_scanState.active) return;
-  const reader = new ZXing.BrowserMultiFormatReader();
+  // TRY_HARDER：正向读不到时自动旋转90°再试 → 竖向/斜向一维条码也能扫（QR本就任意角度）
+  let hints = null;
+  try {
+    if (ZXing.DecodeHintType) { hints = new Map(); hints.set(ZXing.DecodeHintType.TRY_HARDER, true); }
+  } catch {}
+  const reader = hints ? new ZXing.BrowserMultiFormatReader(hints) : new ZXing.BrowserMultiFormatReader();
   _scanState.reader = reader;
   const onResult = (result) => {
     if (result && _scanState.active) {
