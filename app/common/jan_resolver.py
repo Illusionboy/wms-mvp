@@ -102,4 +102,11 @@ def resolve_jan_quantities(
         if resolved_jan:
             return [(resolved_jan, sku_qty * order_count)]
 
+        # 最终兜底：商品番号无法按规则解析、也不在字典里 → 视为「系统商品」，
+        # 直接读 システム連携用SKU番号 的 JAN：取其首个 '-' 段，是 13 位数字即用作 JAN，
+        # 数量用末尾套数（sku_qty，默认 1）× 订购数。避免这类行整条落空报 ERR。
+        head = sys_sku_raw.split("-", 1)[0].strip()
+        if head.isdigit() and len(head) == 13:
+            return [(head, sku_qty * order_count)]
+
     return []
