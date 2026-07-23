@@ -2,6 +2,7 @@ from app.models.allocation_conflict_log import AllocationConflictLog
 from app.models.chat_report_draft import ChatReportDraft
 from app.models.count_session import CountSession
 from app.models.customer_allocation import CustomerAllocation
+from app.models.dormant_ignore import DormantIgnore
 from app.models.telegram_allowed_user import TelegramAllowedUser
 from app.models.customer import Customer
 from app.models.inventory_count_draft import InventoryCountDraft
@@ -28,6 +29,7 @@ __all__ = [
     "ChatReportDraft",
     "CountSession",
     "CustomerAllocation",
+    "DormantIgnore",
     "InventoryCountDraft",
     "InventoryImportJob",
     "InventoryRecord",

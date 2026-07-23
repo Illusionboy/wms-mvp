@@ -1433,6 +1433,7 @@ tr:hover td { background: var(--accent-bg); }
             <label>仓库</label>
             <select id="dm-wh"><option value="">全部仓库</option></select>
           </div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px"><input type="checkbox" id="dm-show-ignored" onchange="loadDormant()"> 显示已忽略</label>
           <button class="btn btn-primary" onclick="loadDormant()" style="margin-bottom:0">查询</button>
           <span id="dm-count" style="color:var(--muted);font-size:13px"></span>
         </div>
@@ -1445,6 +1446,7 @@ tr:hover td { background: var(--accent-bg); }
               <th>最后出库</th>
               <th style="text-align:right">距今</th>
               <th style="text-align:right">在库天数</th>
+              <th>操作</th>
             </tr></thead>
             <tbody id="dm-tbody"></tbody>
           </table>
@@ -3223,30 +3225,42 @@ async function loadDormant() {
   }
   const days = +document.getElementById('dm-days').value || 30;
   const wh = whSel ? whSel.value : '';
+  const showIgnored = document.getElementById('dm-show-ignored').checked;
   const tbody = document.getElementById('dm-tbody');
   const cnt = document.getElementById('dm-count');
-  tbody.innerHTML = '<tr><td colspan="6" class="loading">查询中…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" class="loading">查询中…</td></tr>';
   cnt.textContent = '';
   try {
     let url = `/analytics/dormant-products?days=${days}`;
     if (wh) url += `&warehouse_id=${encodeURIComponent(wh)}`;
+    if (showIgnored) url += '&include_ignored=true';
     const rows = await api('GET', url);
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted)">该范围内没有滞销商品（在库满 N 天且无出库的）</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted)">该范围内没有滞销商品（在库满 N 天且无出库的）</td></tr>';
       return;
     }
-    cnt.textContent = `共 ${rows.length} 个滞销 SKU（在库满 ${days} 天且无出库；已排除新上架）`;
-    tbody.innerHTML = rows.map(r => `<tr>
+    const nIgnored = rows.filter(r => r.ignored).length;
+    cnt.textContent = `共 ${rows.length} 个滞销 SKU（在库满 ${days} 天且无出库；已排除新上架）` + (showIgnored && nIgnored ? `，其中 ${nIgnored} 个已忽略` : '');
+    tbody.innerHTML = rows.map(r => `<tr${r.ignored ? ' style="opacity:.5"' : ''}>
       <td>${esc(r.jan_code)}</td>
       <td>${esc(r.product_name || '—')}${r.product_name_zh ? '<br><small style="color:var(--muted)">' + esc(r.product_name_zh) + '</small>' : ''}</td>
       <td style="text-align:right">${r.current_stock}</td>
       <td>${r.last_out_date || '<span style="color:var(--danger)">从未出库</span>'}</td>
       <td style="text-align:right">${r.days_since_out != null ? r.days_since_out + ' 天' : '—'}</td>
       <td style="text-align:right">${r.days_in_stock != null ? r.days_in_stock + ' 天' : '—'}</td>
+      <td style="white-space:nowrap">${r.ignored
+        ? `<button class="btn btn-ghost btn-sm" onclick="dmToggleIgnore('${esc(r.jan_code)}',false)">取消忽略</button>`
+        : `<button class="btn btn-ghost btn-sm" onclick="dmToggleIgnore('${esc(r.jan_code)}',true)">忽略</button>`}</td>
     </tr>`).join('');
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--danger)">${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--danger)">${esc(e.message)}</td></tr>`;
   }
+}
+async function dmToggleIgnore(jan, ignored) {
+  try {
+    await api('POST', '/analytics/dormant-products/ignore', { jan_code: jan, ignored });
+    loadDormant();
+  } catch (e) { toast(ignored ? '忽略失败：' + e.message : '取消忽略失败：' + e.message, 'err'); }
 }
 
 // ── 用户管理（仅管理员）──────────────────────────────────────────────────────

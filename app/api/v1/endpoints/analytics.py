@@ -11,11 +11,14 @@
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.deps import require_admin
 from app.db.session import get_db_session
+from app.models.dormant_ignore import DormantIgnore
 from app.models.inventory_record import InventoryRecord
 from app.models.product import Product
 from app.models.stock_transaction import StockTransaction, StockTransactionType
@@ -250,12 +253,15 @@ async def product_summary(
 async def dormant_products(
     days: int = Query(30, ge=1, le=3650),
     warehouse_id: int | None = Query(default=None),
+    include_ignored: bool = Query(default=False),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[dict]:
     """最近 N 天内【没有任何出库(OUT)】的在库商品——呆滞/滞销库存报表。
     只算 OUT 事务（不算 ADJUST 调整、不算入库）；只统计当前库存 > 0 的商品；可选按仓库。
+    被标记「忽略」的 JAN 默认不返回（include_ignored=true 则全部返回并带 ignored 标记）。
     返回 JAN、名称、当前库存、最后出库日期、距今天数（从未出库者 last_out_date 为空、排最前）。"""
     cutoff = date.today() - timedelta(days=days)
+    ignored_set = set((await session.execute(select(DormantIgnore.jan_code))).scalars().all())
 
     # 1) 当前有库存(>0)的商品，可选按仓库
     stock_stmt = (
@@ -309,6 +315,9 @@ async def dormant_products(
         first_seen = first_seen_map.get(jan)
         if first_seen is not None and first_seen > cutoff:
             continue  # 首次入库不足 N 天 → 新上架，还没到该卖的时候，不算滞销
+        is_ignored = jan in ignored_set
+        if is_ignored and not include_ignored:
+            continue  # 默认隐藏被标记忽略的
         p = name_map.get(jan)
         result.append({
             "jan_code": jan,
@@ -319,10 +328,36 @@ async def dormant_products(
             "days_since_out": (today - last_out).days if last_out else None,
             "first_in_date": first_seen.isoformat() if first_seen else None,
             "days_in_stock": (today - first_seen).days if first_seen else None,
+            "ignored": is_ignored,
         })
     # 从未出库者最前，其余按距今天数降序（最久没动的在上）
     result.sort(key=lambda r: (r["last_out_date"] is None, r["days_since_out"] or 0), reverse=True)
     return result
+
+
+class DormantIgnoreRequest(BaseModel):
+    jan_code: str
+    ignored: bool
+
+
+@router.post("/dormant-products/ignore")
+async def set_dormant_ignore(
+    payload: DormantIgnoreRequest,
+    session: AsyncSession = Depends(get_db_session),
+    _=Depends(require_admin),
+) -> dict:
+    """标记/取消标记某 JAN 为「忽略」——被忽略的商品默认不出现在滞销品统计里。"""
+    jan = (payload.jan_code or "").strip()
+    if not jan:
+        return {"jan_code": jan, "ignored": False}
+    existing = await session.get(DormantIgnore, jan)
+    if payload.ignored and existing is None:
+        session.add(DormantIgnore(jan_code=jan))
+        await session.commit()
+    elif not payload.ignored and existing is not None:
+        await session.delete(existing)
+        await session.commit()
+    return {"jan_code": jan, "ignored": payload.ignored}
 
 
 @router.get("/safety-stock-recommendations", response_model=list[SafetyStockRecommendation])
