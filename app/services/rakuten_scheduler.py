@@ -1,4 +1,4 @@
-"""乐天自动下载定时器（P2c）：Mon–Sat 08:50 JST 跑两店。
+"""乐天自动下载定时器（P2c）：Mon–Sat 09:00 JST 跑两店。
 
 容器时区已是 Asia/Tokyo，故 datetime.now() 即 JST。用简单 asyncio 循环，无需额外依赖。
 仅当 settings.rakuten_auto_enabled=True 时由 main lifespan 启动（只在 VPS 开）。
@@ -14,8 +14,8 @@ from app.services.rakuten_auto import run_all
 
 logger = logging.getLogger(__name__)
 
-_RUN_HOUR = 8
-_RUN_MIN = 50
+_RUN_HOUR = 9
+_RUN_MIN = 0
 
 
 def _next_run(now: datetime) -> datetime:

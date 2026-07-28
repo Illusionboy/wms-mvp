@@ -1842,7 +1842,6 @@ tr:hover td { background: var(--accent-bg); }
   <div class="scan-box">
     <div class="scan-video-wrap">
       <video id="scan-video" playsinline muted></video>
-      <div class="scan-frame"></div>
     </div>
     <div id="scan-status" class="scan-status"></div>
     <div class="scan-actions">
@@ -3724,7 +3723,7 @@ async function loadAliasPanel(jan) {
       <div style="margin-bottom:8px"><strong>已绑定别名（指向主JAN ${esc(jan)}）：</strong></div>
       ${list}
       <div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-        <input type="text" id="alias-input-${jan}" placeholder="新别名JAN" style="width:140px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+        <input type="text" id="alias-input-${jan}" placeholder="新别名JAN" style="width:140px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"><button class="btn btn-ghost btn-sm" style="padding:2px 7px;margin-left:4px" title="扫别名条码" onclick="scanIntoField('alias-input-${jan}')">📷</button>
         <input type="text" id="alias-note-${jan}" placeholder="备注（可选）" style="width:160px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
         <button class="btn btn-secondary btn-sm" onclick="previewAliasMerge('${jan}')">预览合并</button>
       </div>
@@ -3793,7 +3792,7 @@ function editProductRow(jan, nameJp, nameZh, upc, outerJan) {
     <td><input type="text" value="${nameJp}" id="pedit-jp-${jan}" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td><input type="text" value="${nameZh}" id="pedit-zh-${jan}" placeholder="中文名（可选）" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td><input type="number" value="${upc}" id="pedit-upc-${jan}" min="1" placeholder="—" style="width:70px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
-    <td><input type="text" value="${outerJan}" id="pedit-outer-${jan}" placeholder="外箱JAN（14位ITF可选）" maxlength="14" style="width:120px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
+    <td style="white-space:nowrap"><input type="text" value="${outerJan}" id="pedit-outer-${jan}" placeholder="外箱JAN（14位ITF可选）" maxlength="14" style="width:100px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"><button class="btn btn-ghost btn-sm" style="padding:2px 7px" title="扫外箱条码" onclick="scanIntoField('pedit-outer-${jan}')">📷</button></td>
     <td style="white-space:nowrap">
       <button class="btn btn-primary btn-sm" onclick="saveProductRow('${jan}')">保存</button>
       <button class="btn btn-ghost btn-sm" onclick="searchProducts()">取消</button>
@@ -4775,6 +4774,16 @@ function extractCode(raw) {
   const s = String(raw || '').trim();
   const m = s.match(/[?&#](?:pallet|loc)=([^&#]+)/i);
   return m ? decodeURIComponent(m[1]) : s;
+}
+// 扫码填入指定输入框（外箱JAN/别名等）：只取数字，保留原始码兜底
+function scanIntoField(id) {
+  openScanner(code => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const digits = String(code).replace(/\D/g, '');
+    el.value = digits || String(code).trim();
+    el.dispatchEvent(new Event('input'));
+  });
 }
 function scanIntoText(inputId) {
   openScanner((code) => {

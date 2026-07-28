@@ -143,6 +143,12 @@ def _product_search_statement(keyword: str, limit: int, alias_canonical_jan: str
     elif normalized_keyword.isdigit():
         conditions.append(Product.jan_code == normalized_keyword)
         rank_conditions.append((Product.jan_code == normalized_keyword, 0))
+        # 扫外箱码：14 位整码精确命中 outer_jan（rank 0）。命中后 resolveScan 首步即返回，
+        # 不再走「后6位取前5位」的 5 位片段兜底 → 独占，不再连带出其它只有 5 位巧合相同的商品。
+        if len(normalized_keyword) == 14:
+            outer_exact = and_(Product.outer_jan.isnot(None), Product.outer_jan == normalized_keyword)
+            conditions.append(outer_exact)
+            rank_conditions.append((outer_exact, 0))
     if normalized_keyword.isdigit():
         # 假设 normalized_keyword 是用户输入的 JAN 码片段
         keyword_len = len(normalized_keyword)
