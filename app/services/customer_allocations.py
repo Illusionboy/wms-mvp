@@ -70,7 +70,7 @@ def _parse_allocation_excel(
 
     支持格式：
       - 每个 sheet 名即客户代码（mm / kk / cp 等）
-      - 每行有 JAN（13位纯数字）和数量两列；列名不敏感，只要含 jan/JAN 和 数量/qty/quantity
+      - 每行有 JAN（13位或8位纯数字）和数量两列；列名不敏感，只要含 jan/JAN 和 数量/qty/quantity
       - 数量 ≤ 0 的行跳过
       - JAN 跨多行合并居中、数量分行填写时，合并单元格按锚点值回填，同 JAN 多行数量自动相加
     """
@@ -129,7 +129,9 @@ def _parse_allocation_excel(
             if isinstance(jan_raw, float) and jan_raw.is_integer():
                 jan_raw = int(jan_raw)
             jan = "".join(c for c in str(jan_raw) if c.isdigit())
-            if len(jan) != 13:
+            # 接受 EAN-13 和 EAN-8（8 位短 JAN，如ライオン子供ハミガキ 49795318/49795301，
+            # 库里就是以 8 位 jan_code 存的）。其余长度视为非 JAN 单元格跳过。
+            if len(jan) not in (8, 13):
                 continue
             try:
                 qty = int(float(qty_raw))
@@ -234,7 +236,7 @@ async def upsert_allocations_from_excel(
 
     rows = _parse_allocation_excel(content)
     if not rows:
-        raise ValueError("Excel 中未解析到有效行（需要 JAN 13位 + 数量列）")
+        raise ValueError("Excel 中未解析到有效行（需要 JAN（13或8位）+ 数量列）")
 
     # 别名归一化：Excel 里仍可能用旧/别名JAN填报，统一解析到主JAN再写库存评估，
     # 否则预留行会卡在别名JAN上，永远查不到合并后的真实库存（见 product_alias.create_alias）。
