@@ -429,6 +429,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="container-labels" onclick="nav(this)">
         <span class="icon">🏷</span> 标签打印
       </button>
+      <button class="nav-item" data-section="container-loading" onclick="nav(this)">
+        <span class="icon">🚛</span> 装柜出库
+      </button>
     </div>
 
     <div class="sidebar-footer">
@@ -1832,6 +1835,51 @@ tr:hover td { background: var(--accent-bg); }
       <div id="lbl-preview" style="margin-top:12px"></div>
     </div>
 
+    <!-- 装柜出库 -->
+    <div class="section" id="section-container-loading">
+      <div class="section-title">装柜出库</div>
+      <div class="section-sub">选客户+日期，扫托盘/散货上柜，前后两次对账；确认后「装柜完成」按实际上柜量出库到 WMS，标记预留已出，上柜托盘清零并重置标签。</div>
+      <div class="card">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-row" style="margin:0"><label>计划出库日期</label><input type="date" id="cl-date"></div>
+          <div class="form-row" style="margin:0;flex:1;min-width:160px"><label>客户</label><input type="text" id="cl-customer" placeholder="客户名（与预留一致）"></div>
+          <button class="btn btn-primary" onclick="clLoad()" style="margin-bottom:0">加载</button>
+        </div>
+      </div>
+      <div id="cl-body" style="display:none">
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">① 装柜前检查（绑定托盘 vs 预留需求）</div>
+          <div id="cl-precheck"></div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">② 上柜扫描</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+            <div class="form-row" style="margin:0;flex:1;min-width:150px"><label>扫托盘码</label>
+              <div class="input-scan"><input type="text" id="cl-pallet" placeholder="扫托盘 QR / 输入…" onkeydown="if(event.key==='Enter')clScanPallet()"><button type="button" class="scan-btn" title="扫码" onclick="clScanPalletCam()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button></div>
+            </div>
+            <button class="btn btn-primary btn-sm" style="margin-bottom:0" onclick="clScanPallet()">上柜</button>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:10px">
+            <div class="form-row" style="margin:0;flex:1;min-width:150px"><label>散货 JAN（不上托盘的零散货）</label>
+              <div class="input-scan"><input type="text" id="cl-loose-jan" placeholder="扫商品 JAN / 输入…" onkeydown="if(event.key==='Enter')clAddLoose()"><button type="button" class="scan-btn" title="扫码" onclick="clScanLooseCam()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button></div>
+            </div>
+            <div class="form-row" style="margin:0"><label>数量</label><input type="number" id="cl-loose-qty" value="1" min="1" style="width:70px"></div>
+            <button class="btn btn-ghost btn-sm" style="margin-bottom:0" onclick="clAddLoose()">加散货</button>
+          </div>
+          <div id="cl-loaded" style="margin-top:12px"></div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">③ 装柜后检查（已上柜 vs 预留需求）</div>
+          <div id="cl-aftercheck"></div>
+        </div>
+        <div class="card" style="margin-top:12px;border:1px solid var(--accent)">
+          <button class="btn btn-primary" onclick="clComplete()">装柜完成 · 出库</button>
+          <span style="color:var(--muted);font-size:12px;margin-left:8px">按实际上柜量出库；上柜托盘清零并重置标签（散货不涉及标签）</span>
+          <div id="cl-complete-result" style="margin-top:10px"></div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /main -->
 </div><!-- /app-shell -->
 
@@ -2005,6 +2053,7 @@ function nav(btn) {
   if (btn.dataset.section === 'rakuten-label') loadAutoRuns();
   if (btn.dataset.section === 'count') countInit();
   if (btn.dataset.section === 'container-labels') lblOnTypeChange();
+  if (btn.dataset.section === 'container-loading') clInit();
   if (['supplier-history','customer-history'].includes(btn.dataset.section)) loadCounterpartyLists();
   closeSidebar();
   document.getElementById('main').scrollTo({ top: 0 });
@@ -4784,6 +4833,103 @@ function scanIntoField(id) {
     el.value = digits || String(code).trim();
     el.dispatchEvent(new Event('input'));
   });
+}
+
+// ── 装柜出库 ──────────────────────────────────────────────────────────────────
+let _cl = { customer: '', date: '' };
+function clInit() {
+  const d = document.getElementById('cl-date');
+  if (d && !d.value) d.value = _todayStr();
+  document.getElementById('cl-body').style.display = 'none';
+  document.getElementById('cl-complete-result').innerHTML = '';
+}
+async function clLoad() {
+  const date = document.getElementById('cl-date').value;
+  const customer = document.getElementById('cl-customer').value.trim();
+  if (!date || !customer) { toast('请填日期和客户', 'err'); return; }
+  _cl = { date, customer };
+  try {
+    const st = await api('GET', `/containers/loading?customer=${encodeURIComponent(customer)}&date=${date}`);
+    clRender(st);
+    document.getElementById('cl-body').style.display = '';
+    document.getElementById('cl-complete-result').innerHTML = '';
+  } catch (e) { toast('加载失败：' + e.message, 'err'); }
+}
+function clCheckTable(rows, haveLabel) {
+  if (!rows.length) return '<div style="color:var(--muted);font-size:13px">该客户当天无预留需求</div>';
+  const C = { ok: '#16a34a', over: 'var(--danger)', short: 'var(--warn)' };
+  const L = { ok: '✓ 已满足', over: '⚠ 多装', short: '缺' };
+  return '<div style="overflow-x:auto"><table class="table"><thead><tr><th>JAN</th><th>商品名</th><th style="text-align:right">需求</th><th style="text-align:right">' + haveLabel + '</th><th style="text-align:right">差</th><th>状态</th></tr></thead><tbody>' +
+    rows.map(r => `<tr>
+      <td><code style="font-size:11px">${esc(r.jan)}</code></td>
+      <td style="font-size:13px">${esc(r.name || '—')}</td>
+      <td style="text-align:right">${r.need}</td>
+      <td style="text-align:right">${r.have}</td>
+      <td style="text-align:right;color:${C[r.status]}">${r.diff > 0 ? '+' + r.diff : r.diff}</td>
+      <td style="color:${C[r.status]};font-weight:600">${L[r.status]}${r.status === 'short' ? ' ' + (-r.diff) : ''}</td>
+    </tr>`).join('') + '</tbody></table></div>';
+}
+function clRender(st) {
+  document.getElementById('cl-precheck').innerHTML = clCheckTable(st.pre_check, '托盘已备');
+  document.getElementById('cl-aftercheck').innerHTML = clCheckTable(st.after_check, '已上柜');
+  let h = '';
+  if (st.loaded_pallets.length) {
+    h += `<div style="font-weight:600;font-size:13px;margin-bottom:4px">已上柜托盘（${st.loaded_pallets.length}）</div>`;
+    h += st.loaded_pallets.map(p => `<div style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:6px;font-size:13px">
+      <b>${esc(p.code)}</b>${p.missing ? ' <span style="color:var(--danger)">(托盘不存在)</span>' : ''}
+      <button class="btn btn-ghost btn-sm" style="float:right;padding:1px 8px" onclick="clRemovePallet('${esc(p.code)}')">移除</button>
+      <div style="color:var(--muted);font-size:12px;margin-top:2px">${p.items.map(i => esc(i.jan) + ':' + i.qty).join('　') || '空托盘'}</div>
+    </div>`).join('');
+  }
+  if (st.loose_items.length) {
+    h += `<div style="font-weight:600;font-size:13px;margin:8px 0 4px">散货（${st.loose_items.length}）</div>`;
+    h += st.loose_items.map(l => `<div style="border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:6px;font-size:13px">
+      <code style="font-size:11px">${esc(l.jan)}</code> ${esc(l.name || '')} × ${l.qty}
+      <button class="btn btn-ghost btn-sm" style="float:right;padding:1px 8px" onclick="clRemoveLoose('${esc(l.jan)}')">移除</button>
+    </div>`).join('');
+  }
+  document.getElementById('cl-loaded').innerHTML = h || '<div style="color:var(--muted);font-size:13px">还没扫任何托盘/散货上柜</div>';
+}
+function _clOverToast(st) {
+  if (st.over && st.over.length) toast('⚠ 多装：' + st.over.map(o => o.jan + ' 超' + o.diff).join('，'), 'err');
+  if (st.warn) toast(st.warn, 'info');
+}
+async function clScanPallet() {
+  const inp = document.getElementById('cl-pallet');
+  const code = extractCode(inp.value.trim());
+  if (!code) return;
+  try {
+    const st = await api('POST', '/containers/loading/scan-pallet', { customer: _cl.customer, date: _cl.date, code });
+    clRender(st); inp.value = ''; _clOverToast(st);
+  } catch (e) { toast('上柜失败：' + e.message, 'err'); }
+}
+function clScanPalletCam() { openScanner(code => { document.getElementById('cl-pallet').value = extractCode(code); clScanPallet(); }); }
+async function clAddLoose() {
+  const jan = document.getElementById('cl-loose-jan').value.replace(/\D/g, '');
+  const qty = +document.getElementById('cl-loose-qty').value || 1;
+  if (!jan) return;
+  try {
+    const st = await api('POST', '/containers/loading/loose', { customer: _cl.customer, date: _cl.date, jan, qty });
+    clRender(st); document.getElementById('cl-loose-jan').value = ''; _clOverToast(st);
+  } catch (e) { toast('加散货失败：' + e.message, 'err'); }
+}
+function clScanLooseCam() { openScanner(code => { document.getElementById('cl-loose-jan').value = String(code).replace(/\D/g, ''); }); }
+async function clRemovePallet(code) {
+  try { clRender(await api('POST', '/containers/loading/remove-pallet', { customer: _cl.customer, date: _cl.date, code })); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function clRemoveLoose(jan) {
+  try { clRender(await api('POST', '/containers/loading/remove-loose', { customer: _cl.customer, date: _cl.date, jan })); }
+  catch (e) { toast(e.message, 'err'); }
+}
+async function clComplete() {
+  if (!confirm('确认装柜完成？将按实际上柜量出库、标记预留已出、清零上柜托盘并重置标签。此操作会改动真实库存。')) return;
+  try {
+    const r = await api('POST', '/containers/loading/complete', { customer: _cl.customer, date: _cl.date });
+    document.getElementById('cl-complete-result').innerHTML = resultCard('ok',
+      `✓ 装柜完成：出库 ${r.out_lines} 个 SKU，标记 ${r.allocations_shipped} 条预留已出，重置 ${r.pallets_reset.length} 个托盘（标签可复用）`);
+    document.getElementById('cl-body').style.display = 'none';
+  } catch (e) { toast('装柜完成失败：' + e.message, 'err'); }
 }
 function scanIntoText(inputId) {
   openScanner((code) => {
