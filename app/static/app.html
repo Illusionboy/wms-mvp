@@ -4677,7 +4677,10 @@ async function startZxingScan(video, statusEl) {
 
 // 相机约束：高分辨率(远距离/小码也能解) + 后置。分辨率越高，外箱ITF-14 越容易解出。
 function _scanVideoConstraints() {
-  return { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } };
+  // 不强制分辨率/宽高比：强制 1920x1080 会把手机竖握时的视频流锁成横向，
+  // 导致 detect() 读横向帧、水平条码在帧里变竖直（正常扫不出、转90°才行），二维码也变小掉帧。
+  // 只要后置摄像头，朝向随设备自然，清晰度靠下面的连续对焦；旋转靠 ZXing TRY_HARDER。
+  return { facingMode: { ideal: 'environment' } };
 }
 let _scanTorchOn = false;
 async function _applyScanTrackEnhancements(stream) {
