@@ -352,13 +352,10 @@ tr:hover td { background: var(--accent-bg); }
         <span class="icon">✦</span> 微信报库
       </button>
       <button class="nav-item" data-section="oa" onclick="nav(this)">
-        <span class="icon">📦</span> 乐天采购
+        <span class="icon">📦</span> 乐天日常
       </button>
       <button class="nav-item" data-section="rakuten" onclick="nav(this)">
         <span class="icon">▤</span> 乐天出库
-      </button>
-      <button class="nav-item" data-section="rakuten-label" onclick="nav(this)">
-        <span class="icon">🏷</span> 乐天快递单
       </button>
       <button class="nav-item" data-section="trade-shipment" onclick="nav(this)">
         <span class="icon">⇄</span> 贸易出库
@@ -707,9 +704,18 @@ tr:hover td { background: var(--accent-bg); }
 
     <!-- Rakuten 乐天采购 -->
     <div class="section" id="section-oa">
-      <div class="section-title">乐天采购</div>
-      <div class="section-sub">上传一号店/二号店订单明细（CSV 或 XLSX），汇总采购需求并对比乐天仓库库存</div>
+      <div class="section-title">乐天日常</div>
+      <div class="section-sub">当天订单文件传一次，即可【生成快递单】+【分析采购需求】；下方另有发送完了报告回填。</div>
+      <div class="card" style="border:2px solid var(--accent)">
+        <div class="card-title">🗓 今日自动生成（定时 Mon–Sat 09:00 两店自动下载+生成）</div>
+        <div class="section-sub" style="margin-bottom:10px">每天 9:00 自动登录 RMS 下载两店発送待ち、生成三家快递单。早上进来直接下载各店的「快递单 ZIP」拿去快递网站出单即可。</div>
+        <div id="ar-list"><p class="loading">加载中…</p></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-ghost btn-sm" onclick="loadAutoRuns()">刷新</button>
+        </div>
+      </div>
       <div class="card">
+        <div class="card-title">上传当天订单（一号店 / 二号店）—— 生成快递单 &amp; 分析采购 共用这一次上传</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
           <div class="form-row">
             <label>一号店订单文件</label>
@@ -720,7 +726,11 @@ tr:hover td { background: var(--accent-bg); }
             <input type="file" id="oa-file2" accept=".csv,.xlsx,.xls" style="padding:6px 0;border:none;background:none">
           </div>
         </div>
-        <button class="btn btn-primary" onclick="runOrderAnalysis()">分析出货需求</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="genLabelsFromShared()">生成快递单</button>
+          <button class="btn btn-primary" onclick="runOrderAnalysis()">分析采购需求</button>
+        </div>
+        <div id="rl-result" style="margin-top:12px"></div>
       </div>
 
       <div id="oa-result" style="display:none;margin-top:16px">
@@ -751,6 +761,22 @@ tr:hover td { background: var(--accent-bg); }
         <div id="oa-unresolved" style="display:none;margin-top:14px"></div>
       </div>
       <div id="oa-apply-result" style="display:none;margin-top:16px"></div>
+
+      <hr class="divider">
+      <div class="card">
+        <div class="card-title">运单号回填 CSV（発送完了報告）</div>
+        <div class="section-sub" style="margin-bottom:10px">上传【快递出单结果文件】+【生成时的 mapping.json】→ 生成 RMS 発送完了報告 CSV（cp932），你再手动传到 RMS「■発送完了報告データ」框</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-row"><label>快递结果文件（如佐川 出荷履歴）</label><input type="file" id="sr-file" accept=".csv" style="padding:6px 0;border:none;background:none"></div>
+          <div class="form-row"><label>mapping.json（生成快递单时下载包里）</label><input type="file" id="sr-mapping" accept=".json" style="padding:6px 0;border:none;background:none"></div>
+          <div class="form-row"><label>快递公司（自动对应 RMS 配送会社代码）</label>
+            <select id="sr-courier"><option value="sagawa">佐川急便（1002）</option><option value="yamato">ヤマト運輸（1001）</option></select>
+          </div>
+          <div class="form-row"><label>発送日（默认今天）</label><input type="date" id="sr-date"></div>
+        </div>
+        <button class="btn btn-primary" onclick="genShipmentReport()">生成回填 CSV</button>
+        <div id="sr-result" style="margin-top:12px"></div>
+      </div>
     </div>
 
     <!-- Rakuten CSV -->
@@ -1643,60 +1669,7 @@ tr:hover td { background: var(--accent-bg); }
     </div>
 
     <!-- 乐天快递单生成 -->
-    <div class="section" id="section-rakuten-label">
-      <div class="section-title">乐天快递单生成</div>
-      <div class="section-sub">上传 RMS 订单明细 CSV（全カラムダウンロード用）→ 生成佐川/Yamato/郵便 三家上传 CSV（打包下载，含 mapping.json 供单号回填）</div>
-      <div class="card" style="border:2px solid var(--accent)">
-        <div class="card-title">🗓 今日自动生成（定时 Mon–Sat 08:50 两店自动下载+生成）</div>
-        <div class="section-sub" style="margin-bottom:10px">每天 8:50 自动登录 RMS 下载两店発送待ち、生成三家快递单。早上进来直接下载各店的「快递单 ZIP」拿去快递网站出单即可。</div>
-        <div id="ar-list"><p class="loading">加载中…</p></div>
-        <div style="display:flex;gap:8px;margin-top:10px">
-          <button class="btn btn-ghost btn-sm" onclick="loadAutoRuns()">刷新</button>
-          <!-- 调试用，暂隐藏（需调试时去掉 display:none）-->
-          <button class="btn btn-ghost btn-sm" onclick="runAutoAll()" style="display:none">立即跑两店（测试）</button>
-        </div>
-      </div>
-      <!-- 调试用整块，暂隐藏（需调试时去掉这段的 display:none）-->
-      <hr class="divider" style="display:none">
-      <div class="card" style="border:1px dashed var(--accent);display:none">
-        <div class="card-title">🤖 自动下载订单（P2b · 监督首跑）</div>
-        <div class="section-sub" style="margin-bottom:10px">用「设置→乐天账号」里的凭据自动登录 RMS 下载近 N 天「発送待ち」CSV。<b>第一次请盯着看下面的每步截图</b>，确认能过登录（若被风控拦，我们改走本机刷 session）。成功后可直接下 CSV 或喂给下方快递单生成。</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-          <div class="form-row" style="margin:0"><label>店铺</label><select id="ad-store"><option value="1">一号店(1)</option><option value="2">二号店(2)</option></select></div>
-          <div class="form-row" style="margin:0;width:110px"><label>近 N 天</label><input type="number" id="ad-days" min="1" max="60" value="10"></div>
-          <button class="btn btn-primary" style="margin-bottom:0" onclick="runAutoDownload()">立即下载（调试）</button>
-        </div>
-        <div id="ad-result" style="margin-top:12px"></div>
-      </div>
-      <hr class="divider">
-      <div class="card">
-        <div class="form-row">
-          <label>店铺</label>
-          <select id="rl-store"><option value="1">一号店</option><option value="2">二号店</option></select>
-        </div>
-        <div class="form-row">
-          <label>RMS 订单 CSV</label>
-          <input type="file" id="rl-file" accept=".csv" style="padding:6px 0;border:none;background:none">
-        </div>
-        <button class="btn btn-primary" onclick="genRakutenLabels()">生成并下载</button>
-        <div id="rl-result" style="margin-top:12px"></div>
-      </div>
-      <hr class="divider">
-      <div class="card">
-        <div class="card-title">运单号回填 CSV（発送完了報告）</div>
-        <div class="section-sub" style="margin-bottom:10px">上传【快递出单结果文件】+【生成时的 mapping.json】→ 生成 RMS 発送完了報告 CSV（cp932），你再手动传到 RMS「■発送完了報告データ」框</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div class="form-row"><label>快递结果文件（如佐川 出荷履歴）</label><input type="file" id="sr-result" accept=".csv" style="padding:6px 0;border:none;background:none"></div>
-          <div class="form-row"><label>mapping.json（P1 下载包里）</label><input type="file" id="sr-mapping" accept=".json" style="padding:6px 0;border:none;background:none"></div>
-          <div class="form-row"><label>快递公司（自动对应 RMS 配送会社代码）</label>
-            <select id="sr-courier"><option value="sagawa">佐川急便（1002）</option><option value="yamato">ヤマト運輸（1001）</option></select>
-          </div>
-          <div class="form-row"><label>発送日（默认今天）</label><input type="date" id="sr-date"></div>
-        </div>
-        <button class="btn btn-primary" onclick="genShipmentReport()">生成回填 CSV</button>
-        <div id="sr-result" style="margin-top:12px"></div>
-      </div>
-    </div>
+    <div class="section" id="section-rakuten-label"><div class="section-sub">本页已并入「乐天日常」。</div></div>
 
     <!-- ══ 集装箱装柜工作区 ══ -->
     <!-- 托盘查询 -->
@@ -2051,7 +2024,7 @@ function nav(btn) {
   if (btn.dataset.section === 'counterparty-admin') loadCpAdmin();
   if (btn.dataset.section === 'container-pallets') loadPalletList();
   if (btn.dataset.section === 'stock-transfer') loadLastTransfer();
-  if (btn.dataset.section === 'rakuten-label') loadAutoRuns();
+  if (btn.dataset.section === 'oa') loadAutoRuns();
   if (btn.dataset.section === 'count') countInit();
   if (btn.dataset.section === 'container-labels') lblOnTypeChange();
   if (btn.dataset.section === 'container-loading') clInit();
@@ -5712,9 +5685,43 @@ async function genRakutenLabels() {
   } catch (e) { rel.innerHTML = resultCard('err', e.message); }
 }
 
+// 乐天日常：用共享的一号店/二号店订单文件，循环两店生成快递单 ZIP
+async function genLabelsFromShared() {
+  const files = [
+    { store: '1', f: document.getElementById('oa-file1').files[0] },
+    { store: '2', f: document.getElementById('oa-file2').files[0] },
+  ].filter(x => x.f);
+  if (!files.length) { toast('请至少选一个店的订单文件', 'err'); return; }
+  const rel = document.getElementById('rl-result');
+  rel.innerHTML = '<p class="loading">生成中…</p>';
+  const msgs = [];
+  for (const { store, f } of files) {
+    try {
+      const fd = new FormData(); fd.append('file', f);
+      const res = await fetch(`/api/v1/rakuten/labels?store=${encodeURIComponent(store)}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${_token}` }, body: fd,
+      });
+      if (!res.ok) { let m = 'HTTP ' + res.status; try { const j = await res.json(); m = j.detail || m; } catch {} throw new Error(m); }
+      const counts = JSON.parse(res.headers.get('X-Counts') || '{}');
+      const errN = +(res.headers.get('X-Err-Count') || '0');
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition') || '';
+      const mm = cd.match(/filename="?([^"]+)"?/);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = mm ? mm[1] : `rakuten_labels_store${store}.zip`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+      msgs.push(`${store}号店：佐川 ${counts.sagawa || 0} / Yamato ${counts.yamato || 0} / 郵便 ${counts.post || 0}` + (errN ? ` <span style="color:var(--warn)">⚠ ${errN} 行未解析</span>` : ''));
+    } catch (e) {
+      msgs.push(`<span style="color:var(--danger)">${store}号店失败：${esc(e.message)}</span>`);
+    }
+  }
+  rel.innerHTML = resultCard('ok', '已生成并下载 ✓<br>' + msgs.join('<br>'));
+}
+
 // ── P4：生成 発送完了報告 回填 CSV ──────────────────────────────────────────
 async function genShipmentReport() {
-  const rf = document.getElementById('sr-result').files[0];
+  const rf = document.getElementById('sr-file').files[0];
   const mf = document.getElementById('sr-mapping').files[0];
   const dt = document.getElementById('sr-date').value;
   const out = document.getElementById('sr-result');
