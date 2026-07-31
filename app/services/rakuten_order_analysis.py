@@ -200,9 +200,19 @@ async def analyse_rakuten_orders(
                 inventory[rec.product_jan] = inventory.get(rec.product_jan, 0) + rec.quantity
         else:
             inventory = {}
+        # 普通仓库库存（乐天仓库不足时提示可调库）
+        normal_wh = await session.scalar(select(Warehouse).where(Warehouse.name == "普通仓库"))
+        normal_inv: dict[str, int] = {}
+        if normal_wh:
+            for rec in (await session.scalars(select(InventoryRecord).where(
+                InventoryRecord.product_jan.in_(jan_list),
+                InventoryRecord.warehouse_id == normal_wh.id,
+            ))).all():
+                normal_inv[rec.product_jan] = normal_inv.get(rec.product_jan, 0) + rec.quantity
     else:
         products = {}
         inventory = {}
+        normal_inv = {}
 
     items: list[RakutenOrderLine] = []
     unknown_jan_count = 0
@@ -239,6 +249,7 @@ async def analyse_rakuten_orders(
             current_stock=current_stock,
             shortage=shortage,
             status=status,
+            normal_stock=normal_inv.get(jan, 0),
         ))
 
     # Sort: problems first (unknown → no_record → insufficient → ok), then jan_code

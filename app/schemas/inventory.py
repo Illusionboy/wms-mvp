@@ -496,6 +496,7 @@ class RakutenOrderLine(BaseModel):
     current_stock: int | None  # None = product in DB but no 乐天仓库 record
     shortage: int               # max(0, ordered - max(0, stock))
     status: str                 # "ok" | "insufficient" | "no_record" | "unknown"
+    normal_stock: int = 0       # 普通仓库库存（乐天仓库不足时提示可调库）
 
 
 class RakutenOrderAnalysisResult(BaseModel):

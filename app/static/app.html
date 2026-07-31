@@ -614,6 +614,7 @@ tr:hover td { background: var(--accent-bg); }
           <div class="selected-product" id="st-selected">
             <div class="sri-jan" id="st-jan-display"></div>
             <div class="sp-name" id="st-name-display"></div>
+            <div id="st-stock" style="font-size:11px;color:var(--muted);margin-top:3px"></div>
           </div>
           <input type="hidden" id="st-jan">
         </div>
@@ -2211,6 +2212,21 @@ function selectProduct(prefix, jan, nameJp, nameZh) {
   document.getElementById(`${prefix}-selected`).classList.add('show');
   document.getElementById(`${prefix}-results`).style.display = 'none';
   document.getElementById(`${prefix}-search`).value = nameJp;
+  if (prefix === 'st') stShowStock(jan);
+}
+// 调库页：选中商品后显示各仓库库存（小字）
+async function stShowStock(jan) {
+  const el = document.getElementById('st-stock');
+  if (!el) return;
+  el.textContent = '查库存…';
+  try {
+    const items = await api('GET', `/inventory/search?keyword=${encodeURIComponent(jan)}`);
+    const p = (items || []).find(x => x.jan_code === jan) || (items || [])[0];
+    const recs = ((p && p.inventory_records) || []).filter(r => r.quantity !== 0);
+    el.innerHTML = recs.length
+      ? '各仓库库存：' + recs.map(r => `${esc(r.warehouse.name)} <b style="color:${r.quantity > 0 ? 'var(--accent)' : 'var(--danger)'}">${r.quantity}</b>`).join('　')
+      : '各仓库均无库存';
+  } catch { el.textContent = ''; }
 }
 document.addEventListener('click', e => {
   const item = e.target.closest('.search-result-item');
@@ -2563,15 +2579,45 @@ function renderOATable(items) {
       : item.current_stock;
     const shortageDisplay = item.shortage > 0
       ? `<span style="color:${s.color};font-weight:700">-${item.shortage}</span>` : '—';
+    // 乐天仓库不足/无记录，但普通仓库有货 → 提示可调库 + 一键跳转
+    const canXfer = (item.status === 'insufficient' || item.status === 'no_record') && item.normal_stock > 0;
+    const xferHint = canXfer
+      ? `<div style="margin-top:3px;font-size:11px;color:#2563eb">普通仓库有 ${item.normal_stock} 件 <button class="btn btn-ghost btn-sm" style="padding:0 6px;font-size:11px" onclick="oaGoTransfer('${esc(item.jan_code)}','${esc(String(item.product_name||'').replace(/'/g,'’'))}',${item.shortage})">去调库</button></div>`
+      : '';
     return `<tr style="${item.status !== 'ok' ? `background:${s.bg};color:#1f2937` : ''}">
       <td><span style="font-size:12px;padding:2px 6px;border-radius:4px;background:${s.bg};color:${s.color};border:1px solid ${s.color}">${s.label}</span></td>
       <td><code style="font-size:12px;color:inherit">${esc(item.jan_code)}</code></td>
       <td style="font-size:13px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.product_name||'')}">${esc(item.product_name || '—')}</td>
       <td style="text-align:center">${item.ordered_qty}</td>
       <td style="text-align:center">${stockDisplay}</td>
-      <td style="text-align:center">${shortageDisplay}</td>
+      <td style="text-align:center">${shortageDisplay}${xferHint}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--muted)">暂无数据</td></tr>';
+}
+function _setWhByName(selId, name) {
+  const sel = document.getElementById(selId);
+  if (!sel) return;
+  if (!sel.options.length) sel.innerHTML = _warehouses.map(w => `<option value="${w.id}" data-name="${esc(w.name)}">${esc(w.name)}</option>`).join('');
+  for (const o of sel.options) {
+    if ((o.dataset.name || o.textContent).trim() === name) { sel.value = o.value; return; }
+  }
+}
+// 乐天采购 → 一键跳到调库并预填（普通仓库 → 乐天仓库，数量=缺口）
+function oaGoTransfer(jan, name, qty) {
+  const btn = document.querySelector('.nav-item[data-section="stock-transfer"]');
+  if (btn) nav(btn);
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  set('st-jan', jan);
+  const disp = document.getElementById('st-jan-display'); if (disp) disp.textContent = jan;
+  const nd = document.getElementById('st-name-display'); if (nd) nd.textContent = name || '';
+  const selBox = document.getElementById('st-selected'); if (selBox) selBox.classList.add('show');
+  const sr = document.getElementById('st-results'); if (sr) sr.style.display = 'none';
+  set('st-search', name || jan);
+  _setWhByName('st-from-warehouse', '普通仓库');
+  _setWhByName('st-to-warehouse', '乐天仓库');
+  set('st-qty', qty || 1);
+  stShowStock(jan);
+  toast('已跳到调库并预填：普通仓库 → 乐天仓库', 'info');
 }
 
 async function applyOrderAnalysis() {
