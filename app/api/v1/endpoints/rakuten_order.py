@@ -61,6 +61,35 @@ async def rakuten_order_analysis(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post("/order-analysis/from-auto", response_model=RakutenOrderAnalysisResult)
+async def rakuten_order_analysis_from_auto(
+    session: AsyncSession = Depends(get_db_session),
+    _: CurrentUser = Depends(require_admin),
+) -> RakutenOrderAnalysisResult:
+    """用今日自动下载(9:00)存在服务器上的两店订单文件分析采购需求，免手动上传。
+    文件位置：app/data/rakuten_auto/{1,2}/orders.csv（自动下载覆盖为最新）。"""
+    from pathlib import Path
+    base = Path("app/data/rakuten_auto")
+    f1, f2 = base / "1" / "orders.csv", base / "2" / "orders.csv"
+    c1 = f1.read_bytes() if f1.is_file() else None
+    c2 = f2.read_bytes() if f2.is_file() else None
+    if c1 is None and c2 is None:
+        raise HTTPException(status_code=404, detail="没找到今日自动下载的订单文件（自动下载可能还没跑或失败）——请手动选文件上传")
+    # 只有二号店时，把它当作 file1
+    if c1 is None:
+        c1, c2 = c2, None
+    try:
+        return await analyse_rakuten_orders(
+            session=session,
+            file1_name="auto_store1.csv",
+            file1_content=c1,
+            file2_name="auto_store2.csv" if c2 is not None else None,
+            file2_content=c2,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post(
     "/order-analysis/{draft_id}/apply",
     response_model=RakutenOrderApplyResult,

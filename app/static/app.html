@@ -730,6 +730,7 @@ tr:hover td { background: var(--accent-bg); }
           <button class="btn btn-primary" onclick="genLabelsFromShared()">生成快递单</button>
           <button class="btn btn-primary" onclick="runOrderAnalysis()">分析采购需求</button>
         </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px">💡「分析采购需求」<b>不选文件直接点</b>即用今日 9:00 自动下载的两店 CSV；要分析别的文件才需手动选。</div>
         <div id="rl-result" style="margin-top:12px"></div>
       </div>
 
@@ -2484,14 +2485,19 @@ let _oaDraftId = null;
 
 async function runOrderAnalysis() {
   const f1 = document.getElementById('oa-file1').files[0];
-  if (!f1) { toast('请选择一号店订单文件', 'err'); return; }
-  const fd = new FormData();
-  fd.append('file1', f1);
   const f2 = document.getElementById('oa-file2').files[0];
-  if (f2) fd.append('file2', f2);
-  toast('解析中…', 'info');
+  const useAuto = !f1 && !f2;   // 没手动选文件 → 默认用今日 9:00 自动下载的两店 CSV
+  toast(useAuto ? '用今日自动下载的文件分析…' : '解析中…', 'info');
   try {
-    const res = await api('POST', '/rakuten/order-analysis', fd, true);
+    let res;
+    if (useAuto) {
+      res = await api('POST', '/rakuten/order-analysis/from-auto');
+    } else {
+      const fd = new FormData();
+      fd.append('file1', f1 || f2);          // 只选了二号店时把它当 file1
+      if (f1 && f2) fd.append('file2', f2);
+      res = await api('POST', '/rakuten/order-analysis', fd, true);
+    }
     _oaItems = res.items || [];
     _oaDraftId = res.draft_id || null;
     document.getElementById('oa-result').style.display = 'block';
