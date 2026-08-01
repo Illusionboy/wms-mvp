@@ -4633,16 +4633,37 @@ async function startNativeScan(video, statusEl) {
   await video.play();
   if (!_scanState.active) return;
   _applyScanTrackEnhancements(stream);   // 连续对焦 + 手电筒（清晰对焦是提速关键）
-  statusEl.textContent = '将条码对准取景框…';
+  statusEl.textContent = '对准条码即可（横竖都行）…';
   const tick = async () => {
     if (!_scanState.active) return;
     try {
-      const codes = await detector.detect(video);
-      if (codes && codes.length && codes[0].rawValue) { handleScanResult(codes[0].rawValue); return; }
+      let codes = await detector.detect(video);
+      if (!(codes && codes.length && codes[0] && codes[0].rawValue)) {
+        // 竖握时传感器帧是横向，水平的一维条码在帧里变竖直 → 旋转90°再解一次，覆盖另一朝向
+        const rot = _rotatedFrame(video);
+        if (rot) { try { codes = await detector.detect(rot); } catch {} }
+      }
+      if (codes && codes.length && codes[0] && codes[0].rawValue) { handleScanResult(codes[0].rawValue); return; }
     } catch {}
     _scanState.raf = requestAnimationFrame(tick);
   };
   _scanState.raf = requestAnimationFrame(tick);
+}
+
+// 把当前视频帧旋转 90° 画到 canvas，供 BarcodeDetector 再解一次（一维条码朝向无关的关键）
+let _scanCanvas = null;
+function _rotatedFrame(video) {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w || !h) return null;
+  const cv = _scanCanvas || (_scanCanvas = document.createElement('canvas'));
+  cv.width = h; cv.height = w;                 // 交换宽高
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.translate(h / 2, w / 2);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(video, -w / 2, -h / 2, w, h);
+  return cv;
 }
 
 let _zxingPromise = null;
