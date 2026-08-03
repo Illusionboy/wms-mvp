@@ -1815,9 +1815,13 @@ tr:hover td { background: var(--accent-bg); }
       <div class="section-title">装柜出库</div>
       <div class="section-sub">选客户+日期，扫托盘/散货上柜，前后两次对账；确认后「装柜完成」按实际上柜量出库到 WMS，标记预留已出，上柜托盘清零并重置标签。</div>
       <div class="card">
+        <div class="card-title">待装柜客户（点击直接加载，日期自动带出——装柜常提前一天开始，不用自己猜日期）</div>
+        <div id="cl-pending-list"><p class="loading">加载中…</p></div>
+      </div>
+      <div class="card" style="margin-top:12px">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
           <div class="form-row" style="margin:0"><label>计划出库日期</label><input type="date" id="cl-date"></div>
-          <div class="form-row" style="margin:0;flex:1;min-width:160px"><label>客户</label><input type="text" id="cl-customer" placeholder="客户名（与预留一致）"></div>
+          <div class="form-row" style="margin:0;flex:1;min-width:160px"><label>客户</label><input type="text" id="cl-customer" placeholder="客户名（与预留一致），或上面直接点选"></div>
           <button class="btn btn-primary" onclick="clLoad()" style="margin-bottom:0">加载</button>
         </div>
       </div>
@@ -4945,10 +4949,29 @@ function scanIntoField(id) {
 // ── 装柜出库 ──────────────────────────────────────────────────────────────────
 let _cl = { customer: '', date: '' };
 function clInit() {
-  const d = document.getElementById('cl-date');
-  if (d && !d.value) d.value = _todayStr();
+  // 不默认填今天：装柜常提前一天开始，日期该来自预留的计划出库日，不是"今天"——
+  // 靠下面「待装柜客户」列表点选带出正确日期，避免猜错日期查不到记录。
   document.getElementById('cl-body').style.display = 'none';
   document.getElementById('cl-complete-result').innerHTML = '';
+  clLoadPendingCustomers();
+}
+async function clLoadPendingCustomers() {
+  const el = document.getElementById('cl-pending-list');
+  try {
+    const rows = await api('GET', '/containers/loading/pending-customers');
+    if (!rows.length) { el.innerHTML = '<div style="color:var(--muted);font-size:13px">当前没有未出的客户预留</div>'; return; }
+    el.innerHTML = '<div style="display:flex;flex-direction:column;gap:6px">' + rows.map(r => `
+      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:6px;padding:7px 12px;cursor:pointer" onclick="clPickPending('${esc(r.customer)}','${r.planned_date}')">
+        <b>${esc(r.customer)}</b>
+        <span style="color:var(--accent)">计划 ${r.planned_date}</span>
+        <span style="color:var(--muted);font-size:12px;margin-left:auto">${r.sku_count} 种 / 共 ${r.need_total} 件</span>
+      </div>`).join('') + '</div>';
+  } catch (e) { el.innerHTML = `<div style="color:var(--danger)">${esc(e.message)}</div>`; }
+}
+function clPickPending(customer, date) {
+  document.getElementById('cl-customer').value = customer;
+  document.getElementById('cl-date').value = date;
+  clLoad();
 }
 async function clLoad() {
   const date = document.getElementById('cl-date').value;
@@ -5036,6 +5059,7 @@ async function clComplete() {
     document.getElementById('cl-complete-result').innerHTML = resultCard('ok',
       `✓ 装柜完成：出库 ${r.out_lines} 个 SKU，标记 ${r.allocations_shipped} 条预留已出，重置 ${r.pallets_reset.length} 个托盘（标签可复用）`);
     document.getElementById('cl-body').style.display = 'none';
+    clLoadPendingCustomers();   // 该客户预留已 shipped，从待装柜列表刷新掉
   } catch (e) { toast('装柜完成失败：' + e.message, 'err'); }
 }
 function scanIntoText(inputId) {

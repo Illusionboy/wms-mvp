@@ -60,6 +60,12 @@ async def loading_state(
     return await cl.build_state(session, customer, date)
 
 
+@router.get("/loading/pending-customers")
+async def pending_customers(session: AsyncSession = Depends(get_db_session)) -> list[dict]:
+    """当前所有还有未出预留的 (客户,计划出库日期)——装柜出库页用来按客户选，免猜日期。"""
+    return await cl.list_pending_customers(session)
+
+
 @router.post("/loading/scan-pallet")
 async def scan_pallet(
     payload: ScanPalletReq,

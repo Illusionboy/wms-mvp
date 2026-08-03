@@ -26,6 +26,35 @@ from app.services.inventory import stock_out_item
 LOAD_SOURCE = "container_load"
 
 
+async def list_pending_customers(session: AsyncSession) -> list[dict]:
+    """所有当前还有未出预留(waiting/reserved)的 (客户,计划出库日期)，按日期升序。
+
+    实际装柜常常提前一天(甚至更早)开始，操作员未必记得准确的「计划出库日期」——
+    装柜出库页不再要求先猜日期，而是从这里选客户，日期自动带出。
+    完成装柜后该客户预留变 shipped，会自动从本列表消失。
+    """
+    rows = (await session.execute(
+        select(
+            CustomerAllocation.customer_name,
+            CustomerAllocation.planned_outbound_date,
+            func.sum(CustomerAllocation.quantity),
+            func.count(func.distinct(CustomerAllocation.jan_code)),
+        )
+        .where(CustomerAllocation.status.in_(("waiting", "reserved")))
+        .group_by(CustomerAllocation.customer_name, CustomerAllocation.planned_outbound_date)
+        .order_by(CustomerAllocation.planned_outbound_date, CustomerAllocation.customer_name)
+    )).all()
+    return [
+        {
+            "customer": c,
+            "planned_date": d.isoformat(),
+            "need_total": int(q or 0),
+            "sku_count": int(n or 0),
+        }
+        for c, d, q, n in rows
+    ]
+
+
 async def _get_or_create_draft(
     session: AsyncSession, customer: str, planned_date: date, *, create: bool = True
 ) -> ContainerLoadDraft | None:
