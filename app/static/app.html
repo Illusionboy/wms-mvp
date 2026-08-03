@@ -4633,7 +4633,7 @@ async function startNativeScan(video, statusEl) {
   await video.play();
   if (!_scanState.active) return;
   _applyScanTrackEnhancements(stream);   // 连续对焦 + 手电筒（清晰对焦是提速关键）
-  statusEl.textContent = '对准条码即可（横竖都行）…';
+  statusEl.textContent = '对准条码即可（横竖都行）… [引擎:原生]';
   const tick = async () => {
     if (!_scanState.active) return;
     try {
@@ -4700,19 +4700,77 @@ async function startZxingScan(video, statusEl) {
   statusEl.textContent = '加载扫码组件…';
   await loadZxing();
   if (!_scanState.active) return;
-  // TRY_HARDER：正向读不到时自动旋转90°再试 → 竖向/斜向一维条码也能扫（QR本就任意角度）
+  // iPhone/Safari 路径改为【手动逐帧管线】：画到 canvas 解码，失败再旋转 90° 解一次。
+  // 不再用 BrowserMultiFormatReader 连续封装（之前给它传 hints 的写法在部分版本上会
+  // 让整个解码失效——二维码也一起废，即"以前都能扫、后来全不行"的回归元凶）。
+  // JS 版 ZXing 的 TRY_HARDER 并不做旋转，竖向 1D 必须靠我们自己转帧。
+  const ok = ZXing.MultiFormatReader && ZXing.HTMLCanvasElementLuminanceSource
+    && ZXing.HybridBinarizer && ZXing.BinaryBitmap;
+  if (!ok) { await startZxingLegacy(video, statusEl); return; }
+
+  const stream = await navigator.mediaDevices.getUserMedia({ video: _scanVideoConstraints() });
+  _scanState.stream = stream;
+  video.srcObject = stream;
+  await video.play();
+  if (!_scanState.active) return;
+  _applyScanTrackEnhancements(stream);
+  statusEl.textContent = '对准条码即可（横竖都行）… [引擎:ZXing]';
+
+  const mfr = new ZXing.MultiFormatReader();
   let hints = null;
   try {
     if (ZXing.DecodeHintType) { hints = new Map(); hints.set(ZXing.DecodeHintType.TRY_HARDER, true); }
   } catch {}
-  const reader = hints ? new ZXing.BrowserMultiFormatReader(hints) : new ZXing.BrowserMultiFormatReader();
+  const cv = document.createElement('canvas');
+  const rcv = document.createElement('canvas');
+  const MAXW = 1024;   // 解码用降采样上限（速度/成功率平衡）
+  let last = 0;
+  const decodeCanvas = (canvas) => {
+    try {
+      const src = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+      const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(src));
+      const r = hints ? mfr.decode(bmp, hints) : mfr.decode(bmp);
+      return r ? (typeof r.getText === 'function' ? r.getText() : r.text) : null;
+    } catch { return null; }   // NotFound = 本帧没有码，正常
+  };
+  const tick = () => {
+    if (!_scanState.active) return;
+    const now = performance.now();
+    if (now - last >= 150 && video.videoWidth) {
+      last = now;
+      const w = video.videoWidth, h = video.videoHeight;
+      const scale = Math.min(1, MAXW / Math.max(w, h));
+      const dw = Math.round(w * scale), dh = Math.round(h * scale);
+      cv.width = dw; cv.height = dh;
+      cv.getContext('2d').drawImage(video, 0, 0, dw, dh);
+      let text = decodeCanvas(cv);
+      if (!text) {   // 旋转 90° 再解：覆盖竖向 1D 条码
+        rcv.width = dh; rcv.height = dw;
+        const ctx = rcv.getContext('2d');
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.translate(dh / 2, dw / 2);
+        ctx.rotate(Math.PI / 2);
+        ctx.drawImage(cv, -dw / 2, -dh / 2);
+        text = decodeCanvas(rcv);
+      }
+      if (text) { handleScanResult(text); return; }
+    }
+    _scanState.raf = requestAnimationFrame(tick);
+  };
+  _scanState.raf = requestAnimationFrame(tick);
+}
+
+// 兜底：老的 ZXing 连续解码封装（仅在手动管线所需类缺失时用）
+async function startZxingLegacy(video, statusEl) {
+  _stopScannerMedia();   // 释放我们开的流，让 ZXing 自管相机
+  const reader = new ZXing.BrowserMultiFormatReader();
   _scanState.reader = reader;
   const onResult = (result) => {
     if (result && _scanState.active) {
       handleScanResult(typeof result.getText === 'function' ? result.getText() : result.text);
     }
   };
-  statusEl.textContent = '将条码对准取景框…';
+  statusEl.textContent = '将条码对准取景框… [引擎:ZXing-legacy]';
   if (typeof reader.decodeFromConstraints === 'function') {
     await reader.decodeFromConstraints({ video: _scanVideoConstraints() }, video, onResult);
   } else {
