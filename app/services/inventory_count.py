@@ -3,12 +3,12 @@ import io
 import json
 import logging
 import re
-from datetime import date, datetime, time, timezone
+from datetime import date
 from pathlib import Path
 
 import openpyxl
 from bs4 import BeautifulSoup, Tag
-from sqlalchemy import func, select
+from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.inventory_count_draft import InventoryCountDraft
@@ -472,8 +472,11 @@ async def _compute_draft_lines(
     customer_id: int | None,
     cover_uncovered: bool = True,
 ) -> list[CountDraftLine]:
-    # Transactions strictly after the end of count_date
-    cutoff = datetime.combine(count_date, time(23, 59, 59)).replace(tzinfo=timezone.utc)
+    # "盘点后变动" 必须按业务发生日期(transaction_date)判断，不能按写入WMS的时间(created_at)。
+    # 秦丝同步等来源经常延迟1-2天入库：一笔业务日期在盘点日当天或之前(早已被实物盘点数字
+    # 包含)的交易，如果因为写入时间晚于盘点日就被当作"盘点后变动"再加一次，会导致目标库存
+    # 虚高、盘点调整量偏大(双重计入)。transaction_date 为空的（多为手动录入）才回退到 created_at 当天。
+    effective_date = func.coalesce(StockTransaction.transaction_date, cast(StockTransaction.created_at, Date))
 
     lines: list[CountDraftLine] = []
     covered_jans: set[str] = set()
@@ -525,7 +528,7 @@ async def _compute_draft_lines(
             .where(
                 InventoryRecord.product_jan == jan_code,
                 InventoryRecord.warehouse_id == warehouse_id,
-                StockTransaction.created_at > cutoff,
+                effective_date > count_date,
             )
         )
         delta = int(delta_result or 0)
@@ -578,7 +581,7 @@ async def _compute_draft_lines(
             .where(
                 InventoryRecord.product_jan == jan_code,
                 InventoryRecord.warehouse_id == warehouse_id,
-                StockTransaction.created_at > cutoff,
+                effective_date > count_date,
             )
         )
         delta = int(delta_result or 0)
