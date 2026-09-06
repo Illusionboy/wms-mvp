@@ -30,9 +30,10 @@ class QinsiSessionListResult(BaseModel):
 class CountDraftLine(BaseModel):
     jan_code: str
     product_name: str
-    count_quantity: int
+    count_quantity: int         # 盘点表上的原始数字（含破损实物）
+    damaged_deducted: int = 0   # 其中属于破损品的数量，已从 count_quantity 里扣除
     delta_after_count: int      # net change in WMS after count_date
-    target_quantity: int        # count_quantity + delta_after_count
+    target_quantity: int        # (count_quantity - damaged_deducted) + delta_after_count
     current_quantity: int       # current WMS total for this SKU/warehouse/customer
     adjust_delta: int           # target_quantity - current_quantity
     has_wms_record: bool        # whether an InventoryRecord exists in this warehouse

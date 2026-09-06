@@ -91,10 +91,15 @@ async def _resolve_alias_for_search(session: AsyncSession, keyword: str) -> str 
     return canonical if canonical != normalized else None
 
 
-async def search_inventory_items(session: AsyncSession, keyword: str, limit: int = 20) -> list[Product]:
+async def search_inventory_items(
+    session: AsyncSession, keyword: str, limit: int = 20, include_damaged: bool = False
+) -> list[Product]:
     alias_canonical_jan = await _resolve_alias_for_search(session, keyword)
     statement = (
-        _product_search_statement(keyword=keyword, limit=limit, alias_canonical_jan=alias_canonical_jan)
+        _product_search_statement(
+            keyword=keyword, limit=limit, alias_canonical_jan=alias_canonical_jan,
+            include_damaged=include_damaged,
+        )
         .options(
             selectinload(Product.inventory_records).selectinload(InventoryRecord.warehouse),
             selectinload(Product.inventory_records).selectinload(InventoryRecord.customer),
@@ -104,9 +109,14 @@ async def search_inventory_items(session: AsyncSession, keyword: str, limit: int
     return list(result.all())
 
 
-async def search_products(session: AsyncSession, keyword: str, limit: int = 20) -> list[Product]:
+async def search_products(
+    session: AsyncSession, keyword: str, limit: int = 20, include_damaged: bool = False
+) -> list[Product]:
     alias_canonical_jan = await _resolve_alias_for_search(session, keyword)
-    result = await session.scalars(_product_search_statement(keyword=keyword, limit=limit, alias_canonical_jan=alias_canonical_jan))
+    result = await session.scalars(_product_search_statement(
+        keyword=keyword, limit=limit, alias_canonical_jan=alias_canonical_jan,
+        include_damaged=include_damaged,
+    ))
     return list(result.all())
 
 
@@ -127,9 +137,29 @@ def is_outer_jan_match(keyword: str, product: Product) -> bool:
     return outer_hit and not jan_hit
 
 
-def _product_search_statement(keyword: str, limit: int, alias_canonical_jan: str | None = None):
+def _product_search_statement(
+    keyword: str,
+    limit: int,
+    alias_canonical_jan: str | None = None,
+    include_damaged: bool = False,
+):
+    """全项目唯一的「非等值 JAN 匹配」入口 —— 报损模块的排除逻辑必须落在这里。
+
+    include_damaged=False（默认）时：破损品只能被【完整JAN精确匹配】命中，
+    绝不参与后6位/后5位/外箱码这些模糊分支。这样扫正常条码或输后几位时，
+    候选里永远不会混进破损品，既满足"出库只出正常品"，也避免多命中
+    触发乐天/贸易出库的 ambiguous_product 阻断。
+
+    include_damaged=True 时：库存查询页用，正常品和破损品一起列出。
+    """
+    from app.services.damage import DAMAGE_PREFIX  # 局部导入避免循环依赖
+
     normalized_keyword = keyword.strip()
     name_pattern = f"%{normalized_keyword}%"
+    # 破损JAN形如 "D-4902750735590"：非纯数字，因此不会掉进下面任何 isdigit() 分支，
+    # 必须单独给一条精确等值分支，否则连精确输入都搜不到（会掉进商品名模糊搜索）。
+    keyword_is_damaged_jan = normalized_keyword.startswith(DAMAGE_PREFIX)
+    not_damaged = Product.is_damaged.is_(False)
 
     conditions = []
     rank_conditions = []
@@ -140,32 +170,57 @@ def _product_search_statement(keyword: str, limit: int, alias_canonical_jan: str
         # 变成两个商品同时命中，导致贸易出库等需要"唯一匹配"的流程误判为 ambiguous_product。
         conditions.append(Product.jan_code == alias_canonical_jan)
         rank_conditions.append((Product.jan_code == alias_canonical_jan, 0))
+    elif keyword_is_damaged_jan:
+        # 破损JAN 精确等值：无论 include_damaged 与否都允许（显式指定即视为有意为之），
+        # 这条就是"除非JAN完全一致，否则不出破损品"里的"完全一致"。
+        conditions.append(Product.jan_code == normalized_keyword)
+        rank_conditions.append((Product.jan_code == normalized_keyword, 0))
     elif normalized_keyword.isdigit():
         conditions.append(Product.jan_code == normalized_keyword)
         rank_conditions.append((Product.jan_code == normalized_keyword, 0))
         # 扫外箱码：14 位整码精确命中 outer_jan（rank 0）。命中后 resolveScan 首步即返回，
         # 不再走「后6位取前5位」的 5 位片段兜底 → 独占，不再连带出其它只有 5 位巧合相同的商品。
         if len(normalized_keyword) == 14:
-            outer_exact = and_(Product.outer_jan.isnot(None), Product.outer_jan == normalized_keyword)
+            outer_exact = and_(
+                Product.outer_jan.isnot(None),
+                Product.outer_jan == normalized_keyword,
+                not_damaged,
+            )
             conditions.append(outer_exact)
             rank_conditions.append((outer_exact, 0))
+
+        # 查询页（include_damaged=True）：搜正常JAN时把它的破损兄弟一并带出来
+        if include_damaged:
+            dmg_sibling = Product.jan_code == DAMAGE_PREFIX + normalized_keyword
+            conditions.append(dmg_sibling)
+            rank_conditions.append((dmg_sibling, 3))
+
     if normalized_keyword.isdigit():
         # 假设 normalized_keyword 是用户输入的 JAN 码片段
         keyword_len = len(normalized_keyword)
-        
+
         if keyword_len == 6:
             # 如果输入了 6 位：说明是扫的/输入的单品后六位，直接精确匹配结尾
-            conditions.append(Product.jan_code.endswith(normalized_keyword))
-            rank_conditions.append((Product.jan_code.endswith(normalized_keyword), 1))
-            
+            # 破损JAN 也以正常JAN结尾，若不排除会和正常品双命中 → ambiguous_product
+            suffix_6 = and_(Product.jan_code.endswith(normalized_keyword), not_damaged)
+            conditions.append(suffix_6)
+            rank_conditions.append((suffix_6, 1))
+            if include_damaged:
+                dmg_6 = and_(Product.jan_code.endswith(normalized_keyword), Product.is_damaged.is_(True))
+                conditions.append(dmg_6)
+                rank_conditions.append((dmg_6, 3))
+
         elif keyword_len == 5:
             # 如果输入了 5 位：说明是为了规避外箱最后一位校验码不同的情况
             # 目标：匹配倒数第 6 位到倒数第 2 位
             # 拼接 LIKE 模式：前面任意字符 + 用户的5位数字 + 最后刚好1个字符
             like_pattern = f"%{normalized_keyword}_"
-            suffix_condition = or_(
-                Product.jan_code.like(like_pattern),             # 命中情况 1
-                Product.jan_code.endswith(normalized_keyword)    # 命中情况 2：同事直接输入了最后 5 位
+            suffix_condition = and_(
+                or_(
+                    Product.jan_code.like(like_pattern),             # 命中情况 1
+                    Product.jan_code.endswith(normalized_keyword)    # 命中情况 2：同事直接输入了最后 5 位
+                ),
+                not_damaged,
             )
             conditions.append(suffix_condition)
             rank_conditions.append((suffix_condition, 1))
@@ -176,16 +231,29 @@ def _product_search_statement(keyword: str, limit: int, alias_canonical_jan: str
                     Product.outer_jan.like(like_pattern),
                     Product.outer_jan.endswith(normalized_keyword),
                 ),
+                not_damaged,
             )
             conditions.append(outer_condition)
             rank_conditions.append((outer_condition, 2))  # rank 低于直接 JAN 命中
-    else:
-        conditions.extend(
-            [
-                Product.name_jp.ilike(name_pattern),
-                Product.name_zh.ilike(name_pattern),
-            ]
-        )
+            if include_damaged:
+                dmg_5 = and_(
+                    or_(
+                        Product.jan_code.like(like_pattern),
+                        Product.jan_code.endswith(normalized_keyword),
+                    ),
+                    Product.is_damaged.is_(True),
+                )
+                conditions.append(dmg_5)
+                rank_conditions.append((dmg_5, 3))
+    elif not keyword_is_damaged_jan:
+        name_conditions = [
+            Product.name_jp.ilike(name_pattern),
+            Product.name_zh.ilike(name_pattern),
+        ]
+        if include_damaged:
+            conditions.extend(name_conditions)
+        else:
+            conditions.extend([and_(c, not_damaged) for c in name_conditions])
 
     statement = (
         select(Product)
@@ -646,6 +714,8 @@ async def export_warehouse_inventory(
             "JAN码": rec.product_jan,
             "商品名(日语)": prod.name_jp,
             "商品名(中文)": prod.name_zh or "",
+            # 破损品单独标出：导出表会被拿去做库存加总，不标的话破损品会被当可售库存
+            "状态": "破损" if prod.is_damaged else "正常",
             "库存数量": rec.quantity,
             "箱规(个/箱)": prod.units_per_case or "",
             "库位": rec.location_code or "",

@@ -338,6 +338,9 @@ tr:hover td { background: var(--accent-bg); }
       <button class="nav-item" data-section="stock-adjust" onclick="nav(this)">
         <span class="icon">⇌</span> 调整
       </button>
+      <button class="nav-item" data-section="damage" onclick="nav(this)">
+        <span class="icon">💔</span> 报损
+      </button>
       <button class="nav-item" data-section="stock-transfer" onclick="nav(this)">
         <span class="icon">⇄</span> 调库
       </button>
@@ -547,6 +550,7 @@ tr:hover td { background: var(--accent-bg); }
           <label>交易日期 (默认今天)</label>
           <input type="date" id="so-txn-date">
         </div>
+        <div style="font-size:12px;color:var(--muted);margin:-4px 0 12px">扫正常条码只会出正常品；要卖破损品请去「报损」页从破损品清单点「折价出售」。</div>
         <button class="btn btn-primary" onclick="submitStockOut()">确认出库</button>
       </div>
       <div id="so-result"></div>
@@ -591,6 +595,60 @@ tr:hover td { background: var(--accent-bg); }
         <button class="btn btn-primary" onclick="submitAdjust()">确认调整</button>
       </div>
       <div id="sa-result"></div>
+    </div>
+
+    <!-- 报损（破损品） -->
+    <div class="section" id="section-damage">
+      <div class="section-title">报损</div>
+      <div class="section-sub">仓内发现破损时登记：把货从正常库存转到破损库存（同仓库内，写出库+入库两笔记录）。破损品用「D-」开头的JAN单独存放，查询能看到，但出库时扫正常条码永远不会扣到破损品；要卖破损品需从下方清单点「折价出售」。</div>
+      <div class="card">
+        <div class="card-title">登记报损</div>
+        <div class="form-row">
+          <label>搜索商品 (JAN / 商品名)</label>
+          <div class="search-widget">
+            <div class="input-scan">
+              <input type="text" id="dmg-search" placeholder="扫描或输入…" oninput="debounceSearch('dmg')">
+              <button type="button" class="scan-btn" title="扫码识别" onclick="scanIntoWidget('dmg')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
+            <div class="search-results" id="dmg-results" style="display:none"></div>
+          </div>
+          <div class="selected-product" id="dmg-selected">
+            <div class="sri-jan" id="dmg-jan-display"></div>
+            <div class="sp-name" id="dmg-name-display"></div>
+          </div>
+          <input type="hidden" id="dmg-jan">
+        </div>
+        <div class="form-row">
+          <label>仓库</label>
+          <select id="dmg-warehouse"></select>
+        </div>
+        <div class="form-row">
+          <label>报损数量</label>
+          <input type="number" id="dmg-qty" min="1" placeholder="0">
+        </div>
+        <div class="form-row">
+          <label>报损原因（必填）</label>
+          <input type="text" id="dmg-reason" placeholder="如：外箱压坏 / 漏液 / 包装破损">
+        </div>
+        <div class="form-row">
+          <label>发生日期 (默认今天)</label>
+          <input type="date" id="dmg-txn-date">
+        </div>
+        <button class="btn btn-primary" onclick="submitDamage()">确认报损</button>
+      </div>
+      <div id="dmg-result"></div>
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">破损品清单</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+          <div class="form-row" style="margin:0"><label>仓库</label><select id="dmg-filter-wh"><option value="">全部</option></select></div>
+          <button class="btn btn-primary btn-sm" style="margin-bottom:0" onclick="dmgLoadStock()">查询</button>
+          <span id="dmg-count" style="color:var(--muted);font-size:13px"></span>
+        </div>
+        <div style="overflow-x:auto"><table class="table">
+          <thead><tr><th>破损JAN</th><th>商品名</th><th>仓库</th><th>破损数量</th><th></th></tr></thead>
+          <tbody id="dmg-tbody"></tbody>
+        </table></div>
+      </div>
     </div>
 
     <!-- Stock Transfer -->
@@ -2033,6 +2091,7 @@ function nav(btn) {
   if (btn.dataset.section === 'count') countInit();
   if (btn.dataset.section === 'container-labels') lblOnTypeChange();
   if (btn.dataset.section === 'container-loading') clInit();
+  if (btn.dataset.section === 'damage') dmgInit();
   if (['supplier-history','customer-history'].includes(btn.dataset.section)) loadCounterpartyLists();
   closeSidebar();
   document.getElementById('main').scrollTo({ top: 0 });
@@ -2062,7 +2121,7 @@ async function loadGlobals() {
 }
 
 function populateSelects() {
-  const wSelects = ['si-warehouse','so-warehouse','sa-warehouse','cr-warehouse','rak-warehouse','trade-warehouse','ci-warehouse','st-from-warehouse','st-to-warehouse'];
+  const wSelects = ['si-warehouse','so-warehouse','sa-warehouse','cr-warehouse','rak-warehouse','trade-warehouse','ci-warehouse','st-from-warehouse','st-to-warehouse','dmg-warehouse'];
   const cSelects = ['si-customer','so-customer','sa-customer','cr-customer','rak-customer'];
 
   wSelects.forEach(id => {
@@ -2191,6 +2250,7 @@ function selectProduct(prefix, jan, nameJp, nameZh) {
   document.getElementById(`${prefix}-results`).style.display = 'none';
   document.getElementById(`${prefix}-search`).value = nameJp;
   if (prefix === 'st') stShowStock(jan);
+  if (String(jan).startsWith('D-')) toast('⚠ 已选中破损品，请确认这是你要的', 'warn');
 }
 // 调库页：选中商品后显示各仓库库存（小字）
 async function stShowStock(jan) {
@@ -2327,7 +2387,8 @@ async function doSearch() {
   const el = document.getElementById('search-result');
   el.innerHTML = '<p class="loading">搜索中…</p>';
   try {
-    const items = await api('GET', `/inventory/search?keyword=${encodeURIComponent(kw)}`);
+    // include_damaged=true：查询页要能看到破损品（出入库等需要唯一匹配的流程用默认 false）
+    const items = await api('GET', `/inventory/search?keyword=${encodeURIComponent(kw)}&include_damaged=true`);
     if (!items.length) { el.innerHTML = '<p class="loading">无结果</p>'; return; }
     el.innerHTML = items.map(p => {
       const records = p.inventory_records || [];
@@ -2335,12 +2396,13 @@ async function doSearch() {
       const editBtn = `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="jumpToProductEdit('${esc(p.jan_code)}')">编辑</button>`;
       const histBtn = `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;margin-left:4px" onclick="jumpToProductHistory('${esc(p.jan_code)}')">进出库</button>`;
       const actions = editBtn + histBtn;
+      const dmgTag = (p.jan_code || '').startsWith('D-') ? ' <span class="badge badge-danger">破损</span>' : '';
       const warning = p.outer_jan_warning
         ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#92400e">${esc(p.outer_jan_warning)}</div>`
         : '';
       const rows = records.length
         ? records.map((r, i) => `<tr>
-            <td><code style="font-size:11px">${p.jan_code}</code></td>
+            <td><code style="font-size:11px">${p.jan_code}</code>${dmgTag}</td>
             <td>${esc(p.name_jp)}<br><small style="color:var(--muted)">${esc(p.name_zh||'')}</small></td>
             <td>${r.warehouse?.name||'—'}</td>
             <td>${r.customer?.name||'—'}</td>
@@ -2350,7 +2412,7 @@ async function doSearch() {
             <td style="white-space:nowrap">${i === 0 ? actions : ''}</td>
           </tr>`).join('')
         : `<tr>
-            <td><code style="font-size:11px">${p.jan_code}</code></td>
+            <td><code style="font-size:11px">${p.jan_code}</code>${dmgTag}</td>
             <td>${esc(p.name_jp)}<br><small style="color:var(--muted)">${esc(p.name_zh||'')}</small></td>
             <td colspan="4" style="color:var(--muted)">无库存记录</td>
             <td>${upc}</td>
@@ -4944,6 +5006,93 @@ function scanIntoField(id) {
     el.value = digits || String(code).trim();
     el.dispatchEvent(new Event('input'));
   });
+}
+
+// ── 报损（破损品） ─────────────────────────────────────────────────────────────
+// 破损品是独立商品行，jan_code = "D-" + 正常JAN。后端出库取桶是精确等值匹配，
+// 所以扫正常条码永远不会扣到破损库存；要出破损品必须显式用 D- 码（清单里的「折价出售」按钮）。
+function dmgInit() {
+  const d = document.getElementById('dmg-txn-date');
+  if (d && !d.value) d.value = _todayStr();
+  const whSel = document.getElementById('dmg-filter-wh');
+  if (whSel && whSel.options.length <= 1) {
+    _warehouses.forEach(w => whSel.add(new Option(w.name, w.id)));
+  }
+  dmgLoadStock();
+}
+
+async function submitDamage() {
+  const jan = _cval('dmg-jan');
+  const qty = parseInt(_cval('dmg-qty'), 10);
+  const reason = _cval('dmg-reason');
+  const whId = _cval('dmg-warehouse');
+  if (!jan) { toast('请先选择商品', 'err'); return; }
+  if (!qty || qty <= 0) { toast('请填写报损数量', 'err'); return; }
+  if (!reason) { toast('请填写报损原因', 'err'); return; }
+  if (!confirm(`确认报损？将从「正常库存」扣减 ${qty} 件并转入破损库存。此操作会改动真实库存。`)) return;
+  try {
+    const r = await api('POST', '/damage/report', {
+      sku: jan,
+      warehouse_id: parseInt(whId, 10),
+      quantity: qty,
+      reason: reason,
+      transaction_date: _cval('dmg-txn-date') || null,
+    });
+    document.getElementById('dmg-result').innerHTML = resultCard('ok',
+      `✓ 已报损 ${r.quantity} 件：正常库存剩 ${r.normal_quantity_after}，破损库存 ${r.damaged_quantity_after}（${esc(r.damaged_jan)}）`);
+    toast('报损成功', 'ok');
+    resetForm('dmg');
+    document.getElementById('dmg-qty').value = '';
+    document.getElementById('dmg-reason').value = '';
+    dmgLoadStock();
+  } catch (e) {
+    document.getElementById('dmg-result').innerHTML = resultCard('err', e.message);
+    toast('报损失败：' + e.message, 'err');
+  }
+}
+
+async function dmgLoadStock() {
+  const tbody = document.getElementById('dmg-tbody');
+  const cnt = document.getElementById('dmg-count');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" class="loading">查询中…</td></tr>';
+  const wh = _cval('dmg-filter-wh');
+  try {
+    const rows = await api('GET', '/damage/stock' + (wh ? `?warehouse_id=${wh}` : ''));
+    if (cnt) cnt.textContent = rows.length ? `共 ${rows.length} 条` : '';
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">当前没有破损品库存</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(r => `<tr>
+      <td><code style="font-size:11px">${esc(r.damaged_jan)}</code> <span class="badge badge-danger">破损</span></td>
+      <td>${esc(r.product_name)}</td>
+      <td>${esc(r.warehouse_name)}</td>
+      <td><strong style="color:var(--danger)">${r.quantity}</strong></td>
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px"
+        onclick="dmgGoSell('${esc(r.damaged_jan)}','${esc(r.product_name)}',${r.warehouse_id},${r.quantity})">折价出售</button></td>
+    </tr>`).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--danger)">${esc(e.message)}</td></tr>`;
+  }
+}
+
+// 折价出售：跳到出库页并预填破损JAN。走的是普通出库端点，
+// sku 是完整的 D- 码 → 后端精确命中破损桶，不会碰正常库存。
+function dmgGoSell(dmgJan, name, whId, maxQty) {
+  const btn = document.querySelector('.nav-item[data-section="stock-out"]');
+  if (btn) nav(btn);
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  set('so-jan', dmgJan);
+  const disp = document.getElementById('so-jan-display'); if (disp) disp.textContent = dmgJan;
+  const nd = document.getElementById('so-name-display'); if (nd) nd.textContent = name || '';
+  const selBox = document.getElementById('so-selected'); if (selBox) selBox.classList.add('show');
+  const sr = document.getElementById('so-results'); if (sr) sr.style.display = 'none';
+  set('so-search', name || dmgJan);
+  const whSel = document.getElementById('so-warehouse');
+  if (whSel) whSel.value = String(whId);
+  set('so-qty', maxQty || 1);
+  toast(`已跳到出库并预填破损品（最多 ${maxQty} 件）`, 'warn');
 }
 
 // ── 装柜出库 ──────────────────────────────────────────────────────────────────

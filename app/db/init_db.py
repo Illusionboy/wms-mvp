@@ -48,6 +48,19 @@ async def init_db() -> None:
         await conn.execute(text(
             "ALTER TABLE products ALTER COLUMN outer_jan TYPE VARCHAR(14)"
         ))
+        # 报损模块：破损品独立商品行（jan_code = "D-" + 正常JAN）的标记与反查列
+        await conn.execute(text(
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_damaged BOOLEAN NOT NULL DEFAULT FALSE"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS damaged_of_jan VARCHAR(32)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_products_is_damaged ON products (is_damaged)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_products_damaged_of_jan ON products (damaged_of_jan)"
+        ))
         # P2: rakuten_credentials 补「楽天会員（session upgrade 邮箱登录）」凭据列。
         # 表本身由 create_all 建（模型已含新列），此处 ALTER 只为已部署的旧表补列（幂等）。
         await conn.execute(text(

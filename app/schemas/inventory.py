@@ -193,6 +193,35 @@ class StockAdjustCreate(BaseModel):
     transaction_date: date | None = None
 
 
+class DamageReportCreate(BaseModel):
+    """仓内发现破损：把正常库存转入同仓库的破损桶（jan_code = "D-" + 正常JAN）。"""
+    sku: JanQuery
+    warehouse_id: int = Field(gt=0)
+    quantity: int = Field(gt=0)
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    transaction_date: date | None = None
+
+
+class DamagedStockRead(BaseModel):
+    damaged_jan: str
+    normal_jan: str
+    product_name: str
+    warehouse_id: int
+    warehouse_name: str
+    quantity: int
+
+
+class DamageReportResult(BaseModel):
+    normal_jan: str
+    damaged_jan: str
+    warehouse_id: int
+    quantity: int
+    reason: str
+    reference_id: str
+    normal_quantity_after: int
+    damaged_quantity_after: int
+
+
 class StockTransferCreate(BaseModel):
     sku: JanQuery
     from_warehouse_id: int = Field(gt=0)

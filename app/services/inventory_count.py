@@ -8,7 +8,7 @@ from pathlib import Path
 
 import openpyxl
 from bs4 import BeautifulSoup, Tag
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import Date, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.inventory_count_draft import InventoryCountDraft
@@ -24,6 +24,7 @@ from app.schemas.inventory_count import (
     QinsiSession,
     QinsiSessionListResult,
 )
+from app.services.damage import get_damaged_quantity
 from app.services.inventory import resolve_customer, resolve_warehouse
 from app.services.product_alias import resolve_canonical_jan
 
@@ -533,12 +534,16 @@ async def _compute_draft_lines(
         )
         delta = int(delta_result or 0)
 
-        target_qty = count_qty + delta
+        # 破损品与正常品一起清点（秦丝盘点表只有正常JAN，数字里含破损实物），
+        # 所以要把该JAN在本仓库的破损库存从盘点数里扣掉，剩下的才是正常品应有的量。
+        damaged_deducted = await get_damaged_quantity(session, jan_code, warehouse_id)
+        target_qty = (count_qty - damaged_deducted) + delta
         lines.append(
             CountDraftLine(
                 jan_code=jan_code,
                 product_name=display_name,
                 count_quantity=count_qty,
+                damaged_deducted=damaged_deducted,
                 delta_after_count=delta,
                 target_quantity=target_qty,
                 current_quantity=current_qty,
@@ -566,6 +571,10 @@ async def _compute_draft_lines(
             _customer_filter(customer_id),
             not_in_filter,
             InventoryRecord.quantity != 0,   # skip already-zero buckets
+            # 破损品(D-前缀)永远不会出现在秦丝盘点表里，否则会被当成"未覆盖SKU"
+            # 按 count_quantity=0 处理，每次盘点都把破损库存清零。破损量由下面的
+            # damaged_deducted 机制从正常品盘点数里扣，破损桶本身不参与对账。
+            or_(Product.is_damaged.is_(False), Product.is_damaged.is_(None)),
         )
         .order_by(InventoryRecord.product_jan.asc())
     )
@@ -712,7 +721,8 @@ async def apply_inventory_count_draft(
             note=(
                 f"盘点日期:{document.count_date} "
                 f"盘点量:{line.count_quantity} "
-                f"盘后变动:{line.delta_after_count:+d}"
+                + (f"破损扣除:{line.damaged_deducted} " if line.damaged_deducted else "")
+                + f"盘后变动:{line.delta_after_count:+d}"
             ),
             user_id=user_id,
             transaction_date=document.count_date,
@@ -743,7 +753,7 @@ def export_draft_to_excel(document: InventoryCountDocument) -> bytes:
     headers = [
         "JAN条码", "商品名称",
         f"盘点数量({document.count_date})",
-        "盘后WMS变动", "目标库存", "当前WMS库存", "ADJUST量",
+        "破损扣除", "盘后WMS变动", "目标库存", "当前WMS库存", "ADJUST量",
     ]
     ws.append(headers)
 
@@ -752,6 +762,7 @@ def export_draft_to_excel(document: InventoryCountDocument) -> bytes:
             line.jan_code,
             line.product_name,
             line.count_quantity,
+            line.damaged_deducted,
             line.delta_after_count,
             line.target_quantity,
             line.current_quantity,
@@ -759,7 +770,7 @@ def export_draft_to_excel(document: InventoryCountDocument) -> bytes:
         ])
 
     # Column widths
-    col_widths = [16, 40, 16, 14, 12, 12, 10]
+    col_widths = [16, 40, 16, 10, 14, 12, 12, 10]
     for i, w in enumerate(col_widths, start=1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
 

@@ -191,6 +191,10 @@ async def scan_pallet(session: AsyncSession, customer: str, planned_date: date, 
 
 
 async def add_loose(session: AsyncSession, customer: str, planned_date: date, jan: str, qty: int) -> dict:
+    # 破损品(D-前缀)必须先拦截：下面这行只留数字，会把 "D-4902..." 静默变成正常JAN，
+    # 导致破损品被当好货装柜出口。破损品走折价内销，不进出口集装箱。
+    if str(jan).strip().startswith("D-"):
+        raise ValueError("破损品不参与装柜出口，请走「报损」页的折价出售")
     jan = "".join(c for c in str(jan) if c.isdigit())
     draft = await _get_or_create_draft(session, customer, planned_date)
     loose = json.loads(draft.loose_items or "[]")

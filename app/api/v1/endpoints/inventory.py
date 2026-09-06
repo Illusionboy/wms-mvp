@@ -172,9 +172,17 @@ async def list_negative_stock(
 @router.get("/search", response_model=list[ProductInventoryRead])
 async def search_inventory(
     keyword: str = Query(min_length=1, max_length=255),
+    include_damaged: bool = Query(
+        False,
+        description="是否把破损品(D-前缀)一并列出。库存查询页传 true；"
+                    "出入库/调整等需要唯一匹配的流程一律用默认 false，"
+                    "否则会因多命中触发 ambiguous 阻断。",
+    ),
     session: AsyncSession = Depends(get_db_session),
 ) -> list[ProductInventoryRead]:
-    products = await search_inventory_items(session=session, keyword=keyword)
+    products = await search_inventory_items(
+        session=session, keyword=keyword, include_damaged=include_damaged
+    )
     results = []
     for p in products:
         r = ProductInventoryRead.model_validate(p)

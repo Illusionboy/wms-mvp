@@ -15,7 +15,7 @@ import math
 import statistics
 from datetime import date, timedelta
 
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import Date, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -139,7 +139,12 @@ async def list_safety_stock_recommendations(
     MVP 阶段逐个 SKU 计算（数据量小时足够；后续若 SKU 数量增大可考虑
     在 DB 层一次性聚合所有商品的日出库量）。
     """
-    stmt = select(InventoryRecord.product_jan, InventoryRecord.warehouse_id)
+    # 排除破损品：破损桶不需要补货建议
+    stmt = (
+        select(InventoryRecord.product_jan, InventoryRecord.warehouse_id)
+        .join(Product, Product.jan_code == InventoryRecord.product_jan, isouter=True)
+        .where(or_(Product.is_damaged.is_(False), Product.is_damaged.is_(None)))
+    )
     if warehouse_id is not None:
         stmt = stmt.where(InventoryRecord.warehouse_id == warehouse_id)
     buckets = (await session.execute(stmt)).all()

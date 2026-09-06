@@ -12,7 +12,7 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import Date, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -266,6 +266,9 @@ async def dormant_products(
     # 1) 当前有库存(>0)的商品，可选按仓库
     stock_stmt = (
         select(InventoryRecord.product_jan, func.sum(InventoryRecord.quantity).label("stock"))
+        # 排除破损品：破损JAN天然没有OUT事务，不排除会永久占据滞销榜首
+        .join(Product, Product.jan_code == InventoryRecord.product_jan, isouter=True)
+        .where(or_(Product.is_damaged.is_(False), Product.is_damaged.is_(None)))
         .group_by(InventoryRecord.product_jan)
         .having(func.sum(InventoryRecord.quantity) > 0)
     )

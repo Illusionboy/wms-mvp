@@ -36,6 +36,14 @@ async def _validate_alias_pair(session: AsyncSession, canonical_jan: str, alias_
     if alias_jan == canonical_jan:
         raise ValueError("别名JAN不能与主JAN相同")
 
+    # 破损品(D-前缀)禁止参与别名：create_alias 会把两个库存桶合并且不可逆，
+    # 而 stock_out_item 里的 resolve_canonical_jan 还会把破损JAN改写回正常JAN，
+    # 结果就是破损库存被并进可售库存 —— 与报损模块的隔离目的完全相反。
+    from app.services.damage import is_damaged_jan  # 局部导入避免循环依赖
+
+    if is_damaged_jan(alias_jan) or is_damaged_jan(canonical_jan):
+        raise ValueError("破损品(D-开头)不能设置别名，否则破损库存会被合并进正常库存")
+
     canonical_product = await session.get(Product, canonical_jan)
     if canonical_product is None:
         raise ValueError(f"主JAN {canonical_jan} 不存在")
