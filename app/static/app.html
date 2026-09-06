@@ -179,6 +179,9 @@ textarea { resize: vertical; min-height: 100px; }
 }
 .scan-btn:hover { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
 .scan-btn svg { width: 20px; height: 20px; }
+/* 表格内窄输入框旁的扫码按钮：图标与上面完全一致，只是尺寸小一号 */
+.scan-btn-sm { width: 26px; height: 24px; border-radius: 6px; margin-left: 4px; vertical-align: middle; }
+.scan-btn-sm svg { width: 14px; height: 14px; }
 .scan-overlay {
   display: none; position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.85);
   align-items: center; justify-content: center; padding: 20px;
@@ -3863,7 +3866,7 @@ async function loadAliasPanel(jan) {
       <div style="margin-bottom:8px"><strong>已绑定别名（指向主JAN ${esc(jan)}）：</strong></div>
       ${list}
       <div style="margin-top:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-        <input type="text" id="alias-input-${jan}" placeholder="新别名JAN" style="width:140px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"><button class="btn btn-ghost btn-sm" style="padding:2px 7px;margin-left:4px" title="扫别名条码" onclick="scanIntoField('alias-input-${jan}')">📷</button>
+        <input type="text" id="alias-input-${jan}" placeholder="新别名JAN" style="width:140px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"><button type="button" class="scan-btn scan-btn-sm" title="扫别名条码" onclick="scanIntoField('alias-input-${jan}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
         <input type="text" id="alias-note-${jan}" placeholder="备注（可选）" style="width:160px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
         <button class="btn btn-secondary btn-sm" onclick="previewAliasMerge('${jan}')">预览合并</button>
       </div>
@@ -3932,7 +3935,7 @@ function editProductRow(jan, nameJp, nameZh, upc, outerJan) {
     <td><input type="text" value="${nameJp}" id="pedit-jp-${jan}" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td><input type="text" value="${nameZh}" id="pedit-zh-${jan}" placeholder="中文名（可选）" style="width:100%;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
     <td><input type="number" value="${upc}" id="pedit-upc-${jan}" min="1" placeholder="—" style="width:70px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"></td>
-    <td style="white-space:nowrap"><input type="text" value="${outerJan}" id="pedit-outer-${jan}" placeholder="外箱JAN（14位ITF可选）" maxlength="14" style="width:100px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"><button class="btn btn-ghost btn-sm" style="padding:2px 7px" title="扫外箱条码" onclick="scanIntoField('pedit-outer-${jan}')">📷</button></td>
+    <td style="white-space:nowrap"><input type="text" value="${outerJan}" id="pedit-outer-${jan}" placeholder="外箱JAN（14位ITF可选）" maxlength="14" style="width:100px;padding:3px 6px;font-size:13px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)"><button type="button" class="scan-btn scan-btn-sm" title="扫外箱条码" onclick="scanIntoField('pedit-outer-${jan}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button></td>
     <td style="white-space:nowrap">
       <button class="btn btn-primary btn-sm" onclick="saveProductRow('${jan}')">保存</button>
       <button class="btn btn-ghost btn-sm" onclick="searchProducts()">取消</button>
