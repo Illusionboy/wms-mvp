@@ -1629,8 +1629,11 @@ tr:hover td { background: var(--accent-bg); }
             </div>
           </div>
           <div class="form-row">
-            <label>箱入数（选填）</label>
-            <input type="number" id="np-upc" min="1" placeholder="—">
+            <label>外箱JAN（14位ITF，选填）</label>
+            <div class="input-scan">
+              <input type="text" id="np-outer" placeholder="14位外箱条码" maxlength="14">
+              <button type="button" class="scan-btn" title="扫外箱条码" onclick="scanIntoField('np-outer')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18"/></svg></button>
+            </div>
           </div>
           <div class="form-row">
             <label>商品名（日文）</label>
@@ -1639,6 +1642,10 @@ tr:hover td { background: var(--accent-bg); }
           <div class="form-row">
             <label>商品名（中文，选填）</label>
             <input type="text" id="np-name-zh" placeholder="中文名">
+          </div>
+          <div class="form-row">
+            <label>箱入数（选填）</label>
+            <input type="number" id="np-upc" min="1" placeholder="—">
           </div>
         </div>
         <button class="btn btn-primary" onclick="createProduct()">新增商品</button>
@@ -3796,12 +3803,16 @@ async function createProduct() {
   const nameJp = document.getElementById('np-name-jp').value.trim();
   const nameZh = document.getElementById('np-name-zh').value.trim();
   const upcRaw = document.getElementById('np-upc').value;
+  const outerJan = document.getElementById('np-outer').value.trim();
   const resultEl = document.getElementById('np-result');
   if (!jan || !/^\d{5,13}$/.test(jan)) { toast('请输入有效的 JAN 码', 'err'); return; }
   if (!nameJp) { toast('请输入商品名（日文）', 'err'); return; }
+  // 外箱JAN 选填；填了就必须是纯数字（列宽14，ITF-14标准是14位）
+  if (outerJan && !/^\d{1,14}$/.test(outerJan)) { toast('外箱JAN 只能是数字（最多14位）', 'err'); return; }
   const body = { jan_code: jan, name_jp: nameJp };
   if (nameZh) body.name_zh = nameZh;
   if (upcRaw) body.units_per_case = +upcRaw;
+  if (outerJan) body.outer_jan = outerJan;
   try {
     await api('POST', '/inventory/products', body);
     toast('商品已新增', 'ok');
@@ -3810,6 +3821,7 @@ async function createProduct() {
     document.getElementById('np-name-jp').value = '';
     document.getElementById('np-name-zh').value = '';
     document.getElementById('np-upc').value = '';
+    document.getElementById('np-outer').value = '';
   } catch (e) {
     toast(e.message, 'err');
   }

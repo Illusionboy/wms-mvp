@@ -90,6 +90,7 @@ class ProductCreate(BaseModel):
     name_jp: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
     name_zh: Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)] | None = None
     units_per_case: int | None = Field(default=None, gt=0)
+    outer_jan: Annotated[str, StringConstraints(strip_whitespace=True, max_length=14)] | None = None  # ITF-14 外箱箱码
 
 
 class ProductUpdate(BaseModel):

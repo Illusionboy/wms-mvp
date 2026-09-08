@@ -238,6 +238,7 @@ async def create_product(
         name_jp=payload.name_jp,
         name_zh=payload.name_zh,
         units_per_case=payload.units_per_case,
+        outer_jan=payload.outer_jan or None,
     )
     session.add(product)
     await session.commit()
