@@ -31,6 +31,20 @@ class CountSessionUpsert(BaseModel):
     items: list[CountItem] = Field(default_factory=list)
 
 
+class MergeSessionsRequest(BaseModel):
+    """把多个点数会话合并成一条（同 JAN 累加）。源会话保持不变。"""
+    session_ids: list[int] = Field(min_length=2)
+
+
+class MergeSessionsResult(BaseModel):
+    session: "CountSessionRead"
+    source_sessions: int
+    lines_before: int      # 合并前的条目总数（跨所有源会话）
+    lines_after: int       # 合并后的 SKU 数
+    total_qty: int
+    alias_merged: int      # 有多少个JAN因别名归一被并到了主JAN
+
+
 class CountSessionRead(BaseModel):
     id: int
     name: str | None
@@ -102,3 +116,6 @@ class PalletCheckRow(BaseModel):
 class PalletCheckResult(BaseModel):
     rows: list[PalletCheckRow] = Field(default_factory=list)
     unknown_pallet_codes: list[str] = Field(default_factory=list)  # 扫到但库里不存在的托盘码
+
+
+MergeSessionsResult.model_rebuild()

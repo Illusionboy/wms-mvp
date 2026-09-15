@@ -12,6 +12,8 @@ from app.schemas.count_session import (
     CountSessionRead,
     CountSessionUpsert,
     ImportResult,
+    MergeSessionsRequest,
+    MergeSessionsResult,
     PalletCheckRequest,
     PalletCheckResult,
     SimulateRequest,
@@ -75,6 +77,33 @@ async def update_session(
     if obj is None:
         raise HTTPException(status_code=404, detail="点数会话不存在")
     return obj
+
+
+@router.post("/sessions/merge", response_model=MergeSessionsResult)
+async def merge_sessions(
+    payload: MergeSessionsRequest,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_admin),
+) -> MergeSessionsResult:
+    """多选点数会话 → 按 JAN 累加合并 → 新建一个会话装结果。
+
+    用于「一批货分几个入库单点数，到货即发走」：合并后在同一个会话里
+    统一生成微信报库文本 / 秦丝出库草稿。**源会话原样保留，可追溯。**
+    """
+    merged = await svc.merge_sessions(session, payload.session_ids)
+    if merged is None:
+        raise HTTPException(status_code=404, detail="有会话不存在，请刷新会话列表后重试")
+    items, stats = merged
+    if not items:
+        raise HTTPException(status_code=400, detail="选中的会话里没有有效条目（数量都为 0）")
+
+    from datetime import datetime
+    name = f"合并{len(payload.session_ids)}单 · {datetime.now().strftime('%m-%d %H:%M')}"
+    new_session = await svc.create_session(
+        session, name=name, note=f"由会话 {payload.session_ids} 合并生成",
+        items=items, created_by=current_user.id,
+    )
+    return MergeSessionsResult(session=new_session, **stats)
 
 
 @router.delete("/sessions/{session_id}")

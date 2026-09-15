@@ -356,6 +356,8 @@ async def backfill(
     return {
         "success": res.success, "error": res.error, "steps": res.steps, "shots": res.shots,
         "created_new": res.created_new, "not_found": res.not_found, "direction": payload.direction,
+        # SKU 超过单张草稿上限时会自动分批，前端据此提示用户去秦丝看几张草稿
+        "batch_total": res.batch_total, "batch_ok": res.batch_ok,
     }
 
 

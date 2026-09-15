@@ -146,8 +146,8 @@ async def _qs_create_goods(client: httpx.AsyncClient, jan: str, name: str) -> bo
         return False
 
 
-async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str,
-                        cp_id: int | None = None, cp_name: str | None = None) -> "BackfillResult":
+async def _api_backfill_batch(items: list[tuple], warehouse_name: str, direction: str,
+                              cp_id: int | None = None, cp_name: str | None = None) -> "BackfillResult":
     """回填草稿：httpx 直接调秦丝接口。出库=wholesaleOrdersSaveDraft.ac，入库=purchaseSaveDraft.ac。不用浏览器。
     items=[(jan, qty)] 或 [(jan, qty, name_jp)]。草稿不校验库存（实测超库存也能存），对方统一 WMS回填。
     JAN 秦丝查无 → 自动建商品（名称取 name_jp，兜底 JAN；记入 created_new），再入单；建失败才记 not_found。"""
@@ -172,7 +172,7 @@ async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str,
                                  follow_redirects=False) as client:
         # 逐个校验 JAN；秦丝查无 → 自动建商品(名称=name_jp,兜底JAN)后入单，建失败才记 not_found
         goods: list[dict] = []
-        for it in items[:50]:
+        for it in items:
             jan, qty = it[0], it[1]
             name_jp = it[2] if len(it) > 2 else ""
             if await _qs_goods_name_if_exists(client, jan, depot_id) is None:
@@ -280,6 +280,45 @@ async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str,
     return res
 
 
+# 秦丝单张草稿的商品行上限。历史代码是 items[:50] 直接静默截断——超出的 SKU
+# 无声丢失，用户以为全回填了实际只进了前 50 个。合并多个入库单正是最容易超的场景，
+# 故改为按此上限分批，每批一张草稿，结果逐批汇总。
+_QS_MAX_GOODS_PER_DRAFT = 50
+
+
+async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str,
+                        cp_id: int | None = None, cp_name: str | None = None) -> "BackfillResult":
+    """回填草稿；SKU 数超过单张上限时自动分批，每批一张草稿。"""
+    batches = [items[i:i + _QS_MAX_GOODS_PER_DRAFT]
+               for i in range(0, len(items), _QS_MAX_GOODS_PER_DRAFT)] or [[]]
+    if len(batches) == 1:
+        res = await _api_backfill_batch(batches[0], warehouse_name, direction, cp_id, cp_name)
+        res.batch_total = 1
+        res.batch_ok = 1 if res.success else 0
+        return res
+
+    merged = BackfillResult()
+    merged.batch_total = len(batches)
+    errors: list[str] = []
+    for idx, batch in enumerate(batches, 1):
+        r = await _api_backfill_batch(batch, warehouse_name, direction, cp_id, cp_name)
+        merged.created_new.extend(r.created_new)
+        merged.not_found.extend(r.not_found)
+        for st in r.steps:
+            st = dict(st)
+            st["step"] = f"[第{idx}/{len(batches)}批] {st.get('step', '')}"
+            merged.steps.append(st)
+        if r.success:
+            merged.batch_ok += 1
+        if r.error:
+            errors.append(f"第{idx}批：{r.error}")
+
+    merged.success = merged.batch_ok == len(batches) and not merged.not_found
+    if errors:
+        merged.error = f"共 {len(items)} 个SKU 分 {len(batches)} 张草稿；" + "；".join(errors)
+    return merged
+
+
 @dataclass
 class BackfillResult:
     success: bool = False
@@ -288,6 +327,8 @@ class BackfillResult:
     created_new: list[str] = field(default_factory=list)
     not_found: list[str] = field(default_factory=list)
     error: str | None = None
+    batch_total: int = 1   # 本次回填拆成了几张秦丝草稿
+    batch_ok: int = 0      # 其中成功几张
 
 
 async def backfill_draft(

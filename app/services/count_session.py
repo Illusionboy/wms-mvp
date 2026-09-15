@@ -25,6 +25,7 @@ from app.schemas.count_session import (
     SimulateRow,
 )
 from app.services.customer_allocations import _parse_allocation_excel
+from app.services.product_alias import resolve_canonical_jan
 from app.services.trade_containers import get_pallet_by_code
 
 
@@ -117,6 +118,76 @@ async def delete_session(session: AsyncSession, session_id: int) -> bool:
     await session.delete(obj)
     await session.commit()
     return True
+
+
+# ── 多会话合并 ──────────────────────────────────────────────────────────────
+def effective_qty(item: CountItem) -> int:
+    """一条点数行的实际件数。与前端 _countQty(app.html) 同口径：
+    整箱行 = 箱入数 × 箱数；按件行 = quantity。"""
+    if item.whole_case:
+        return int(item.case_size or 0) * int(item.case_count or 0)
+    return int(item.quantity or 0)
+
+
+async def merge_sessions(
+    session: AsyncSession, session_ids: list[int]
+) -> tuple[list[CountItem], dict] | None:
+    """把多个点数会话按 JAN 累加合并成一份条目列表。
+
+    场景：一批货分几个入库单点数，到货即发走，需要合成一条统一出库。
+    - 先 resolve_canonical_jan 做别名归一再累加，否则别名JAN与主JAN会合不到一起
+    - 整箱信息压平：不同会话同一JAN可能一个按整箱一个按件，保留整箱标记会让
+      数量口径自相矛盾，故统一输出按件行（quantity=Σ有效件数）
+    - 源会话不作任何修改，保持可追溯
+
+    返回 (合并后条目, 统计)；任一会话不存在则返回 None。
+    """
+    merged: dict[str, int] = defaultdict(int)
+    first_name: dict[str, str | None] = {}
+    any_new: dict[str, bool] = defaultdict(bool)
+    lines_before = 0
+    raw_jans: set[str] = set()
+
+    for sid in session_ids:
+        read = await get_session(session, sid)
+        if read is None:
+            return None
+        for it in read.items:
+            qty = effective_qty(it)
+            if qty <= 0:
+                continue
+            lines_before += 1
+            raw_jans.add(it.jan_code)
+            jan = await resolve_canonical_jan(session, it.jan_code)
+            merged[jan] += qty
+            if it.name_zh and not first_name.get(jan):
+                first_name[jan] = it.name_zh
+            any_new[jan] = any_new[jan] or bool(it.is_new)
+
+    products = await _product_map(session, list(merged.keys()))
+    items = [
+        CountItem(
+            jan_code=jan,
+            quantity=qty,
+            whole_case=False,
+            case_size=(products[jan].units_per_case if jan in products else None),
+            case_count=None,
+            name_zh=first_name.get(jan) or (products[jan].name_zh if jan in products else None),
+            is_new=any_new[jan] and jan not in products,
+        )
+        for jan, qty in merged.items()
+    ]
+    items.sort(key=lambda x: x.jan_code)
+
+    stats = {
+        "source_sessions": len(session_ids),
+        "lines_before": lines_before,
+        "lines_after": len(items),
+        "total_qty": sum(merged.values()),
+        # 有多少条目的JAN被别名归一到了别的主JAN
+        "alias_merged": len(raw_jans - set(merged.keys())),
+    }
+    return items, stats
 
 
 # ── Excel 导入（sheet=客户/供应商，JAN+数量；逻辑与预留模块一致）───────────────

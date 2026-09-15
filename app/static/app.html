@@ -1180,12 +1180,28 @@ tr:hover td { background: var(--accent-bg); }
       <div class="section-sub">扫码 / 手输 / Excel 收集 (JAN, 数量)，生成通用 JSON 供各模块复用；并出微信报库文本、库存是否够货模拟、装柜前与托盘 QR 对账。全程只读、不改库存。</div>
 
       <!-- 会话条 -->
-      <div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <span id="count-session-label" style="font-size:13px;color:var(--text-dim)">会话：新建中</span>
-        <select id="count-session-pick" onchange="countSwitchSession()" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px"></select>
-        <button class="btn btn-ghost btn-sm" onclick="countNewSession()">新建会话</button>
-        <button class="btn btn-ghost btn-sm" onclick="countClear()">清空</button>
-        <span id="count-save-state" style="font-size:12px;color:var(--text-dim);margin-left:auto"></span>
+      <div class="card">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <span id="count-session-label" style="font-size:13px;color:var(--text-dim)">会话：新建中</span>
+          <select id="count-session-pick" onchange="countSwitchSession()" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px"></select>
+          <input type="text" id="count-session-name" placeholder="会话名（如：9/15 A单）" onchange="countRenameSession()"
+                 style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px;width:150px">
+          <button class="btn btn-ghost btn-sm" onclick="countNewSession()">新建会话</button>
+          <button class="btn btn-ghost btn-sm" onclick="countToggleMergePanel()">合并会话</button>
+          <button class="btn btn-ghost btn-sm" onclick="countDeleteSession()">删除会话</button>
+          <button class="btn btn-ghost btn-sm" onclick="countClear()">清空</button>
+          <span id="count-save-state" style="font-size:12px;color:var(--text-dim);margin-left:auto"></span>
+        </div>
+        <div id="count-merge-panel" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+          <div style="font-size:13px;color:var(--muted);margin-bottom:8px">
+            勾选要合并的会话（同一 JAN 数量自动累加，合并结果存为新会话，原会话保留不动）
+          </div>
+          <div id="count-merge-list" style="max-height:260px;overflow-y:auto"></div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+            <button class="btn btn-primary btn-sm" onclick="countDoMerge()">合并选中</button>
+            <span id="count-merge-hint" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+        </div>
       </div>
 
       <!-- 点数工作台 -->
@@ -5486,6 +5502,7 @@ async function pasteSubtractPallet() {
 
 // ═══ 批量点数模块（数据通信功能）═══════════════════════════════════════════
 let _count = { sessionId: null, items: [], palletCodes: [] };
+let _countSessions = [];   // 会话列表缓存，供合并面板使用
 const _COUNT_LS = 'wms_count_v1';
 let _countSaveTimer = null;
 let _countInited = false;
@@ -5519,21 +5536,108 @@ async function countLoadSessions() {
   const pick = document.getElementById('count-session-pick'); if (!pick) return;
   try {
     const list = await api('GET', '/counting/sessions');
+    _countSessions = list;
     pick.innerHTML = ['<option value="">— 继续已有会话 —</option>']
       .concat(list.map(s => `<option value="${s.id}" ${s.id === _count.sessionId ? 'selected' : ''}>#${s.id} ${esc(s.name || '')} (${s.items.length}项)</option>`)).join('');
+    _countSyncNameBox();
+    if (document.getElementById('count-merge-panel')?.style.display !== 'none') _countRenderMergeList();
   } catch {}
+}
+// 名称输入框跟随当前会话
+function _countSyncNameBox() {
+  const box = document.getElementById('count-session-name'); if (!box) return;
+  const cur = _countSessions.find(x => x.id === _count.sessionId);
+  box.value = cur ? (cur.name || '') : '';
+}
+// 给会话起名——不起名的话合并面板里全是 "#12 (37项)"，根本认不出哪个是哪个单
+async function countRenameSession() {
+  const name = document.getElementById('count-session-name').value.trim();
+  if (!_count.sessionId) { toast('先扫一件商品，会话保存后才能命名', 'warn'); return; }
+  try {
+    await api('PATCH', '/counting/sessions/' + _count.sessionId,
+              { name, items: _count.items.map(_countItemPayload) });
+    toast('会话已命名', 'ok');
+    countLoadSessions();
+  } catch (e) { toast(e.message, 'err'); }
+}
+async function countDeleteSession() {
+  if (!_count.sessionId) { toast('当前是新建中的会话，无需删除', 'info'); return; }
+  const cur = _countSessions.find(x => x.id === _count.sessionId);
+  if (!confirm(`确认删除会话 #${_count.sessionId}${cur && cur.name ? ' ' + cur.name : ''}？删除后不可恢复。`)) return;
+  try {
+    await api('DELETE', '/counting/sessions/' + _count.sessionId);
+    toast('会话已删除', 'ok');
+    _count.sessionId = null; _count.items = [];
+    _countPersistLocal(); _countRender(); countLoadSessions();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ── 多会话合并 ──────────────────────────────────────────────────────────────
+function countToggleMergePanel() {
+  const el = document.getElementById('count-merge-panel');
+  const show = el.style.display === 'none';
+  el.style.display = show ? '' : 'none';
+  if (show) { countLoadSessions(); _countRenderMergeList(); }
+}
+function _countRenderMergeList() {
+  const el = document.getElementById('count-merge-list'); if (!el) return;
+  if (!_countSessions.length) { el.innerHTML = '<div style="color:var(--muted);font-size:13px">还没有已保存的会话</div>'; return; }
+  el.innerHTML = '<div style="overflow-x:auto"><table class="table"><thead><tr>'
+    + '<th style="width:32px"><input type="checkbox" onchange="countMergeToggleAll(this.checked)"></th>'
+    + '<th>会话</th><th>名称</th><th style="text-align:center">条目</th><th>更新时间</th>'
+    + '</tr></thead><tbody>'
+    + _countSessions.map(x => `<tr>
+        <td><input type="checkbox" class="count-merge-chk" data-id="${x.id}" onchange="_countMergeHint()"></td>
+        <td><code style="font-size:12px">#${x.id}</code>${x.id === _count.sessionId ? ' <span class="badge badge-neutral">当前</span>' : ''}</td>
+        <td style="font-size:13px">${esc(x.name || '—')}</td>
+        <td style="text-align:center">${x.items.length}</td>
+        <td style="font-size:12px;color:var(--muted)">${fmtDate(x.updated_at)}</td>
+      </tr>`).join('')
+    + '</tbody></table></div>';
+  _countMergeHint();
+}
+function countMergeToggleAll(on) {
+  document.querySelectorAll('.count-merge-chk').forEach(c => { c.checked = on; });
+  _countMergeHint();
+}
+function _countMergeSelectedIds() {
+  return [...document.querySelectorAll('.count-merge-chk')].filter(c => c.checked).map(c => +c.dataset.id);
+}
+function _countMergeHint() {
+  const ids = _countMergeSelectedIds();
+  const el = document.getElementById('count-merge-hint'); if (!el) return;
+  el.textContent = ids.length < 2 ? '至少选 2 个会话' : `已选 ${ids.length} 个会话`;
+}
+async function countDoMerge() {
+  const ids = _countMergeSelectedIds();
+  if (ids.length < 2) { toast('至少选 2 个会话才能合并', 'err'); return; }
+  try {
+    const r = await api('POST', '/counting/sessions/merge', { session_ids: ids });
+    // 合并结果就是个普通会话，切过去后扫码/改数量/删行全部照常可用
+    _count.sessionId = r.session.id;
+    _count.items = r.session.items.map(it => ({ ...it }));
+    _countPersistLocal(); _countRender(); countLoadSessions();
+    document.getElementById('count-merge-panel').style.display = 'none';
+    let msg = `已合并 ${r.source_sessions} 个会话 → ${r.lines_after} 个SKU / 共 ${r.total_qty} 件`;
+    if (r.alias_merged) msg += `（${r.alias_merged} 个别名JAN已归并到主JAN）`;
+    toast(msg, 'ok');
+    if (r.lines_after > 50) {
+      toast(`SKU 超过 50，秦丝回填会自动拆成 ${Math.ceil(r.lines_after / 50)} 张草稿`, 'warn');
+    }
+  } catch (e) { toast('合并失败：' + e.message, 'err'); }
 }
 async function countSwitchSession() {
   const id = +document.getElementById('count-session-pick').value; if (!id) return;
   try {
     const s = await api('GET', '/counting/sessions/' + id);
     _count.sessionId = s.id; _count.items = s.items.map(it => ({ ...it }));
-    _countPersistLocal(); _countRender(); toast('已切换到会话 #' + id, 'ok');
+    _countPersistLocal(); _countRender(); _countSyncNameBox(); toast('已切换到会话 #' + id, 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 function countNewSession() {
   _count.sessionId = null; _count.items = [];
   _countPersistLocal(); _countRender(); countLoadSessions();
+  const nb = document.getElementById('count-session-name'); if (nb) nb.value = '';
   toast('已开新会话（首次保存时创建）', 'info');
 }
 function countClear() {
@@ -5581,7 +5685,18 @@ async function _countAddCode(code, qty) {
     // 以箱为单位：同 JAN 的整箱行 → 箱数 +qty；无则新建整箱行（数量=箱入数×箱数）
     const ex = _count.items.find(it => it.jan_code === jan && it.whole_case);
     if (ex) { ex.case_count = (+ex.case_count || 0) + qty; ex.quantity = (+ex.case_size || 0) * (+ex.case_count); }
-    else _count.items.push({ jan_code: jan, quantity: (+units || 0) * qty, whole_case: true, case_size: units, case_count: qty, name_zh, is_new });
+    else {
+      // 已有同 JAN 的按件行（合并会话后所有行都是按件）→ 换算成件数并进去，
+      // 不另起一行；否则同一个 JAN 会出现两行，报库和回填都会重复列出
+      const exPiece = _count.items.find(it => it.jan_code === jan && !it.whole_case);
+      const box = +(units || exPiece?.case_size || 0);
+      if (exPiece && box > 0) {
+        exPiece.quantity = (+exPiece.quantity || 0) + box * qty;
+        toast(`已按 ${box}/箱 换算成 ${box * qty} 件，并入已有行`, 'info');
+      } else {
+        _count.items.push({ jan_code: jan, quantity: (+units || 0) * qty, whole_case: true, case_size: units, case_count: qty, name_zh, is_new });
+      }
+    }
   } else {
     // 按件：同 JAN 的非整箱行 → 数量 +qty；无则新建
     const ex = _count.items.find(it => it.jan_code === jan && !it.whole_case);
