@@ -547,6 +547,7 @@ class RakutenOrderDraftDocument(BaseModel):
 class RakutenOrderMutation(BaseModel):
     jan_code: str
     quantity: int
+    remaining_qty: int = 0   # 本次扣减后乐天仓库的剩余库存
     transaction: StockTransactionRead
     low_stock_alert: LowStockAlertRead | None = None
 

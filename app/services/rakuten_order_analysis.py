@@ -367,6 +367,8 @@ async def apply_rakuten_order_draft(
         mutations.append(RakutenOrderMutation(
             jan_code=item.jan_code,
             quantity=item.ordered_qty,
+            # 扣减后该桶的实时余量（此时尚未 commit，record 已在内存中扣好）
+            remaining_qty=result.record.quantity,
             transaction=StockTransactionRead.model_validate(result.transaction),
             low_stock_alert=result.low_stock_alert,
         ))

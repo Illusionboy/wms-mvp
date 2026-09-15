@@ -2698,8 +2698,17 @@ function renderOAApplyResult(res) {
   let html = `<div class="card" style="border-left:3px solid #16a34a;padding:10px 14px;margin-bottom:12px">
     <div style="font-weight:600;margin-bottom:8px">出库结果：${res.mutations.length} 条成功${res.skipped_duplicates ? `，${res.skipped_duplicates} 条已跳过（重复）` : ''}</div>`;
   if (res.mutations.length) {
-    html += `<table class="table"><thead><tr><th>JAN</th><th>数量</th></tr></thead><tbody>
-      ${res.mutations.map(m => `<tr><td><code style="font-size:12px">${esc(m.jan_code)}</code></td><td style="text-align:center">${m.quantity}</td></tr>`).join('')}
+    html += `<table class="table"><thead><tr><th>JAN</th><th style="text-align:center">出库量</th><th style="text-align:center">剩余量</th></tr></thead><tbody>
+      ${res.mutations.map(m => {
+        const rq = m.remaining_qty ?? 0;
+        // 出完就没了(<=0) 标红提醒，便于当场判断要不要补货/调库
+        const color = rq <= 0 ? 'var(--danger)' : 'inherit';
+        return `<tr>
+          <td><code style="font-size:12px">${esc(m.jan_code)}</code></td>
+          <td style="text-align:center">${m.quantity}</td>
+          <td style="text-align:center;color:${color};font-weight:600">${rq}</td>
+        </tr>`;
+      }).join('')}
     </tbody></table>`;
   }
   html += '</div>';
