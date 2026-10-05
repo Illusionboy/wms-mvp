@@ -1246,7 +1246,7 @@ tr:hover td { background: var(--accent-bg); }
             <input type="text" id="count-wx-party" placeholder="输入自动匹配秦丝对方…" autocomplete="off" oninput="wxPartySearch()" onblur="setTimeout(wxPartyHide,200)">
             <div id="wx-party-dd" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:var(--surface);border:1px solid var(--border);border-radius:6px;max-height:220px;overflow:auto;box-shadow:0 4px 12px rgba(0,0,0,.15)"></div>
           </div>
-          <div class="form-row" style="margin:0"><label>仓库（回填用）</label><select id="qbf-wh"><option>普通仓库</option><option>乐天仓库</option></select></div>
+          <div class="form-row" style="margin:0"><label>仓库（回填用）</label><select id="qbf-wh"></select></div>
         </div>
         <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" style="margin:0" onclick="countBuildWx()">生成微信报库文本</button>
@@ -5528,6 +5528,16 @@ async function countInit() {
   }
   const wh = document.getElementById('count-sim-wh');
   if (wh) wh.innerHTML = _warehouses.map(w => `<option value="${w.id}">${esc(w.name)}</option>`).join('');
+  // 回填仓库下拉动态生成（新开仓库自动出现）。注意仍把默认值钉在「普通仓库」——
+  // 按 id 排序的话默认会变成乐天仓库，操作员不留意就会把草稿回填到错仓库。
+  const bw = document.getElementById('qbf-wh');
+  if (bw) {
+    const keep = bw.value;
+    bw.innerHTML = _warehouses.map(w => `<option>${esc(w.name)}</option>`).join('');
+    const names = _warehouses.map(w => w.name);
+    bw.value = (keep && names.includes(keep)) ? keep
+             : (names.includes('普通仓库') ? '普通仓库' : (names[0] || ''));
+  }
   const dt = document.getElementById('count-wx-date'); if (dt && !dt.value) dt.value = _todayStr();
   countLoadSessions();
   _countRender();

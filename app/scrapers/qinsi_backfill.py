@@ -73,10 +73,13 @@ _QS_DELIVERY_NAME = "顺丰速递"
 _QS_WMS_CLIENT_ID = 52535444    # WMS回填 客户（出库对方）
 _QS_WMS_SUPPLIER_ID = 3810010   # WMS回填 供应商（入库对方，与客户id不同）
 # 前端仓库名(WMS/秦丝均可) → 秦丝 depot（id + 秦丝名）。
+# WMS 仓库名(及秦丝原名别名) → 秦丝 depotId。新开仓库要在这里登记才能回填草稿。
+# depotId 可用秦丝接口 POST /gis/admin/inner/storehouse/storehouseSelectJSON.ac 查到。
 _QS_DEPOT = {
     "普通仓库": {"id": 283425, "name": "北津守仓库"},
     "北津守仓库": {"id": 283425, "name": "北津守仓库"},
     "乐天仓库": {"id": 1348869, "name": "乐天仓库"},
+    "大阪一号店": {"id": 1415092, "name": "大阪一号店"},
 }
 _QS_API_HEADERS = {
     "Origin": _QS_BASE, "qs-pcversion": "3.6.5",
