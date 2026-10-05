@@ -277,6 +277,119 @@ async def _fetch_purchases(
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+# 按单号拉取单据明细（供批量点数「从秦丝单号建会话」用）
+# ---------------------------------------------------------------------------
+
+# 秦丝单号前缀 → 方向。实测：出库(批发)=XS…，入库(采购)=CG…
+_SN_PREFIX_KIND = {"XS": "out", "CG": "in"}
+_KIND_API = {
+    "out": ("/inner/sale/wholesaleOrdersGet.ac", "ordersSn"),
+    "in": ("/inner/orders/purchase/purchaseGet.ac", "purchaseSn"),
+}
+
+
+def guess_order_kind(sn: str) -> str | None:
+    """按单号前缀猜方向；猜不出返回 None（调用方会两个接口都试）。"""
+    return _SN_PREFIX_KIND.get(str(sn).strip().upper()[:2])
+
+
+async def _fetch_order_detail(client: httpx.AsyncClient, sn: str, kind: str) -> dict | None:
+    """取一张单的明细。单号与方向不匹配时秦丝返回 statusCode=0（不报错），此时返回 None。"""
+    path, key = _KIND_API[kind]
+    try:
+        d = await _post_json(client, path, {key: sn})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fetch order %s (%s) failed: %s", sn, kind, exc)
+        return None
+    if d.get("statusCode") != 1 or not d.get("orderGoods"):
+        return None
+    return d
+
+
+async def fetch_order_items(order_sns: list[str]) -> dict:
+    """按单号（可多张）拉取秦丝单据的 JAN+数量。**草稿单同样可查**（实测）。
+
+    返回 {"success", "error", "needs_relogin", "direction", "orders": [...],
+          "items": [{jan_code, quantity, name}], "skipped": [...]}
+    多张单时同 JAN 数量累加；要求所有单方向一致（出库/入库不能混）。
+    """
+    out: dict = {"success": False, "error": None, "needs_relogin": False,
+                 "direction": None, "orders": [], "items": [], "skipped": []}
+    sns = [s.strip() for s in order_sns if s and s.strip()]
+    if not sns:
+        out["error"] = "请填写秦丝单号"
+        return out
+
+    cookies = _load_cookies()
+    if not cookies:
+        out["error"] = "未找到秦丝登录 session，请先刷新秦丝会话"
+        out["needs_relogin"] = True
+        return out
+
+    merged: dict[str, int] = {}
+    names: dict[str, str] = {}
+    async with httpx.AsyncClient(cookies=cookies, follow_redirects=True, timeout=30) as client:
+        if not await _check_auth(client):
+            out["error"] = "秦丝 session 已过期，请重新授权登录"
+            out["needs_relogin"] = True
+            return out
+
+        for sn in sns:
+            guessed = guess_order_kind(sn)
+            # 先按前缀猜；猜错或猜不出就把另一个方向也试一遍
+            tries = [guessed] if guessed else []
+            tries += [k for k in ("out", "in") if k not in tries]
+            detail, kind = None, None
+            for k in tries:
+                detail = await _fetch_order_detail(client, sn, k)
+                if detail is not None:
+                    kind = k
+                    break
+            if detail is None:
+                out["skipped"].append({"order_sn": sn, "reason": "秦丝里查不到这个单号（出库/入库都试过了）"})
+                continue
+
+            if out["direction"] is None:
+                out["direction"] = kind
+            elif out["direction"] != kind:
+                out["error"] = (f"单号 {sn} 是{'出库' if kind == 'out' else '入库'}单，"
+                                f"与前面的{'出库' if out['direction'] == 'out' else '入库'}单方向不一致，不能混在一起")
+                return out
+
+            order = detail.get("order") or {}
+            out["orders"].append({
+                "order_sn": sn,
+                "direction": kind,
+                "warehouse_name": order.get("depotName") or "",
+                "counterparty": order.get("clientName") or order.get("supplierName") or "",
+                "date": _epoch_to_date(order.get("businessTime") or order.get("createTime")),
+                "goods_count": len(detail.get("orderGoods", [])),
+            })
+
+            for g in detail.get("orderGoods", []):
+                jan = _clean_jan(str(g.get("goodsSn") or g.get("barCode") or ""))
+                try:
+                    qty = int(float(g.get("quantity") or 0))
+                except (TypeError, ValueError):
+                    qty = 0
+                if not jan or qty <= 0:
+                    out["skipped"].append({
+                        "order_sn": sn,
+                        "reason": f"跳过一行（JAN={g.get('goodsSn')!r} 数量={g.get('quantity')!r}）",
+                    })
+                    continue
+                merged[jan] = merged.get(jan, 0) + qty
+                names.setdefault(jan, str(g.get("goodName") or ""))
+
+    out["items"] = [{"jan_code": j, "quantity": q, "name": names.get(j, "")}
+                    for j, q in sorted(merged.items())]
+    out["success"] = bool(out["items"])
+    if not out["success"] and not out["error"]:
+        out["error"] = "这些单号里没有可用的商品行"
+    return out
+
+
+# ---------------------------------------------------------------------------
 
 async def scrape_stock_records(
     from_date: date,

@@ -45,6 +45,20 @@ class MergeSessionsResult(BaseModel):
     alias_merged: int      # 有多少个JAN因别名归一被并到了主JAN
 
 
+class FromQinsiRequest(BaseModel):
+    """按秦丝单号（可多张，含草稿）拉明细建一个新的点数会话。"""
+    order_sns: list[str] = Field(min_length=1)
+
+
+class FromQinsiResult(BaseModel):
+    session: "CountSessionRead"
+    direction: str                 # out=出库(批发单) / in=入库(采购单)
+    orders: list[dict] = Field(default_factory=list)
+    lines: int                     # 合并后的 SKU 数
+    total_qty: int
+    skipped: list[dict] = Field(default_factory=list)
+
+
 class CountSessionRead(BaseModel):
     id: int
     name: str | None
@@ -119,3 +133,4 @@ class PalletCheckResult(BaseModel):
 
 
 MergeSessionsResult.model_rebuild()
+FromQinsiResult.model_rebuild()

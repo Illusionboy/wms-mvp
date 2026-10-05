@@ -9,8 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_admin
 from app.db.session import get_db_session
 from app.schemas.count_session import (
+    CountItem,
     CountSessionRead,
     CountSessionUpsert,
+    FromQinsiRequest,
+    FromQinsiResult,
     ImportResult,
     MergeSessionsRequest,
     MergeSessionsResult,
@@ -104,6 +107,48 @@ async def merge_sessions(
         items=items, created_by=current_user.id,
     )
     return MergeSessionsResult(session=new_session, **stats)
+
+
+@router.post("/sessions/from-qinsi", response_model=FromQinsiResult)
+async def session_from_qinsi(
+    payload: FromQinsiRequest,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_admin),
+) -> FromQinsiResult:
+    """按秦丝单号拉取出库/入库单（**含草稿**）的 JAN+数量，建成一个新的点数会话。
+
+    多张单会合并成一个会话（同 JAN 累加），但方向必须一致（出库单不能和入库单混）。
+    只读秦丝，不改秦丝任何数据。
+    """
+    from app.scrapers.qinsi_scraper import fetch_order_items
+
+    r = await fetch_order_items(payload.order_sns)
+    if not r["success"]:
+        raise HTTPException(
+            status_code=409 if r.get("needs_relogin") else 400,
+            detail=r.get("error") or "拉取失败",
+        )
+
+    items = [
+        CountItem(jan_code=it["jan_code"], quantity=it["quantity"],
+                  whole_case=False, name_zh=it.get("name") or None)
+        for it in r["items"]
+    ]
+    sns = [o["order_sn"] for o in r["orders"]]
+    label = "出库" if r["direction"] == "out" else "入库"
+    name = f"秦丝{label} {sns[0]}" + (f" 等{len(sns)}单" if len(sns) > 1 else "")
+    new_session = await svc.create_session(
+        session, name=name[:255], note=f"来自秦丝单号：{', '.join(sns)}",
+        items=items, created_by=current_user.id,
+    )
+    return FromQinsiResult(
+        session=new_session,
+        direction=r["direction"],
+        orders=r["orders"],
+        lines=len(items),
+        total_qty=sum(i.quantity for i in items),
+        skipped=r["skipped"],
+    )
 
 
 @router.delete("/sessions/{session_id}")

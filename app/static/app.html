@@ -1187,10 +1187,23 @@ tr:hover td { background: var(--accent-bg); }
           <input type="text" id="count-session-name" placeholder="会话名（如：9/15 A单）" onchange="countRenameSession()"
                  style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px;width:150px">
           <button class="btn btn-ghost btn-sm" onclick="countNewSession()">新建会话</button>
+          <button class="btn btn-ghost btn-sm" onclick="countToggleQsPanel()">从秦丝单号</button>
           <button class="btn btn-ghost btn-sm" onclick="countToggleMergePanel()">合并会话</button>
           <button class="btn btn-ghost btn-sm" onclick="countDeleteSession()">删除会话</button>
           <button class="btn btn-ghost btn-sm" onclick="countClear()">清空</button>
           <span id="count-save-state" style="font-size:12px;color:var(--text-dim);margin-left:auto"></span>
+        </div>
+        <div id="count-qs-panel" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+          <div style="font-size:13px;color:var(--muted);margin-bottom:8px">
+            输入秦丝单号（出库 XS… / 入库 CG…，<b>草稿单也能拉</b>）。多张单用空格或换行分隔，会合并成一个会话（同 JAN 累加），但出库单和入库单不能混。只读秦丝，不改那边任何数据。
+          </div>
+          <textarea id="count-qs-sn" rows="2" placeholder="例：CG2610050954015872&#10;可一行一个，支持多张"
+            style="width:100%;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:12px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"></textarea>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+            <button class="btn btn-primary btn-sm" id="count-qs-btn" onclick="countFromQinsi()">拉取并建会话</button>
+            <span id="count-qs-hint" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+          <div id="count-qs-result" style="margin-top:10px"></div>
         </div>
         <div id="count-merge-panel" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
           <div style="font-size:13px;color:var(--muted);margin-bottom:8px">
@@ -5580,6 +5593,57 @@ async function countDeleteSession() {
     _count.sessionId = null; _count.items = [];
     _countPersistLocal(); _countRender(); countLoadSessions();
   } catch (e) { toast(e.message, 'err'); }
+}
+
+// ── 从秦丝单号建会话 ────────────────────────────────────────────────────────
+// 按单号拉秦丝出库/入库单(含草稿)的 JAN+数量，直接建成新会话。
+function countToggleQsPanel() {
+  const el = document.getElementById('count-qs-panel');
+  el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+async function countFromQinsi() {
+  const raw = document.getElementById('count-qs-sn').value.trim();
+  const sns = raw.split(/[\s,，;；]+/).map(x => x.trim()).filter(Boolean);
+  if (!sns.length) { toast('请填写秦丝单号', 'err'); return; }
+  const btn = document.getElementById('count-qs-btn');
+  const hint = document.getElementById('count-qs-hint');
+  const out = document.getElementById('count-qs-result');
+  btn.disabled = true; btn.textContent = '拉取中…'; hint.textContent = '';
+  out.innerHTML = '';
+  try {
+    const r = await api('POST', '/counting/sessions/from-qinsi', { order_sns: sns });
+    // 结果就是个普通会话，切过去后扫码/改数量/合并全部照常
+    _count.sessionId = r.session.id;
+    _count.items = r.session.items.map(it => ({ ...it }));
+    _countPersistLocal(); _countRender(); countLoadSessions();
+    document.getElementById('count-qs-panel').style.display = 'none';
+    document.getElementById('count-qs-sn').value = '';
+    const label = r.direction === 'out' ? '出库' : '入库';
+    toast(`已从秦丝${label}单建会话：${r.lines} 个SKU / 共 ${r.total_qty} 件`, 'ok');
+    let html = `<div class="card" style="border-left:3px solid #16a34a;padding:10px 14px">
+      <div style="font-weight:600;margin-bottom:6px">秦丝${esc(label)}单 · ${r.lines} 个SKU / 共 ${r.total_qty} 件</div>
+      <table class="table"><thead><tr><th>单号</th><th>仓库</th><th>对方</th><th>日期</th><th style="text-align:center">商品行</th></tr></thead><tbody>
+      ${r.orders.map(o => `<tr>
+        <td><code style="font-size:12px">${esc(o.order_sn)}</code></td>
+        <td>${esc(o.warehouse_name || '—')}</td>
+        <td>${esc(o.counterparty || '—')}</td>
+        <td>${esc(o.date || '—')}</td>
+        <td style="text-align:center">${o.goods_count}</td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+    if (r.skipped && r.skipped.length) {
+      html += `<div class="card" style="border-left:3px solid #d97706;padding:10px 14px;margin-top:8px">
+        <div style="font-weight:600;color:#d97706;margin-bottom:6px">已跳过 ${r.skipped.length} 项</div>
+        <div style="font-size:12px;color:var(--muted)">${r.skipped.map(x => esc(x.order_sn + '：' + x.reason)).join('<br>')}</div>
+      </div>`;
+    }
+    out.innerHTML = html;
+  } catch (e) {
+    toast('拉取失败：' + e.message, 'err');
+    out.innerHTML = resultCard('err', e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '拉取并建会话';
+  }
 }
 
 // ── 多会话合并 ──────────────────────────────────────────────────────────────
