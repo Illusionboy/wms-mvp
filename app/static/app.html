@@ -1348,6 +1348,28 @@ tr:hover td { background: var(--accent-bg); }
         </div>
       </div>
 
+      <!-- 调库（调拨单）同步 -->
+      <div class="card" style="margin-top:12px">
+        <div class="card-title">调库（秦丝调拨单）</div>
+        <div class="section-sub" style="margin:-4px 0 10px">
+          把秦丝的调拨单写成 WMS 调库（出库+入库各一笔）。只取<b>已完成</b>的单，草稿不同步。
+          单号 DB 开头，与出入库(XS/CG)不重叠，不会重复计数。
+          <b>⚠ 仓库两边都可能操作</b>：疑似与 WMS 既有手工调库重复的单会默认不勾选并标黄，请核对后再写入。
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+          <div class="form-row" style="margin:0"><label>开始日期</label><input type="date" id="qst-from"></div>
+          <div class="form-row" style="margin:0"><label>结束日期</label><input type="date" id="qst-to"></div>
+          <button class="btn btn-primary btn-sm" id="qst-scan-btn" style="margin-bottom:0" onclick="qstScan()">预览调拨单</button>
+          <span id="qst-hint" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+        <div id="qst-list"></div>
+        <div id="qst-actions" style="display:none;gap:8px;align-items:center;margin-top:10px">
+          <button class="btn btn-primary btn-sm" id="qst-apply-btn" onclick="qstApply()">写入选中的调库</button>
+          <span id="qst-sel" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+        <div id="qst-result" style="margin-top:10px"></div>
+      </div>
+
       <div id="qs-result-area" style="display:none">
         <hr class="divider">
         <!-- Warehouse filter tabs -->
@@ -4259,6 +4281,96 @@ function _groupByOrder(records) {
     map.get(key).items.push(r);
   }
   return [...map.values()];
+}
+
+// ── 秦丝调库（调拨单）同步 ──────────────────────────────────────────────────
+let _qstOrders = [];
+async function qstScan() {
+  const f = _cval('qst-from'), t = _cval('qst-to');
+  if (!f || !t) { toast('请选择日期范围', 'err'); return; }
+  const btn = document.getElementById('qst-scan-btn');
+  btn.disabled = true; btn.textContent = '拉取中…';
+  document.getElementById('qst-result').innerHTML = '';
+  try {
+    const r = await api('POST', '/qinsi/transfers/scrape', { from_date: f, to_date: t });
+    _qstOrders = r.orders || [];
+    qstRender(r);
+  } catch (e) {
+    toast('拉取失败：' + e.message, 'err');
+    document.getElementById('qst-list').innerHTML = resultCard('err', e.message);
+  } finally { btn.disabled = false; btn.textContent = '预览调拨单'; }
+}
+function qstRender(r) {
+  const el = document.getElementById('qst-list');
+  const acts = document.getElementById('qst-actions');
+  if (!_qstOrders.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">该区间没有可同步的调拨单</div>';
+    acts.style.display = 'none'; return;
+  }
+  document.getElementById('qst-hint').textContent =
+    `共 ${r.total_orders} 张` + (r.suspected_duplicates ? `，其中 ${r.suspected_duplicates} 张疑似重复` : '');
+  el.innerHTML = '<div style="overflow-x:auto"><table class="table"><thead><tr>'
+    + '<th style="width:32px"><input type="checkbox" onchange="qstToggleAll(this.checked)"></th>'
+    + '<th>单号</th><th>日期</th><th>路线</th><th style="text-align:center">SKU</th>'
+    + '<th style="text-align:center">件数</th><th>状态</th></tr></thead><tbody>'
+    + _qstOrders.map((o, i) => {
+        const bad = !!o.blocked;
+        const dup = o.suspected_duplicate;
+        const done = o.pending_lines === 0;
+        const dis = bad || done;
+        const bg = dup ? 'background:#fffbeb' : (bad ? 'background:var(--danger-bg)' : '');
+        let st = '<span class="badge badge-ok">可同步</span>';
+        if (bad) st = `<span class="badge badge-danger">${esc(o.blocked)}</span>`;
+        else if (done) st = '<span class="badge badge-neutral">已全部同步</span>';
+        else if (dup) st = '<span class="badge badge-warn">⚠ 疑似与WMS手工调库重复</span>';
+        return `<tr style="${bg}">
+          <td><input type="checkbox" class="qst-chk" data-i="${i}" ${dis || dup ? '' : 'checked'} ${dis ? 'disabled' : ''} onchange="qstSel()"></td>
+          <td><code style="font-size:11px">${esc(o.order_sn)}</code></td>
+          <td style="font-size:12px">${esc(o.date)}</td>
+          <td style="font-size:12px">${esc(o.from_warehouse_wms || o.out_warehouse)} → ${esc(o.to_warehouse_wms || o.in_warehouse)}</td>
+          <td style="text-align:center">${o.items.length}</td>
+          <td style="text-align:center">${o.total_qty}</td>
+          <td>${st}</td>
+        </tr>`;
+      }).join('')
+    + '</tbody></table></div>';
+  acts.style.display = 'flex';
+  qstSel();
+}
+function qstToggleAll(on) {
+  document.querySelectorAll('.qst-chk:not([disabled])').forEach(c => { c.checked = on; });
+  qstSel();
+}
+function _qstSelected() {
+  return [...document.querySelectorAll('.qst-chk')].filter(c => c.checked).map(c => _qstOrders[+c.dataset.i]);
+}
+function qstSel() {
+  const sel = _qstSelected();
+  document.getElementById('qst-sel').textContent =
+    sel.length ? `已选 ${sel.length} 张 / 共 ${sel.reduce((a, o) => a + o.total_qty, 0)} 件` : '未选';
+}
+async function qstApply() {
+  const sel = _qstSelected();
+  if (!sel.length) { toast('请先勾选要写入的调拨单', 'err'); return; }
+  const qty = sel.reduce((a, o) => a + o.total_qty, 0);
+  if (!confirm(`确认写入 ${sel.length} 张调拨单 / 共 ${qty} 件？将按出库+入库写入真实库存变动。`)) return;
+  const btn = document.getElementById('qst-apply-btn');
+  btn.disabled = true; btn.textContent = '写入中…';
+  try {
+    const r = await api('POST', '/qinsi/transfers/apply', { orders: sel });
+    let html = resultCard('ok', `✓ 已写入 ${r.applied_orders} 张调拨单，共 ${r.applied_lines} 行`);
+    if (r.skipped && r.skipped.length) html += resultCard('warn', `${r.skipped.length} 行已同步过，自动跳过`);
+    if (r.errors && r.errors.length) {
+      html += resultCard('err', `${r.errors.length} 行失败：` +
+        r.errors.slice(0, 6).map(e => `${e.order_sn}/${e.jan_code || ''} ${e.error}`).join('；'));
+    }
+    document.getElementById('qst-result').innerHTML = html;
+    toast(`调库写入完成：${r.applied_lines} 行`, 'ok');
+    qstScan();
+  } catch (e) {
+    document.getElementById('qst-result').innerHTML = resultCard('err', e.message);
+    toast('写入失败：' + e.message, 'err');
+  } finally { btn.disabled = false; btn.textContent = '写入选中的调库'; }
 }
 
 async function checkQinsiAuth() {
