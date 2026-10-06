@@ -34,8 +34,29 @@ def _effective_date():
 
 
 async def _warehouse_ids(session: AsyncSession) -> dict[str, int]:
+    """秦丝仓库名 → WMS 仓库 id。
+
+    必须走 QINSI_WAREHOUSE_MAP：秦丝叫「北津守仓库」，WMS 里叫「普通仓库」，
+    直接拿秦丝名查 WMS 会全部查不到。
+    """
+    from app.core.config import settings
+
     rows = (await session.scalars(select(Warehouse))).all()
-    return {w.name: w.id for w in rows}
+    by_wms_name = {w.name: w.id for w in rows}
+    qs_map: dict[str, str] = settings.qinsi_warehouse_map or {}
+
+    out = dict(by_wms_name)          # WMS 名本身也认（两边同名时直接命中）
+    for qs_name, wms_name in qs_map.items():
+        if wms_name in by_wms_name:
+            out[qs_name] = by_wms_name[wms_name]
+    return out
+
+
+def _wms_name(qs_name: str) -> str:
+    """秦丝仓库名 → WMS 仓库名（仅用于展示/备注）。"""
+    from app.core.config import settings
+
+    return (settings.qinsi_warehouse_map or {}).get(qs_name, qs_name)
 
 
 async def _already_synced(session: AsyncSession, order_sn: str, jans: list[str]) -> set[str]:
@@ -116,9 +137,9 @@ async def annotate_orders(session: AsyncSession, orders: list[dict]) -> list[dic
 
         blocked = None
         if from_id is None:
-            blocked = f"WMS 里没有仓库「{o['out_warehouse']}」（调出仓未映射）"
+            blocked = f"调出仓「{o['out_warehouse']}」在 QINSI_WAREHOUSE_MAP 里没有对应的 WMS 仓库"
         elif to_id is None:
-            blocked = f"WMS 里没有仓库「{o['in_warehouse']}」（调入仓未映射）"
+            blocked = f"调入仓「{o['in_warehouse']}」在 QINSI_WAREHOUSE_MAP 里没有对应的 WMS 仓库"
         elif from_id == to_id:
             blocked = "调出仓与调入仓映射到了同一个 WMS 仓库"
 
@@ -126,6 +147,8 @@ async def annotate_orders(session: AsyncSession, orders: list[dict]) -> list[dic
             **o,
             "from_warehouse_id": from_id,
             "to_warehouse_id": to_id,
+            "from_warehouse_wms": _wms_name(o["out_warehouse"]),
+            "to_warehouse_wms": _wms_name(o["in_warehouse"]),
             "blocked": blocked,
             "already_synced": sorted(synced),
             "duplicate_jans": dup_jans,
@@ -164,7 +187,8 @@ async def apply_transfers(
                     StockTransferCreate(
                         sku=jan, from_warehouse_id=from_id, to_warehouse_id=to_id,
                         quantity=qty, transaction_date=day,
-                        note=f"秦丝调拨单 {sn}：{o['out_warehouse']} → {o['in_warehouse']}",
+                        note=(f"秦丝调拨单 {sn}："
+                              f"{_wms_name(o['out_warehouse'])} → {_wms_name(o['in_warehouse'])}"),
                     ),
                     user_id=user_id,
                     source=TRANSFER_SOURCE,
