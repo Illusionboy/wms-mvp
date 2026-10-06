@@ -277,6 +277,115 @@ async def _fetch_purchases(
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+# 调拨单（调库）拉取
+# ---------------------------------------------------------------------------
+
+_TRANSFER_LIST = "/inner/storehouse/storeTransferOrder/storeTransferOrderListJSON.ac"
+_TRANSFER_GET = "/inner/storehouse/storeTransferOrder/storeTransferOrderGet.ac"
+# 实测 status: 2=已完成(203张), 1=草稿(10张)。只同步已完成的。
+_TRANSFER_DONE_STATUS = 2
+
+
+async def fetch_transfer_orders(from_date: date, to_date: date) -> dict:
+    """拉取秦丝调拨单（调库）。单号 DB 开头，与出库XS/入库CG 完全不重叠，不会重复计数。
+
+    ⚠ 数量只能取明细行：列表里的 outNumber/inNumber 只是**第一行**的数量，
+    总数在 transferNumber。实测 DB2610061803016898 列表 outNumber=528，
+    而 4 行明细之和是 1284。照列表的数字做会严重少算。
+
+    返回 {"success", "error", "needs_relogin", "orders": [
+        {order_sn, out_warehouse, in_warehouse, date, status,
+         items: [{jan_code, quantity, name}]}
+    ], "skipped": [...]}
+    """
+    out: dict = {"success": False, "error": None, "needs_relogin": False,
+                 "orders": [], "skipped": []}
+    cookies = _load_cookies()
+    if not cookies:
+        out["error"] = "未找到秦丝登录 session，请先刷新秦丝会话"
+        out["needs_relogin"] = True
+        return out
+
+    f_str, t_str = from_date.strftime("%Y-%m-%d"), to_date.strftime("%Y-%m-%d")
+    async with httpx.AsyncClient(cookies=cookies, follow_redirects=True, timeout=30) as client:
+        if not await _check_auth(client):
+            out["error"] = "秦丝 session 已过期，请重新授权登录"
+            out["needs_relogin"] = True
+            return out
+
+        # 列表按时间倒序分页；客户端按业务日期过滤（不猜它的日期参数名，稳）
+        rows: list[dict] = []
+        page = 1
+        while True:
+            try:
+                data = await _get_json(client, _TRANSFER_LIST, {
+                    "rows": _PAGE_SIZE, "page": page,
+                    "sidx": "", "sord": "desc", "_search": "false",
+                })
+            except Exception as exc:  # noqa: BLE001
+                out["error"] = f"拉取调拨单列表失败: {exc}"
+                return out
+            batch = data.get("rows", [])
+            if not batch:
+                break
+            rows += batch
+            oldest = min((r.get("businessTime") or 0) for r in batch)
+            # 倒序：本页最旧的已早于起始日 → 后面都更旧，停
+            if oldest and _epoch_to_date(oldest) < f_str:
+                break
+            if page >= data.get("total", 1):
+                break
+            page += 1
+
+        for r in rows:
+            sn = r.get("orderNo") or ""
+            day = _epoch_to_date(r.get("businessTime") or r.get("createTime"))
+            if not sn or not (f_str <= day <= t_str):
+                continue
+            if r.get("status") != _TRANSFER_DONE_STATUS:
+                out["skipped"].append({"order_sn": sn, "reason": f"非已完成状态(status={r.get('status')})，跳过草稿"})
+                continue
+
+            try:
+                detail = await _post_json(client, _TRANSFER_GET, {"orderNo": sn})
+            except Exception as exc:  # noqa: BLE001
+                out["skipped"].append({"order_sn": sn, "reason": f"取明细失败: {exc}"})
+                continue
+            if detail.get("statusCode") != 1:
+                out["skipped"].append({"order_sn": sn, "reason": "取明细失败(statusCode≠1)"})
+                continue
+
+            items = []
+            for g in detail.get("orderGoods", []):
+                jan = _clean_jan(str(g.get("goodsSn") or g.get("barCode") or ""))
+                try:
+                    qty = int(float(g.get("outNumber") or g.get("inNumber") or 0))
+                except (TypeError, ValueError):
+                    qty = 0
+                if not jan or qty <= 0:
+                    continue
+                items.append({"jan_code": jan, "quantity": qty,
+                              "name": str(g.get("goodName") or "")})
+            if not items:
+                out["skipped"].append({"order_sn": sn, "reason": "没有可用的商品行"})
+                continue
+
+            out["orders"].append({
+                "order_sn": sn,
+                "out_warehouse": r.get("outStorehouseName") or "",
+                "in_warehouse": r.get("inStorehouseName") or "",
+                "date": day,
+                "status": r.get("status"),
+                "items": items,
+                "total_qty": sum(i["quantity"] for i in items),
+            })
+
+        out["orders"].sort(key=lambda o: o["date"])
+    out["success"] = True
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 按单号拉取单据明细（供批量点数「从秦丝单号建会话」用）
 # ---------------------------------------------------------------------------
 

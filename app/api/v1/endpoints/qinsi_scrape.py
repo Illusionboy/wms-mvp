@@ -340,6 +340,56 @@ async def apply_scraped_records(
 
 
 # ── 反向回填（Playwright 填表存草稿）─────────────────────────────────────────
+# ── 调拨单（调库）同步 ──────────────────────────────────────────────────────
+class TransferScrapeRequest(BaseModel):
+    from_date: date
+    to_date: date
+
+
+class TransferApplyRequest(BaseModel):
+    orders: list[dict] = Field(min_length=1)
+
+
+@router.post("/transfers/scrape")
+async def transfers_scrape(
+    payload: TransferScrapeRequest,
+    session: AsyncSession = Depends(get_db_session),
+    _: CurrentUser = Depends(require_admin),
+) -> dict:
+    """预览秦丝调拨单（调库）。只读秦丝、不写 WMS。
+
+    每单附带：仓库能否映射、哪些行已同步过、**是否疑似与 WMS 既有手工调库重复**
+    （两边都可能操作，重复的单前端默认不勾选）。
+    """
+    from app.scrapers.qinsi_scraper import fetch_transfer_orders
+    from app.services.qinsi_transfers import annotate_orders
+
+    r = await fetch_transfer_orders(payload.from_date, payload.to_date)
+    if not r["success"]:
+        raise HTTPException(status_code=409 if r.get("needs_relogin") else 400,
+                            detail=r.get("error") or "拉取调拨单失败")
+    orders = await annotate_orders(session, r["orders"])
+    return {
+        "success": True,
+        "orders": orders,
+        "skipped": r["skipped"],
+        "total_orders": len(orders),
+        "suspected_duplicates": len([o for o in orders if o["suspected_duplicate"]]),
+    }
+
+
+@router.post("/transfers/apply")
+async def transfers_apply(
+    payload: TransferApplyRequest,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_admin),
+) -> dict:
+    """把选中的调拨单写成 WMS 调库（出库+入库各一笔，共用幂等键）。"""
+    from app.services.qinsi_transfers import apply_transfers
+
+    return await apply_transfers(session, payload.orders, user_id=current_user.id)
+
+
 @router.post("/backfill")
 async def backfill(
     payload: BackfillRequest,

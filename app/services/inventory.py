@@ -485,20 +485,28 @@ async def transfer_stock_item(
     payload: StockTransferCreate,
     *,
     user_id: int | None = None,
+    source: str = "web_ui",
+    reference_id: str | None = None,
+    commit: bool = True,
 ) -> tuple[StockMutationResult, StockMutationResult]:
+    """同一商品从一个仓库调到另一个仓库：写出库+入库两笔，共用一个 reference_id。
+
+    source/reference_id 可覆盖，供秦丝调拨单同步复用（需要自己的幂等键）；
+    commit=False 时由调用方统一提交（批量 apply 用）。
+    """
     from uuid import uuid4
 
     if payload.from_warehouse_id == payload.to_warehouse_id:
         raise InventoryServiceError("调出仓库和调入仓库不能相同")
 
-    ref = f"transfer:{uuid4().hex}"
+    ref = reference_id or f"transfer:{uuid4().hex}"
     note = payload.note or ""
 
     out_payload = StockOutCreate(
         sku=payload.sku,
         warehouse_id=payload.from_warehouse_id,
         quantity=payload.quantity,
-        source="web_ui",
+        source=source,
         reference_id=ref,
         note=note,
         transaction_date=payload.transaction_date,
@@ -510,14 +518,15 @@ async def transfer_stock_item(
         warehouse_id=payload.to_warehouse_id,
         quantity=payload.quantity,
         location_code="A-00-00",
-        source="web_ui",
+        source=source,
         reference_id=ref,
         note=note,
         transaction_date=payload.transaction_date,
     )
     in_result = await stock_in_item(session, in_payload, commit=False, user_id=user_id)
 
-    await session.commit()
+    if commit:
+        await session.commit()
     return out_result, in_result
 
 
