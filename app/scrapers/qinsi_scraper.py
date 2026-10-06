@@ -372,6 +372,9 @@ async def fetch_transfer_orders(from_date: date, to_date: date) -> dict:
 
             out["orders"].append({
                 "order_sn": sn,
+                # 链式调库（A→B 紧接着 B→C）依赖日内先后，只按日期排会丢顺序，
+                # 导致中转仓出现本不该有的负库存。保留毫秒时间戳用于排序。
+                "business_time": r.get("businessTime") or r.get("createTime") or 0,
                 "out_warehouse": r.get("outStorehouseName") or "",
                 "in_warehouse": r.get("inStorehouseName") or "",
                 "date": day,
@@ -380,7 +383,7 @@ async def fetch_transfer_orders(from_date: date, to_date: date) -> dict:
                 "total_qty": sum(i["quantity"] for i in items),
             })
 
-        out["orders"].sort(key=lambda o: o["date"])
+        out["orders"].sort(key=lambda o: (o.get("business_time") or 0, o["order_sn"]))
     out["success"] = True
     return out
 
