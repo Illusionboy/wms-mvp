@@ -150,14 +150,16 @@ async def _qs_create_goods(client: httpx.AsyncClient, jan: str, name: str) -> bo
 
 
 async def _api_backfill_batch(items: list[tuple], warehouse_name: str, direction: str,
-                              cp_id: int | None = None, cp_name: str | None = None) -> "BackfillResult":
+                              cp_id: int | None = None, cp_name: str | None = None,
+                              depot_override: dict | None = None) -> "BackfillResult":
     """回填草稿：httpx 直接调秦丝接口。出库=wholesaleOrdersSaveDraft.ac，入库=purchaseSaveDraft.ac。不用浏览器。
     items=[(jan, qty)] 或 [(jan, qty, name_jp)]。草稿不校验库存（实测超库存也能存），对方统一 WMS回填。
     JAN 秦丝查无 → 自动建商品（名称取 name_jp，兜底 JAN；记入 created_new），再入单；建失败才记 not_found。"""
     res = BackfillResult()
-    depot = _QS_DEPOT.get(warehouse_name)
+    depot = depot_override or _QS_DEPOT.get(warehouse_name)
     if depot is None:
-        res.error = f"暂不支持仓库「{warehouse_name}」（缺秦丝 depotId，目前仅：{'/'.join(_QS_DEPOT)}）"
+        res.error = (f"仓库「{warehouse_name}」没有关联秦丝仓库ID"
+                     f"（请在 WMS 仓库管理里设置 qinsi_depot_id）")
         return res
     depot_id, depot_name = depot["id"], depot["name"]
     is_sale = direction == "out"
@@ -290,12 +292,13 @@ _QS_MAX_GOODS_PER_DRAFT = 50
 
 
 async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str,
-                        cp_id: int | None = None, cp_name: str | None = None) -> "BackfillResult":
+                        cp_id: int | None = None, cp_name: str | None = None,
+                        depot_override: dict | None = None) -> "BackfillResult":
     """回填草稿；SKU 数超过单张上限时自动分批，每批一张草稿。"""
     batches = [items[i:i + _QS_MAX_GOODS_PER_DRAFT]
                for i in range(0, len(items), _QS_MAX_GOODS_PER_DRAFT)] or [[]]
     if len(batches) == 1:
-        res = await _api_backfill_batch(batches[0], warehouse_name, direction, cp_id, cp_name)
+        res = await _api_backfill_batch(batches[0], warehouse_name, direction, cp_id, cp_name, depot_override)
         res.batch_total = 1
         res.batch_ok = 1 if res.success else 0
         return res
@@ -304,7 +307,7 @@ async def _api_backfill(items: list[tuple], warehouse_name: str, direction: str,
     merged.batch_total = len(batches)
     errors: list[str] = []
     for idx, batch in enumerate(batches, 1):
-        r = await _api_backfill_batch(batch, warehouse_name, direction, cp_id, cp_name)
+        r = await _api_backfill_batch(batch, warehouse_name, direction, cp_id, cp_name, depot_override)
         merged.created_new.extend(r.created_new)
         merged.not_found.extend(r.not_found)
         for st in r.steps:
@@ -345,9 +348,58 @@ async def backfill_draft(
 ) -> BackfillResult:
     """items=[(jan, qty)]；direction='in'(采购入库)/'out'(批发出库)。
     counterparty_id/name：选中的秦丝供应商(入)/客户(出)；不传则回退 WMS回填。
-    出/入库都走 API 回放(httpx 直接建草稿，不用浏览器)——无离线弹窗、无 OOM。"""
+    出/入库都走 API 回放(httpx 直接建草稿，不用浏览器)——无离线弹窗、无 OOM。
+
+    仓库按 **qinsi_depot_id** 解析（WMS 仓库表里存），而不是写死的名字表：
+    秦丝改仓库名时（如「大阪一号店」→「大阪一号店备货仓」）按名字查会断。"""
+    depot_override = await _depot_from_db(warehouse_name)
     return await _api_backfill(items, warehouse_name, direction,
-                              cp_id=counterparty_id, cp_name=counterparty_name)
+                              cp_id=counterparty_id, cp_name=counterparty_name,
+                              depot_override=depot_override)
+
+
+async def _depot_from_db(wms_warehouse_name: str) -> dict | None:
+    """从 WMS 仓库表取 qinsi_depot_id；名字用秦丝侧的实时名（取不到就用 WMS 名）。"""
+    try:
+        from sqlalchemy import select
+
+        from app.db.session import AsyncSessionLocal
+        from app.models.warehouse import Warehouse
+
+        async with AsyncSessionLocal() as s:
+            depot_id = await s.scalar(
+                select(Warehouse.qinsi_depot_id).where(Warehouse.name == wms_warehouse_name)
+            )
+        if not depot_id:
+            return None
+        return {"id": int(depot_id), "name": await _qs_depot_name(int(depot_id)) or wms_warehouse_name}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def _qs_depot_name(depot_id: int) -> str | None:
+    """问秦丝该 depotId 当前叫什么（改名后仍能拿到正确名字）。"""
+    try:
+        cookies = _load_cookie_dict()
+        async with httpx.AsyncClient(cookies=cookies, headers=_QS_API_HEADERS,
+                                     timeout=15, follow_redirects=False) as c:
+            r = await c.post(_QS_BASE + "/gis/admin/inner/storehouse/storehouseSelectJSON.ac", data={})
+            found: dict[int, str] = {}
+
+            def scan(o):
+                if isinstance(o, dict):
+                    i, n = o.get("id") or o.get("val"), o.get("name") or o.get("text")
+                    if i and isinstance(n, str):
+                        found[int(i)] = n
+                    for v in o.values():
+                        scan(v)
+                elif isinstance(o, list):
+                    for v in o:
+                        scan(v)
+            scan(r.json())
+        return found.get(depot_id)
+    except Exception:  # noqa: BLE001
+        return None
 
     # ↓↓↓ 以下 Playwright 填表路径已弃用（API 回放替代），保留备查，不再执行 ↓↓↓
     from playwright.async_api import TimeoutError as PWTimeout  # noqa: F401

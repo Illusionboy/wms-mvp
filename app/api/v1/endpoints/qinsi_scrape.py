@@ -265,12 +265,17 @@ async def apply_scraped_records(
             continue
 
         qinsi_name = rec.warehouse_name or ""
-        wms_name = qinsi_wh_map.get(qinsi_name, "")
-        resolved_wh_id = wh_by_name.get(wms_name) or payload.warehouse_id
+        # depotId 优先：秦丝改仓库名时名字映射会失效，ID 不变
+        from app.services.qinsi_transfers import resolve_warehouse_id
+
+        resolved_wh_id = await resolve_warehouse_id(
+            session, depot_id=getattr(rec, "warehouse_depot_id", None), qinsi_name=qinsi_name
+        ) or payload.warehouse_id
         if not resolved_wh_id:
             errors.append(
-                f"{rec.jan_code} ({rec.product_name}): "
-                f"无法确定仓库（秦丝仓库名 {qinsi_name!r} 未在映射表中，且未指定默认仓库）"
+                f"{rec.jan_code} ({rec.product_name}): 无法确定仓库"
+                f"（秦丝仓库 {qinsi_name!r} depotId={getattr(rec, 'warehouse_depot_id', None)} "
+                f"未关联到 WMS 仓库，且未指定默认仓库）"
             )
             skipped += 1
             continue

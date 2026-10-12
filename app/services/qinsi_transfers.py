@@ -33,6 +33,28 @@ def _effective_date():
     return func.coalesce(StockTransaction.transaction_date, cast(StockTransaction.created_at, Date))
 
 
+async def resolve_warehouse_id(
+    session: AsyncSession, *, depot_id: int | None = None, qinsi_name: str | None = None
+) -> int | None:
+    """秦丝仓库 → WMS 仓库 id。**depotId 优先**，名字只作兜底。
+
+    按名字映射的毛病：秦丝把「大阪一号店」改名成「大阪一号店备货仓」时，
+    同步/调库/回填三处全断。depotId 不随改名变化。
+    """
+    if depot_id:
+        wid = await session.scalar(
+            select(Warehouse.id).where(Warehouse.qinsi_depot_id == int(depot_id))
+        )
+        if wid:
+            return wid
+    if qinsi_name:
+        from app.core.config import settings
+
+        wms_name = (settings.qinsi_warehouse_map or {}).get(qinsi_name, qinsi_name)
+        return await session.scalar(select(Warehouse.id).where(Warehouse.name == wms_name))
+    return None
+
+
 async def _warehouse_ids(session: AsyncSession) -> dict[str, int]:
     """秦丝仓库名 → WMS 仓库 id。
 
@@ -121,7 +143,10 @@ async def annotate_orders(session: AsyncSession, orders: list[dict]) -> list[dic
     wh = await _warehouse_ids(session)
     result = []
     for o in orders:
-        from_id, to_id = wh.get(o["out_warehouse"]), wh.get(o["in_warehouse"])
+        from_id = await resolve_warehouse_id(session, depot_id=o.get("out_depot_id"),
+                                            qinsi_name=o["out_warehouse"])
+        to_id = await resolve_warehouse_id(session, depot_id=o.get("in_depot_id"),
+                                          qinsi_name=o["in_warehouse"])
         jans = [i["jan_code"] for i in o["items"]]
         synced = await _already_synced(session, o["order_sn"], jans) if (from_id and to_id) else set()
 
@@ -137,9 +162,9 @@ async def annotate_orders(session: AsyncSession, orders: list[dict]) -> list[dic
 
         blocked = None
         if from_id is None:
-            blocked = f"调出仓「{o['out_warehouse']}」在 QINSI_WAREHOUSE_MAP 里没有对应的 WMS 仓库"
+            blocked = f"调出仓「{o['out_warehouse']}」(depotId={o.get('out_depot_id')}) 没有对应的 WMS 仓库"
         elif to_id is None:
-            blocked = f"调入仓「{o['in_warehouse']}」在 QINSI_WAREHOUSE_MAP 里没有对应的 WMS 仓库"
+            blocked = f"调入仓「{o['in_warehouse']}」(depotId={o.get('in_depot_id')}) 没有对应的 WMS 仓库"
         elif from_id == to_id:
             blocked = "调出仓与调入仓映射到了同一个 WMS 仓库"
 
@@ -167,7 +192,10 @@ async def apply_transfers(
 
     for o in orders:
         sn = o["order_sn"]
-        from_id, to_id = wh.get(o["out_warehouse"]), wh.get(o["in_warehouse"])
+        from_id = await resolve_warehouse_id(session, depot_id=o.get("out_depot_id"),
+                                            qinsi_name=o["out_warehouse"])
+        to_id = await resolve_warehouse_id(session, depot_id=o.get("in_depot_id"),
+                                          qinsi_name=o["in_warehouse"])
         if not from_id or not to_id or from_id == to_id:
             errors.append({"order_sn": sn, "error": "仓库映射无效，已跳过整单"})
             continue

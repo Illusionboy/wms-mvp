@@ -53,6 +53,7 @@ class ScrapedRecord(BaseModel):
     product_name: str
     quantity: int
     warehouse_name: str
+    warehouse_depot_id: int | None = None
     customer_name: str | None
     note: str | None
     source_row: dict[str, str]   # raw JSON fields for debugging
@@ -147,6 +148,7 @@ def _build_record(
     direction: str,
     order_date_ms: int,
     warehouse_name: str,
+    warehouse_depot_id: int | None,
     customer_name: str | None,
     order_no: str,
     scraped_at: str,
@@ -166,6 +168,7 @@ def _build_record(
         product_name=str(goods.get("goodName", "")),
         quantity=int(qty),
         warehouse_name=warehouse_name,
+        warehouse_depot_id=warehouse_depot_id,
         customer_name=customer_name,
         note=None,
         source_row={k: str(v) for k, v in goods.items()},
@@ -199,6 +202,7 @@ async def _fetch_sales(
         for order in rows:
             sn = order.get("ordersSn", "")
             depot_name = order.get("depotName", "秦丝仓库")
+            depot_id = order.get("depotId")
             client_name = order.get("clientName")
             date_ms = order.get("businessTime") or order.get("createTime")
             try:
@@ -206,7 +210,7 @@ async def _fetch_sales(
                     client, "/inner/sale/wholesaleOrdersGet.ac", {"ordersSn": sn}
                 )
                 for g in detail.get("orderGoods", []):
-                    rec = _build_record(g, "OUT", date_ms, depot_name, client_name, sn, scraped_at)
+                    rec = _build_record(g, "OUT", date_ms, depot_name, depot_id, client_name, sn, scraped_at)
                     if rec:
                         records.append(rec)
             except Exception as exc:
@@ -245,6 +249,7 @@ async def _fetch_purchases(
         for order in rows:
             sn = order.get("purchaseSn", "")
             depot_name = order.get("depotName", "秦丝仓库")
+            depot_id = order.get("depotId")
             date_ms = order.get("businessTime") or order.get("createTime")
             supplier_name = (
                 order.get("supplierName") or order.get("supplierCompany")
@@ -261,7 +266,7 @@ async def _fetch_purchases(
                         or detail.get("providerName")
                     )
                 for g in detail.get("orderGoods", []):
-                    rec = _build_record(g, "IN", date_ms, depot_name, supplier_name, sn, scraped_at)
+                    rec = _build_record(g, "IN", date_ms, depot_name, depot_id, supplier_name, sn, scraped_at)
                     if rec:
                         records.append(rec)
             except Exception as exc:
@@ -377,6 +382,8 @@ async def fetch_transfer_orders(from_date: date, to_date: date) -> dict:
                 "business_time": r.get("businessTime") or r.get("createTime") or 0,
                 "out_warehouse": r.get("outStorehouseName") or "",
                 "in_warehouse": r.get("inStorehouseName") or "",
+                "out_depot_id": r.get("outStorehouseId"),
+                "in_depot_id": r.get("inStorehouseId"),
                 "date": day,
                 "status": r.get("status"),
                 "items": items,

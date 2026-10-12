@@ -48,6 +48,22 @@ async def init_db() -> None:
         await conn.execute(text(
             "ALTER TABLE products ALTER COLUMN outer_jan TYPE VARCHAR(14)"
         ))
+        # 秦丝仓库ID：按ID关联秦丝仓库，避免任一边改名就断
+        await conn.execute(text(
+            "ALTER TABLE warehouses ADD COLUMN IF NOT EXISTS qinsi_depot_id BIGINT"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_warehouses_qinsi_depot_id "
+            "ON warehouses (qinsi_depot_id) WHERE qinsi_depot_id IS NOT NULL"
+        ))
+        # 一次性回填已知对应关系（仅当该行还没填，不覆盖人工设置）
+        for _wh_name, _depot in (("普通仓库", 283425), ("乐天仓库", 1348869), ("大阪一号店", 1415092)):
+            await conn.execute(
+                text("UPDATE warehouses SET qinsi_depot_id = :d "
+                     "WHERE name = :n AND qinsi_depot_id IS NULL"),
+                {"d": _depot, "n": _wh_name},
+            )
+
         # 报损模块：破损品独立商品行（jan_code = "D-" + 正常JAN）的标记与反查列
         await conn.execute(text(
             "ALTER TABLE products ADD COLUMN IF NOT EXISTS is_damaged BOOLEAN NOT NULL DEFAULT FALSE"
