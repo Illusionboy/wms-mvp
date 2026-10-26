@@ -60,6 +60,14 @@ class AmbiguousInventoryRecordError(InventoryServiceError):
     pass
 
 
+class ErpManagedWarehouseError(InventoryServiceError):
+    """该仓库的库存由秦丝 ERP 管理（ERP_MIRROR），WMS 侧不接受手动写入。
+
+    不静默吞掉，而是抛出明确错误 —— 本项目踩过静默截断的坑（见 commit 6ca8860），
+    写入被拒必须让操作员当场看见原因。
+    """
+
+
 class InsufficientStockError(InventoryServiceError):
     pass
 
@@ -275,6 +283,7 @@ async def stock_in_item(
     user_id: int | None = None,
 ) -> StockMutationResult:
     payload.sku = await resolve_canonical_jan(session, payload.sku)
+    await assert_warehouse_writable(session, payload.warehouse_id, payload.source)
     product = await session.scalar(select(Product).where(Product.jan_code == payload.sku))
     warehouse = await session.scalar(select(Warehouse).where(Warehouse.id == payload.warehouse_id))
     if product is None or warehouse is None:
@@ -340,6 +349,7 @@ async def stock_out_item(
     force_negative: bool = False,
 ) -> StockMutationResult:
     payload.sku = await resolve_canonical_jan(session, payload.sku)
+    await assert_warehouse_writable(session, payload.warehouse_id, payload.source)
     try:
         # with_for_update() inside _find_single_inventory_record prevents concurrent deduction
         record = await _find_single_inventory_record(
@@ -427,6 +437,7 @@ async def adjust_stock_item(
     user_id: int | None = None,
 ) -> StockMutationResult:
     payload.sku = await resolve_canonical_jan(session, payload.sku)
+    await assert_warehouse_writable(session, payload.warehouse_id, payload.source)
     record = await _find_single_inventory_record(
         session=session,
         sku=payload.sku,
@@ -572,6 +583,37 @@ async def _get_product_total_quantity(session: AsyncSession, jan_code: str) -> i
         )
     )
     return int(total_quantity or 0)
+
+
+# ERP 联邦化：镜像仓库只接受来自秦丝的写入，其余来源一律拒绝。
+# 允许的 source 白名单——秦丝同步(含调拨)与镜像快照本身。
+_ERP_MIRROR_ALLOWED_SOURCES = {"qinsi_scrape", "qinsi_transfer", "erp_mirror_sync"}
+
+
+async def assert_warehouse_writable(
+    session: AsyncSession, warehouse_id: int, source: str
+) -> None:
+    """镜像仓库（ERP_MIRROR）只允许秦丝侧来源写入；手动操作直接拒绝。
+
+    之所以按 source 白名单而不是按端点拦：写入口有十几个（web_ui/乐天/贸易/盘点…），
+    逐个改容易漏；在库存变动的唯一必经之路上按来源判断，才不会留后门。
+    """
+    from app.models.warehouse import InventorySourceMode
+
+    res = (await session.execute(
+        select(Warehouse.inventory_source_mode, Warehouse.name).where(Warehouse.id == warehouse_id)
+    )).first()
+    if res is None:
+        return
+    mode, name = res
+    if mode != InventorySourceMode.erp_mirror:
+        return
+    if source in _ERP_MIRROR_ALLOWED_SOURCES:
+        return
+    raise ErpManagedWarehouseError(
+        f"仓库「{name}」的库存由秦丝 ERP 管理，WMS 侧不能直接改动"
+        f"（本次来源：{source}）。请在秦丝里操作，WMS 会同步过来。"
+    )
 
 
 async def _find_single_inventory_record(

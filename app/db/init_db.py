@@ -48,6 +48,12 @@ async def init_db() -> None:
         await conn.execute(text(
             "ALTER TABLE products ALTER COLUMN outer_jan TYPE VARCHAR(14)"
         ))
+        # 库存权威源模式（ERP 联邦化）：WMS_NATIVE=WMS 权威；ERP_MIRROR=镜像秦丝、WMS只读
+        await conn.execute(text(
+            "ALTER TABLE warehouses ADD COLUMN IF NOT EXISTS inventory_source_mode "
+            "VARCHAR(16) NOT NULL DEFAULT 'WMS_NATIVE'"
+        ))
+
         # 秦丝仓库ID：按ID关联秦丝仓库，避免任一边改名就断
         await conn.execute(text(
             "ALTER TABLE warehouses ADD COLUMN IF NOT EXISTS qinsi_depot_id BIGINT"

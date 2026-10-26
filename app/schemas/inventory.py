@@ -27,6 +27,8 @@ class WarehouseRead(BaseModel):
     id: int
     name: str
     allow_negative_stock: bool
+    qinsi_depot_id: int | None = None
+    inventory_source_mode: str = "WMS_NATIVE"
     created_at: datetime
     updated_at: datetime
 
