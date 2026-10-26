@@ -121,7 +121,8 @@ SNAPSHOT_SOURCE = "erp_mirror_sync"
 
 
 async def sync_snapshot(
-    session: AsyncSession, warehouse_id: int, *, dry_run: bool = True, user_id: int | None = None
+    session: AsyncSession, warehouse_id: int, *, dry_run: bool = True,
+    user_id: int | None = None, create_missing_products: bool = False,
 ) -> dict:
     """把秦丝某仓库的当前库存快照覆盖写进 WMS（仅限 ERP_MIRROR 仓库）。
 
@@ -167,6 +168,20 @@ async def sync_snapshot(
         select(Product.jan_code).where(Product.jan_code.in_(list(jans)))
     )).all()) if jans else set()
 
+    # 秦丝有库存但 WMS 商品目录里没有的 SKU：按需自动建档（名称取秦丝商品名），
+    # 否则这些库存永远同步不进来，对账里会一直挂着"商品未知"。
+    created_products = []
+    if create_missing_products and not dry_run:
+        erp_names = {it["jan_code"]: (it.get("name") or "") for it in snap["items"]}
+        for jan in sorted(jans - known):
+            if erp_qty.get(jan, 0) == 0:
+                continue
+            session.add(Product(jan_code=jan, name_jp=(erp_names.get(jan) or jan)[:255]))
+            created_products.append({"jan_code": jan, "name": erp_names.get(jan, "")})
+        if created_products:
+            await session.flush()
+            known |= {c["jan_code"] for c in created_products}
+
     changes, unknown = [], []
     for jan in sorted(jans):
         target = erp_qty.get(jan, 0)
@@ -189,6 +204,7 @@ async def sync_snapshot(
         "changes": changes, "change_count": len(changes),
         "delta_abs_total": sum(abs(c["delta"]) for c in changes),
         "unknown_products": unknown,
+        "created_products": created_products if not dry_run else [],
         "applied": 0,
     }
     if dry_run or not changes:

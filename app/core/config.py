@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     rakuten_cred_key: str | None = Field(default=None, validation_alias="RAKUTEN_CRED_KEY")
     # 乐天自动下载定时（Mon–Sat 08:50 JST）总开关。仅在跑抓取的那台(VPS)设 true。
     rakuten_auto_enabled: bool = Field(default=False, validation_alias="RAKUTEN_AUTO_ENABLED")
+    # 秦丝 ERP 自动同步（调拨单 + 镜像仓库库存快照）；乐天出入库不在范围内
+    erp_auto_sync_enabled: bool = Field(default=False, validation_alias="ERP_AUTO_SYNC_ENABLED")
     admin_username: str | None = Field(default=None, validation_alias="ADMIN_USERNAME")
     admin_password: str | None = Field(default=None, validation_alias="ADMIN_PASSWORD")
     # 秦丝生意通爬虫配置

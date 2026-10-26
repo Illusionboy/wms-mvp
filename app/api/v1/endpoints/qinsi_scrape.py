@@ -373,6 +373,16 @@ async def stock_snapshot_sync(
     return r
 
 
+@router.post("/auto-sync/run")
+async def auto_sync_run(
+    _: CurrentUser = Depends(require_admin),
+) -> dict:
+    """手动跑一轮 ERP 自动同步（调拨单 + 镜像仓库库存快照），与定时任务同一套逻辑。"""
+    from app.services.erp_sync_scheduler import run_once
+
+    return await run_once(trigger="manual")
+
+
 # ── 调拨单（调库）同步 ──────────────────────────────────────────────────────
 class TransferScrapeRequest(BaseModel):
     from_date: date
