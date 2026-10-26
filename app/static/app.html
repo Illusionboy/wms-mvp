@@ -2223,7 +2223,39 @@ async function loadDashboard() {
   try {
     const rows = await api('GET', '/status');
     if (!rows.length) { el.innerHTML = '<p class="loading">暂无仓库数据</p>'; return; }
-    el.innerHTML = rows.map(r => {
+    // ERP 镜像仓库的对账摘要：差异 = ERP快照 与 WMS流水累计 对不上的 SKU 数。
+    // 这个指标是在替系统监控自己的数据质量——差异不为 0 说明流水有缺口或重复，
+    // 而安全库存/需求预测全部依赖流水。
+    let recon = null;
+    try { recon = await api('GET', '/analytics/erp-reconciliation/summary'); } catch {}
+    el.innerHTML = (recon && recon.mirror_warehouses && recon.mirror_warehouses.length ? `
+      <div class="card" style="border-left:3px solid ${recon.diff_sku_count ? 'var(--warn)' : '#16a34a'}">
+        <div class="card-title">ERP 镜像对账</div>
+        <div style="font-size:12px;color:var(--muted);margin:-4px 0 10px">
+          镜像仓库：${recon.mirror_warehouses.map(w => esc(w.name)).join('、')}
+          —— 库存以秦丝 ERP 为准，WMS 侧只读
+        </div>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-label">差异 SKU 数</div>
+            <div class="stat-value ${recon.diff_sku_count ? 'warn' : 'ok'}">${recon.diff_sku_count}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">差异合计(件)</div>
+            <div class="stat-value ${recon.diff_total_abs ? 'warn' : 'ok'}">${recon.diff_total_abs}</div>
+          </div>
+        </div>
+        ${recon.worst && recon.worst.length ? `<div style="margin-top:10px;overflow-x:auto">
+          <table class="table"><thead><tr><th>JAN</th><th>商品</th><th style="text-align:right">ERP快照</th>
+          <th style="text-align:right">WMS流水</th><th style="text-align:right">差异</th></tr></thead><tbody>
+          ${recon.worst.map(w => `<tr>
+            <td><code style="font-size:11px">${esc(w.product_jan)}</code></td>
+            <td style="font-size:12px">${esc((w.product_name_jp || '—').slice(0, 20))}</td>
+            <td style="text-align:right">${w.erp_snapshot_qty}</td>
+            <td style="text-align:right">${w.wms_derived_qty}</td>
+            <td style="text-align:right;color:var(--danger);font-weight:600">${w.diff > 0 ? '+' : ''}${w.diff}</td>
+          </tr>`).join('')}</tbody></table></div>` : ''}
+      </div>` : '') + rows.map(r => {
       const gapText = r.data_gap_days === null ? '无记录'
         : r.data_gap_days === 0 ? '今天' : `${r.data_gap_days} 天前`;
       const gapClass = r.data_gap_days === null ? 'warn'

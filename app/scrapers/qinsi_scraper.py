@@ -286,7 +286,7 @@ async def _fetch_purchases(
 # ---------------------------------------------------------------------------
 
 _STOCK_SNAPSHOT = "/inner/storehouse/getGoodsStoredListJSON.ac"
-_SNAPSHOT_PAGE_SIZE = 200
+_SNAPSHOT_PAGE_SIZE = 200   # 仅作请求参数；秦丝实际固定返回 18 条/页
 
 
 async def fetch_stock_snapshot(depot_id: int) -> dict:
@@ -294,11 +294,14 @@ async def fetch_stock_snapshot(depot_id: int) -> dict:
 
     接口是库存页 goodsStoredList 背后的 getGoodsStoredListJSON.ac。
     `existsNumber` 的含义（实测）：
-      - 1 → 只返回"有库存记录"的商品（大阪一号店 649 个）
-      - 0 → 返回整个商品目录，含库存为 0 的（7049 个）
+      - 1 → 只返回"有库存"的商品（大阪一号店 649 个 → 37 页）
+      - 0 → 返回整个商品目录含 0 库存（7049 个 → **392 页**）
 
-    这里刻意用 **0**：镜像要求完整——某商品在 ERP 已归零时，WMS 侧也必须跟着归零。
-    若只取 existsNumber=1，归零的商品会从快照里消失，WMS 就会一直留着旧的非零库存。
+    用 **1**。镜像完整性靠调用方保证而不是靠拉全量：
+    凡是没出现在"有库存"列表里的 SKU，ERP 侧即为 0，`sync_snapshot` 里
+    `erp_qty.get(jan, 0)` 会把缺席当 0 处理，WMS 侧照样归零。
+    ⚠ 秦丝**硬性固定每页 18 条**（传 rows / pageSize 都无效），所以页数直接决定耗时——
+    取全量要 392 次请求，实测会把同步拖到分钟级且容易超时。
 
     返回 {"success","error","depot_id","items":[{jan_code,quantity,name}],"skipped":[...]}
     """
@@ -322,7 +325,7 @@ async def fetch_stock_snapshot(depot_id: int) -> dict:
         while True:
             try:
                 data = await _get_json(client, _STOCK_SNAPSHOT, {
-                    "storehouseId": depot_id, "existsNumber": 0, "isOnSale": 1,
+                    "storehouseId": depot_id, "existsNumber": 1, "isOnSale": 1,
                     "disabledStoredFilterFlag": "true",
                     "rows": _SNAPSHOT_PAGE_SIZE, "page": page,
                     "sidx": "", "sord": "asc", "_search": "false",

@@ -149,6 +149,7 @@ async def sync_snapshot(
     if not snap["success"]:
         return {"success": False, "error": snap["error"], "needs_relogin": snap.get("needs_relogin")}
 
+    # 快照只含"有库存"的 SKU；WMS 有记录但快照里没有的，说明 ERP 侧已归零 → 目标即 0
     erp_qty = {it["jan_code"]: it["quantity"] for it in snap["items"]}
 
     # WMS 侧该仓库现有库存
