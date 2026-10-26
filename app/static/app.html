@@ -4101,16 +4101,24 @@ async function addCustomer() {
 async function loadSettingsLists() {
   const wEl = document.getElementById('warehouse-list');
   const cEl = document.getElementById('customer-list');
-  wEl.innerHTML = '<div class="table-wrap"><table><thead><tr><th>仓库</th><th>负库存</th><th></th></tr></thead><tbody>' +
-    _warehouses.map(w => `<tr>
+  wEl.innerHTML = '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">'
+    + '库存权威源：<b>WMS</b>=本系统说了算；<b>ERP镜像</b>=以秦丝为准，WMS 侧拒绝手动出入库/调整（切换需先关联秦丝仓库）'
+    + '</div><div class="table-wrap"><table><thead><tr><th>仓库</th><th>库存权威源</th><th>秦丝仓库ID</th><th>负库存</th><th></th></tr></thead><tbody>' +
+    _warehouses.map(w => {
+      const mirror = w.inventory_source_mode === 'ERP_MIRROR';
+      return `<tr>
       <td>${w.name}</td>
+      <td>${mirror ? '<span class="badge badge-warn">ERP镜像(只读)</span>' : '<span class="badge badge-ok">WMS</span>'}</td>
+      <td>${w.qinsi_depot_id ? `<code style="font-size:11px">${w.qinsi_depot_id}</code>` : '<span style="color:var(--muted)">未关联</span>'}</td>
       <td>${w.allow_negative_stock ? '<span class="badge badge-warn">开启</span>' : '<span class="badge badge-neutral">关闭</span>'}</td>
       <td style="white-space:nowrap">
-        <button class="btn btn-ghost btn-sm" onclick="toggleNegativeStock(${w.id},${!w.allow_negative_stock})">${w.allow_negative_stock ? '关闭' : '开启'}</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleSourceMode(${w.id},'${mirror ? 'WMS_NATIVE' : 'ERP_MIRROR'}','${esc(w.name)}')">${mirror ? '改回WMS权威' : '切ERP镜像'}</button>
+        <button class="btn btn-ghost btn-sm" style="margin-left:4px" onclick="toggleNegativeStock(${w.id},${!w.allow_negative_stock})">${w.allow_negative_stock ? '关负库存' : '开负库存'}</button>
         <button class="btn btn-ghost btn-sm" style="margin-left:4px" onclick="exportInventory(${w.id},'xlsx')">导出库存</button>
+        ${mirror ? `<button class="btn btn-primary btn-sm" style="margin-left:4px" onclick="syncErpSnapshot(${w.id},'${esc(w.name)}')">同步ERP库存</button>` : ''}
       </td>
-    </tr>`).join('') +
-    '</tbody></table></div>';
+    </tr>`;}).join('') +
+    '</tbody></table></div><div id="erp-sync-result" style="margin-top:10px"></div>';
   cEl.innerHTML = '<div class="table-wrap"><table><thead><tr><th>客户</th></tr></thead><tbody>' +
     _customers.map(c => `<tr><td>${c.name}</td></tr>`).join('') +
     '</tbody></table></div>';
@@ -4254,6 +4262,63 @@ async function toggleNegList(cell, warehouseId) {
       </tr>`).join('')}</tbody>
     </table>`;
   } catch (e) { listDiv.innerHTML = `<span style="color:var(--danger);font-size:12px">${e.message}</span>`; }
+}
+
+// 切换库存权威源。ERP镜像 = 该仓库库存以秦丝为准，WMS 侧拒绝手动写入——
+// 这是"做减法"：不和 ERP 抢同一件事，各管各自擅长的部分。
+async function toggleSourceMode(warehouseId, mode, name) {
+  const toMirror = mode === 'ERP_MIRROR';
+  const msg = toMirror
+    ? `把「${name}」切换为 ERP 镜像？\n\n切换后该仓库的入库/出库/调整在 WMS 侧会被拒绝，库存以秦丝为准（通过「同步ERP库存」拉取）。`
+    : `把「${name}」改回 WMS 权威？\n\n改回后 WMS 侧可以再手动操作该仓库库存。`;
+  if (!confirm(msg)) return;
+  try {
+    await api('PATCH', `/warehouses/${warehouseId}/inventory-source-mode?mode=${mode}`);
+    await loadGlobals();
+    loadSettingsLists();
+    toast(toMirror ? '已切换为 ERP 镜像（WMS 侧只读）' : '已改回 WMS 权威', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// 拉秦丝库存快照覆盖到该仓库。先 dry-run 给出将要改动的清单，确认后才写。
+async function syncErpSnapshot(warehouseId, name) {
+  const el = document.getElementById('erp-sync-result');
+  el.innerHTML = '<p class="loading">正在拉取秦丝库存快照…（约37页，请稍候）</p>';
+  let preview;
+  try {
+    preview = await api('POST', '/qinsi/stock-snapshot/sync', { warehouse_id: warehouseId, dry_run: true });
+  } catch (e) { el.innerHTML = resultCard('err', e.message); toast(e.message, 'err'); return; }
+
+  if (!preview.change_count) {
+    el.innerHTML = resultCard('ok', `「${esc(name)}」已与秦丝一致，无需校正（秦丝有库存 SKU ${preview.erp_sku_with_stock} 个）`);
+    return;
+  }
+  const top = preview.changes.slice().sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 12);
+  el.innerHTML = `<div class="card" style="border-left:3px solid var(--warn)">
+    <div style="font-weight:600;margin-bottom:6px">「${esc(name)}」将校正 ${preview.change_count} 个 SKU，累计差额 ${preview.delta_abs_total} 件</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
+      秦丝有库存 SKU ${preview.erp_sku_with_stock} 个${preview.unknown_products.length ? `；另有 ${preview.unknown_products.length} 个商品不在 WMS 目录，将跳过` : ''}
+    </div>
+    <div style="overflow-x:auto"><table class="table"><thead><tr><th>JAN</th>
+      <th style="text-align:right">WMS现有</th><th style="text-align:right">秦丝</th><th style="text-align:right">差额</th></tr></thead><tbody>
+      ${top.map(c => `<tr><td><code style="font-size:11px">${esc(c.jan_code)}</code></td>
+        <td style="text-align:right">${c.wms_qty}</td><td style="text-align:right">${c.erp_qty}</td>
+        <td style="text-align:right;font-weight:600;color:${c.delta > 0 ? '#16a34a' : 'var(--danger)'}">${c.delta > 0 ? '+' : ''}${c.delta}</td></tr>`).join('')}
+    </tbody></table></div>
+    ${preview.change_count > 12 ? `<div style="font-size:12px;color:var(--muted);margin-top:6px">… 另 ${preview.change_count - 12} 个</div>` : ''}
+    <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="syncErpSnapshotApply(${warehouseId},'${esc(name)}')">确认写入</button>
+  </div>`;
+}
+async function syncErpSnapshotApply(warehouseId, name) {
+  if (!confirm(`确认按秦丝快照覆盖「${name}」的库存？将写入 ADJUST 事务留痕。`)) return;
+  const el = document.getElementById('erp-sync-result');
+  el.innerHTML = '<p class="loading">写入中…</p>';
+  try {
+    const r = await api('POST', '/qinsi/stock-snapshot/sync', { warehouse_id: warehouseId, dry_run: false });
+    el.innerHTML = resultCard('ok', `✓ 已校正 ${r.applied} 个 SKU（累计差额 ${r.delta_abs_total} 件）`)
+      + ((r.errors && r.errors.length) ? resultCard('err', `${r.errors.length} 个失败：` + r.errors.slice(0, 5).map(e => `${e.jan_code} ${e.error}`).join('；')) : '');
+    toast(`ERP 库存同步完成：${r.applied} 个 SKU`, 'ok');
+  } catch (e) { el.innerHTML = resultCard('err', e.message); toast(e.message, 'err'); }
 }
 
 async function toggleNegativeStock(warehouseId, enable) {
