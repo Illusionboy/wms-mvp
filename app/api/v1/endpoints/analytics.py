@@ -384,3 +384,31 @@ async def system_logs(
 ) -> list[SystemLogRead]:
     """系统异常事件统一日志：出库/调整后出现负库存、预留冲突等，按时间倒序。"""
     return await get_system_logs(session, category=category, level=level, limit=limit)
+
+
+# ── ERP 镜像仓库对账（reconciliation）────────────────────────────────────────
+@router.get("/erp-reconciliation")
+async def erp_reconciliation(
+    warehouse_id: int | None = Query(None, gt=0),
+    only_diff: bool = Query(True, description="只看对不上的；false 则列出全部"),
+    limit: int = Query(500, ge=1, le=5000),
+    session: AsyncSession = Depends(get_db_session),
+) -> list[dict]:
+    """镜像仓库逐 SKU 对账：ERP 快照库存 vs WMS 流水累计。只读、免认证（与本模块一致）。
+
+    差异 != 0 说明流水有缺口或重复——库存数字能靠快照覆盖治标，但流水完整性治不了，
+    而安全库存/需求预测全靠流水。
+    """
+    from app.services.erp_reconciliation import reconcile
+
+    return await reconcile(session, warehouse_id, only_diff=only_diff, limit=limit)
+
+
+@router.get("/erp-reconciliation/summary")
+async def erp_reconciliation_summary(
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """仪表盘指标：差异 SKU 数 / 差异总件数 / 最严重的几个。"""
+    from app.services.erp_reconciliation import diff_summary
+
+    return await diff_summary(session)
