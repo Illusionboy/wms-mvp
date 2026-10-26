@@ -114,3 +114,118 @@ async def diff_summary(session: AsyncSession) -> dict:
         "diff_total_abs": sum(abs(r["diff"]) for r in rows),
         "worst": rows[:5],
     }
+
+
+# ── 快照同步（ERP → WMS 镜像）───────────────────────────────────────────────
+SNAPSHOT_SOURCE = "erp_mirror_sync"
+
+
+async def sync_snapshot(
+    session: AsyncSession, warehouse_id: int, *, dry_run: bool = True, user_id: int | None = None
+) -> dict:
+    """把秦丝某仓库的当前库存快照覆盖写进 WMS（仅限 ERP_MIRROR 仓库）。
+
+    为什么用「快照覆盖」而不是「流水累加」：
+    流水里已知存在重复风险（同一笔调库可能既手工录了 WMS、又同步了秦丝调拨单），
+    累加会把这些误差永久滚进库存。快照每次都把数字拉回 ERP 口径，误差不累积。
+    差额写一笔 ADJUST 留痕——不静默改数，事后能查出每次校正了多少。
+
+    流水同步照常继续（安全库存/需求预测依赖它）：快照回答"现在有多少"，
+    流水回答"卖得多快"，两者各司其职。
+    """
+    from app.models.warehouse import InventorySourceMode
+    from app.scrapers.qinsi_scraper import fetch_stock_snapshot
+
+    wh = await session.get(Warehouse, warehouse_id)
+    if wh is None:
+        return {"success": False, "error": "仓库不存在"}
+    if wh.inventory_source_mode != InventorySourceMode.erp_mirror:
+        return {"success": False,
+                "error": f"仓库「{wh.name}」不是 ERP_MIRROR 模式，快照同步只对镜像仓库开放"}
+    if not wh.qinsi_depot_id:
+        return {"success": False, "error": f"仓库「{wh.name}」未关联秦丝仓库(qinsi_depot_id)"}
+
+    snap = await fetch_stock_snapshot(int(wh.qinsi_depot_id))
+    if not snap["success"]:
+        return {"success": False, "error": snap["error"], "needs_relogin": snap.get("needs_relogin")}
+
+    erp_qty = {it["jan_code"]: it["quantity"] for it in snap["items"]}
+
+    # WMS 侧该仓库现有库存
+    rows = (await session.execute(
+        select(InventoryRecord.product_jan, func.sum(InventoryRecord.quantity))
+        .where(InventoryRecord.warehouse_id == warehouse_id)
+        .group_by(InventoryRecord.product_jan)
+    )).all()
+    wms_qty = {j: int(q or 0) for j, q in rows}
+
+    # 只处理「ERP 有量」或「WMS 有记录」的 JAN——
+    # 整个商品目录有 7000+ 个，两边都为 0 的没必要建记录
+    jans = {j for j, q in erp_qty.items() if q != 0} | set(wms_qty)
+    known = set((await session.scalars(
+        select(Product.jan_code).where(Product.jan_code.in_(list(jans)))
+    )).all()) if jans else set()
+
+    changes, unknown = [], []
+    for jan in sorted(jans):
+        target = erp_qty.get(jan, 0)
+        current = wms_qty.get(jan, 0)
+        if target == current:
+            continue
+        if jan not in known:
+            unknown.append({"jan_code": jan, "erp_qty": target,
+                            "reason": "商品不在 WMS 目录，跳过（需先登记商品）"})
+            continue
+        changes.append({"jan_code": jan, "wms_qty": current,
+                        "erp_qty": target, "delta": target - current})
+
+    result = {
+        "success": True, "dry_run": dry_run,
+        "warehouse_id": warehouse_id, "warehouse_name": wh.name,
+        "qinsi_depot_id": int(wh.qinsi_depot_id),
+        "erp_sku_total": len(snap["items"]),
+        "erp_sku_with_stock": sum(1 for q in erp_qty.values() if q != 0),
+        "changes": changes, "change_count": len(changes),
+        "delta_abs_total": sum(abs(c["delta"]) for c in changes),
+        "unknown_products": unknown,
+        "applied": 0,
+    }
+    if dry_run or not changes:
+        return result
+
+    # 实际写入：走 adjust_stock_item 保证每笔都有 StockTransaction
+    from app.schemas.inventory import StockAdjustCreate
+    from app.services.inventory import adjust_stock_item, stock_in_item
+    from app.schemas.inventory import StockInCreate
+
+    applied, errors = 0, []
+    for ch in changes:
+        try:
+            if ch["wms_qty"] == 0 and not await session.scalar(
+                select(InventoryRecord.id).where(
+                    InventoryRecord.product_jan == ch["jan_code"],
+                    InventoryRecord.warehouse_id == warehouse_id,
+                ).limit(1)
+            ):
+                # 该仓库还没有这个 SKU 的桶 → 用入库建桶
+                await stock_in_item(session, StockInCreate(
+                    sku=ch["jan_code"], warehouse_id=warehouse_id, quantity=ch["erp_qty"],
+                    location_code="A-00-00", source=SNAPSHOT_SOURCE,
+                    note=f"ERP镜像快照建桶：秦丝 {ch['erp_qty']}",
+                ), commit=False, user_id=user_id)
+            else:
+                await adjust_stock_item(session, StockAdjustCreate(
+                    sku=ch["jan_code"], warehouse_id=warehouse_id,
+                    actual_quantity=max(ch["erp_qty"], 0),
+                    source=SNAPSHOT_SOURCE,
+                    note=(f"ERP镜像快照校正：WMS {ch['wms_qty']} → 秦丝 {ch['erp_qty']}"
+                          f"（{ch['delta']:+d}）"),
+                ), commit=False, user_id=user_id)
+            applied += 1
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"jan_code": ch["jan_code"], "error": f"{type(exc).__name__}: {exc}"})
+
+    await session.commit()
+    result["applied"] = applied
+    result["errors"] = errors
+    return result

@@ -282,6 +282,81 @@ async def _fetch_purchases(
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+# 库存快照（ERP 镜像用）
+# ---------------------------------------------------------------------------
+
+_STOCK_SNAPSHOT = "/inner/storehouse/getGoodsStoredListJSON.ac"
+_SNAPSHOT_PAGE_SIZE = 200
+
+
+async def fetch_stock_snapshot(depot_id: int) -> dict:
+    """拉取秦丝某仓库的**当前库存快照**（JAN → 数量）。
+
+    接口是库存页 goodsStoredList 背后的 getGoodsStoredListJSON.ac。
+    `existsNumber` 的含义（实测）：
+      - 1 → 只返回"有库存记录"的商品（大阪一号店 649 个）
+      - 0 → 返回整个商品目录，含库存为 0 的（7049 个）
+
+    这里刻意用 **0**：镜像要求完整——某商品在 ERP 已归零时，WMS 侧也必须跟着归零。
+    若只取 existsNumber=1，归零的商品会从快照里消失，WMS 就会一直留着旧的非零库存。
+
+    返回 {"success","error","depot_id","items":[{jan_code,quantity,name}],"skipped":[...]}
+    """
+    out: dict = {"success": False, "error": None, "needs_relogin": False,
+                 "depot_id": depot_id, "items": [], "skipped": []}
+    cookies = _load_cookies()
+    if not cookies:
+        out["error"] = "未找到秦丝登录 session，请先刷新秦丝会话"
+        out["needs_relogin"] = True
+        return out
+
+    merged: dict[str, int] = {}
+    names: dict[str, str] = {}
+    async with httpx.AsyncClient(cookies=cookies, follow_redirects=True, timeout=40) as client:
+        if not await _check_auth(client):
+            out["error"] = "秦丝 session 已过期，请重新授权登录"
+            out["needs_relogin"] = True
+            return out
+
+        page = 1
+        while True:
+            try:
+                data = await _get_json(client, _STOCK_SNAPSHOT, {
+                    "storehouseId": depot_id, "existsNumber": 0, "isOnSale": 1,
+                    "disabledStoredFilterFlag": "true",
+                    "rows": _SNAPSHOT_PAGE_SIZE, "page": page,
+                    "sidx": "", "sord": "asc", "_search": "false",
+                })
+            except Exception as exc:  # noqa: BLE001
+                out["error"] = f"拉取库存快照失败(第{page}页): {exc}"
+                return out
+            rows = data.get("rows", [])
+            if not rows:
+                break
+            for r in rows:
+                jan = _clean_jan(str(r.get("goodsSn") or r.get("barCode") or ""))
+                try:
+                    qty = int(float(r.get("number") or 0))
+                except (TypeError, ValueError):
+                    qty = 0
+                if not jan:
+                    out["skipped"].append({"goodsSn": r.get("goodsSn"), "reason": "JAN 无法解析"})
+                    continue
+                # 同一 JAN 可能有多个单位行，数量按主单位累加
+                merged[jan] = merged.get(jan, 0) + qty
+                names.setdefault(jan, str(r.get("goodsName") or ""))
+            total_pages = data.get("total", 1)
+            if page >= total_pages:
+                break
+            page += 1
+
+    out["items"] = [{"jan_code": j, "quantity": q, "name": names.get(j, "")}
+                    for j, q in sorted(merged.items())]
+    out["success"] = True
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 调拨单（调库）拉取
 # ---------------------------------------------------------------------------
 

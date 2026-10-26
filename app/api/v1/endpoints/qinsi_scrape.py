@@ -345,6 +345,34 @@ async def apply_scraped_records(
 
 
 # ── 反向回填（Playwright 填表存草稿）─────────────────────────────────────────
+# ── ERP 镜像：库存快照同步 ──────────────────────────────────────────────────
+class SnapshotSyncRequest(BaseModel):
+    warehouse_id: int = Field(gt=0)
+    dry_run: bool = True
+
+
+@router.post("/stock-snapshot/sync")
+async def stock_snapshot_sync(
+    payload: SnapshotSyncRequest,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: CurrentUser = Depends(require_admin),
+) -> dict:
+    """把秦丝某仓库的当前库存快照覆盖到 WMS（只对 ERP_MIRROR 仓库开放）。
+
+    **默认 dry_run=True**：先看会改哪些 SKU、改多少，确认后再传 dry_run=false 写入。
+    快照覆盖而非流水累加——流水已知有重复风险(手工调库 vs 秦丝调拨单)，
+    累加会把误差永久滚进库存；快照每次把数字拉回 ERP 口径，误差不累积。
+    """
+    from app.services.erp_reconciliation import sync_snapshot
+
+    r = await sync_snapshot(session, payload.warehouse_id,
+                            dry_run=payload.dry_run, user_id=current_user.id)
+    if not r.get("success"):
+        raise HTTPException(status_code=409 if r.get("needs_relogin") else 400,
+                            detail=r.get("error") or "快照同步失败")
+    return r
+
+
 # ── 调拨单（调库）同步 ──────────────────────────────────────────────────────
 class TransferScrapeRequest(BaseModel):
     from_date: date
