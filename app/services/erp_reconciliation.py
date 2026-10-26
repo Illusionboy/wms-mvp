@@ -210,34 +210,32 @@ async def sync_snapshot(
     if dry_run or not changes:
         return result
 
-    # 实际写入：走 adjust_stock_item 保证每笔都有 StockTransaction
-    from app.schemas.inventory import StockAdjustCreate
-    from app.services.inventory import adjust_stock_item, stock_in_item
-    from app.schemas.inventory import StockInCreate
+    # 实际写入：按差额走 IN/OUT，每笔都有 StockTransaction。
+    #
+    # 为什么不用 ADJUST：StockAdjustCreate.actual_quantity 约束了 ge=0，而**秦丝确实存在
+    # 负库存**（实测 -10 / -18 / -48 等）。用 ADJUST 就只能把负数夹成 0——那是静默改数，
+    # 正是本项目反复踩过的坑。按差额走 IN/OUT 可以如实表达负库存：
+    #   delta > 0 → 入库；delta < 0 → 出库(force_negative 允许扣成负数，并会在缺桶时建桶)
+    # 这两种来源都标 source=erp_mirror_sync，算消耗速度时必须排除（见 SNAPSHOT_SOURCES），
+    # 否则一次校正会被当成一次销售。
+    from app.schemas.inventory import StockInCreate, StockOutCreate
+    from app.services.inventory import stock_in_item, stock_out_item
 
     applied, errors = 0, []
     for ch in changes:
+        delta = ch["delta"]
+        note = (f"ERP镜像快照校正：WMS {ch['wms_qty']} → 秦丝 {ch['erp_qty']}（{delta:+d}）")
         try:
-            if ch["wms_qty"] == 0 and not await session.scalar(
-                select(InventoryRecord.id).where(
-                    InventoryRecord.product_jan == ch["jan_code"],
-                    InventoryRecord.warehouse_id == warehouse_id,
-                ).limit(1)
-            ):
-                # 该仓库还没有这个 SKU 的桶 → 用入库建桶
+            if delta > 0:
                 await stock_in_item(session, StockInCreate(
-                    sku=ch["jan_code"], warehouse_id=warehouse_id, quantity=ch["erp_qty"],
-                    location_code="A-00-00", source=SNAPSHOT_SOURCE,
-                    note=f"ERP镜像快照建桶：秦丝 {ch['erp_qty']}",
+                    sku=ch["jan_code"], warehouse_id=warehouse_id, quantity=delta,
+                    location_code="A-00-00", source=SNAPSHOT_SOURCE, note=note,
                 ), commit=False, user_id=user_id)
             else:
-                await adjust_stock_item(session, StockAdjustCreate(
-                    sku=ch["jan_code"], warehouse_id=warehouse_id,
-                    actual_quantity=max(ch["erp_qty"], 0),
-                    source=SNAPSHOT_SOURCE,
-                    note=(f"ERP镜像快照校正：WMS {ch['wms_qty']} → 秦丝 {ch['erp_qty']}"
-                          f"（{ch['delta']:+d}）"),
-                ), commit=False, user_id=user_id)
+                await stock_out_item(session, StockOutCreate(
+                    sku=ch["jan_code"], warehouse_id=warehouse_id, quantity=-delta,
+                    source=SNAPSHOT_SOURCE, note=note, suppress_low_stock_alert=True,
+                ), commit=False, user_id=user_id, force_negative=True)
             applied += 1
         except Exception as exc:  # noqa: BLE001
             errors.append({"jan_code": ch["jan_code"], "error": f"{type(exc).__name__}: {exc}"})
