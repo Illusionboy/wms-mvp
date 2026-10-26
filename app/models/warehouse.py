@@ -41,7 +41,11 @@ class Warehouse(TimestampMixin, Base):
     # 库存权威源。切到 ERP_MIRROR 必须先设置 qinsi_depot_id（服务层强制校验），
     # 否则镜像无从同步。
     inventory_source_mode: Mapped[InventorySourceMode] = mapped_column(
-        Enum(InventorySourceMode, native_enum=False, length=16),
+        # values_callable 必须加：SQLAlchemy 的 Enum 默认按**成员名**(wms_native)存取，
+        # 而迁移和任务规格里用的是**值**(WMS_NATIVE)。不加会在读取时抛
+        # LookupError: 'WMS_NATIVE' is not among the defined enum values
+        Enum(InventorySourceMode, native_enum=False, length=16,
+             values_callable=lambda e: [m.value for m in e]),
         nullable=False,
         default=InventorySourceMode.wms_native,
         server_default="WMS_NATIVE",
