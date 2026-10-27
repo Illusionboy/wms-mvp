@@ -5,7 +5,8 @@
 | 对象 | 是否自动 | 原因 |
 | --- | --- | --- |
 | **调拨单（调库）** | ✅ 全部自动，**含乐天** | 调库是仓间内部搬运，两边都在秦丝里做，WMS 只需跟随 |
-| **ERP_MIRROR 仓库的库存快照** | ✅ 自动（普通仓库 / 一号店备货仓） | 这些仓库的权威源已交给秦丝 |
+| **ERP_MIRROR 仓库的出入库流水** | ✅ 自动（普通仓库 / 一号店备货仓） | 流水决定"卖得多快"，是安全库存/预测的输入，不能有洞 |
+| **ERP_MIRROR 仓库的库存快照** | ✅ 自动 | 快照决定"现在有多少"，把累积误差拉回 ERP 口径 |
 | **乐天仓库的出入库** | ❌ 保持手动 | 乐天渠道的权威源在 WMS，由「秦丝同步」页与「乐天日常」人工操作 |
 
 注意"快照同步"只覆盖 `inventory_source_mode = ERP_MIRROR` 的仓库——
@@ -48,7 +49,7 @@ async def run_once(trigger: str = "schedule") -> dict:
     from app.services.qinsi_transfers import annotate_orders, apply_transfers
 
     result: dict = {"trigger": trigger, "at": datetime.now().isoformat(),
-                    "transfers": None, "snapshots": [], "errors": []}
+                    "transfers": None, "flows": None, "snapshots": [], "errors": []}
 
     # ── 1. 调拨单（全仓，含乐天）──
     try:
@@ -79,7 +80,37 @@ async def run_once(trigger: str = "schedule") -> dict:
         logger.exception("调拨单自动同步失败")
         result["errors"].append(f"调拨单同步异常: {type(exc).__name__}: {exc}")
 
-    # ── 2. 镜像仓库库存快照 ──
+    # ── 2. 镜像仓库的出入库流水（乐天不碰）──
+    try:
+        from app.scrapers.qinsi_scraper import scrape_stock_records
+        from app.services.erp_reconciliation import list_mirror_warehouses
+        from app.services.qinsi_flow_sync import apply_scraped_flow
+
+        async with AsyncSessionLocal() as session:
+            mirror_ids = {w.id for w in await list_mirror_warehouses(session)}
+        if mirror_ids:
+            today = date.today()
+            sr = await scrape_stock_records(today - timedelta(days=_LOOKBACK_DAYS), today)
+            if not sr.success:
+                result["errors"].append(f"出入库拉取失败: {sr.error}")
+            else:
+                async with AsyncSessionLocal() as session:
+                    fr = await apply_scraped_flow(
+                        session, sr.records, user_id=None,
+                        # 只写镜像仓库：乐天的出入库权威在 WMS，自动流程绝不能碰
+                        only_warehouse_ids=mirror_ids,
+                        # 镜像仓以 ERP 为准，流水必须如实记下；数字由随后的快照修正，
+                        # 否则库存不足会让这笔流水失败、在历史里留洞
+                        force_negative=True,
+                    )
+                result["flows"] = {"scraped": len(sr.records), **{
+                    k: v for k, v in fr.items() if k != "errors"},
+                    "errors": fr["errors"][:5]}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("出入库流水自动同步失败")
+        result["errors"].append(f"出入库同步异常: {type(exc).__name__}: {exc}")
+
+    # ── 3. 镜像仓库库存快照 ──
     try:
         async with AsyncSessionLocal() as session:
             mirrors = await list_mirror_warehouses(session)
