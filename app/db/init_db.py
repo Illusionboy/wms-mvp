@@ -48,6 +48,11 @@ async def init_db() -> None:
         await conn.execute(text(
             "ALTER TABLE products ALTER COLUMN outer_jan TYPE VARCHAR(14)"
         ))
+        # system_logs.jan_code 放宽到 32：14 位 JAN 会在原 VARCHAR(13) 上溢出
+        await conn.execute(text(
+            "ALTER TABLE system_logs ALTER COLUMN jan_code TYPE VARCHAR(32)"
+        ))
+
         # 库存权威源模式（ERP 联邦化）：WMS_NATIVE=WMS 权威；ERP_MIRROR=镜像秦丝、WMS只读
         await conn.execute(text(
             "ALTER TABLE warehouses ADD COLUMN IF NOT EXISTS inventory_source_mode "

@@ -19,5 +19,8 @@ class SystemLog(TimestampMixin, Base):
     category: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     level: Mapped[str] = mapped_column(String(16), nullable=False, default="warning")
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    jan_code: Mapped[str | None] = mapped_column(String(13), nullable=True, index=True)
+    # 32 与 products.jan_code / inventory_records.product_jan 对齐。
+    # 原本是 13，遇到 14 位外箱型 JAN（如久光 14987188201244）写日志直接溢出，
+    # 并且会连带污染整个 session，把调用方的批量写入一起打断。
+    jan_code: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     warehouse_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
