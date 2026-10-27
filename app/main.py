@@ -3,13 +3,14 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.db.init_db import init_db
+from app.services.inventory import ErpManagedWarehouseError
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -40,6 +41,16 @@ def create_app() -> FastAPI:
     )
     app.include_router(api_router, prefix="/api/v1")
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+    @app.exception_handler(ErpManagedWarehouseError)
+    async def _erp_managed_warehouse(_req: Request, exc: ErpManagedWarehouseError) -> JSONResponse:
+        """ERP 镜像仓库拒绝 WMS 侧写入时，返回明确的 409 而不是 500。
+
+        这个异常在 stock_in/out/adjust 的服务层抛出，各端点没有逐个 catch——
+        不加这个 handler 的话会变成 500 无详情，操作员只看到"失败"却不知道为什么，
+        正是任务规格里点名要避免的静默失败。
+        """
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
     @app.get("/", include_in_schema=False)
     @app.get("/app", include_in_schema=False)
